@@ -24,46 +24,64 @@ export async function* streamAsk(
   question: string,
   knowledgeBase?: string | null,
   sessionId?: string | null,
+  opts?: { timeoutMs?: number },
 ): AsyncGenerator<SSEEvent> {
-  const resp = await fetch('/api/ask', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, knowledgeBase, sessionId }),
-  })
+  // 客户端超时保护：防止后端挂起导致 UI 永远转圈
+  const controller = new AbortController()
+  const timeoutMs = opts?.timeoutMs ?? 90_000
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
 
-  if (!resp.ok || !resp.body) {
-    const text = await resp.text().catch(() => '')
-    yield { event: 'error', data: { message: `HTTP ${resp.status}: ${text}` } }
-    return
-  }
+  try {
+    const resp = await fetch('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, knowledgeBase, sessionId }),
+      signal: controller.signal,
+    })
 
-  const reader = resp.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
+    if (!resp.ok || !resp.body) {
+      const text = await resp.text().catch(() => '')
+      yield { event: 'error', data: { message: `HTTP ${resp.status}: ${text}` } }
+      return
+    }
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
 
-    const events = buffer.split('\n\n')
-    buffer = events.pop() || ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
 
-    for (const raw of events) {
-      const lines = raw.split('\n')
-      let eventType = ''
-      let dataStr = ''
-      for (const line of lines) {
-        if (line.startsWith('event:')) eventType = line.slice(6).trim()
-        else if (line.startsWith('data:')) dataStr += line.slice(5).trim()
-      }
-      if (eventType && dataStr) {
-        try {
-          yield { event: eventType, data: JSON.parse(dataStr) } as SSEEvent
-        } catch {
-          // skip malformed
+      const events = buffer.split('\n\n')
+      buffer = events.pop() || ''
+
+      for (const raw of events) {
+        const lines = raw.split('\n')
+        let eventType = ''
+        let dataStr = ''
+        for (const line of lines) {
+          if (line.startsWith('event:')) eventType = line.slice(6).trim()
+          else if (line.startsWith('data:')) dataStr += line.slice(5).trim()
+        }
+        if (eventType && dataStr) {
+          try {
+            yield { event: eventType, data: JSON.parse(dataStr) } as SSEEvent
+          } catch {
+            // skip malformed
+          }
         }
       }
     }
+  } catch (e: unknown) {
+    if (controller.signal.aborted) {
+      yield { event: 'error', data: { message: '请求超时，请稍后重试' } }
+    } else {
+      const msg = e instanceof Error ? e.message : String(e)
+      yield { event: 'error', data: { message: `网络错误：${msg}` } }
+    }
+  } finally {
+    clearTimeout(timer)
   }
 }
