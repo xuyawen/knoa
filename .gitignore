@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# typescript / tsc emitted artifacts
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# env / secrets
+.env
+
+# local memory (do not sync)
+.workbuddy/
