@@ -1,24 +1,65 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { HealthItem } from '@/types/api'
 import Icon from './Icon.vue'
 
-defineProps<{ item: HealthItem }>()
+const props = defineProps<{ item: HealthItem }>()
+
+const iconName = computed(() => {
+  switch (props.item.kb) {
+    case '合规库': return 'compliance'
+    case '广告投放': return 'ads'
+    case '物流仓储': return 'logistics'
+    case '选品策略': return 'selection'
+    case '客服话术': return 'service'
+    default: return 'library'
+  }
+})
+
+const pct = computed(() => Math.round(props.item.coverage * 100))
+
+const band = computed<'good' | 'mid' | 'low'>(() => {
+  const c = props.item.coverage
+  if (c >= 0.8) return 'good'
+  if (c >= 0.6) return 'mid'
+  return 'low'
+})
+
+const bandLabel = computed(
+  () => ({ good: '覆盖良好', mid: '覆盖一般', low: '覆盖偏低' })[band.value],
+)
+
+function relTime(iso: string): string {
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return ''
+  const h = Math.max(0, (Date.now() - then) / 3.6e6)
+  if (h < 1) return '刚刚更新'
+  if (h < 24) return `${Math.floor(h)} 小时前更新`
+  const d = Math.floor(h / 24)
+  if (d === 1) return '昨天更新'
+  if (d < 7) return `${d} 天前更新`
+  return new Date(iso).toLocaleDateString('zh-CN') + ' 更新'
+}
 </script>
 
 <template>
-  <div class="card" :class="{ alert: item.kb === '合规库' }">
-    <div class="icon">
-      <Icon v-if="item.kb === '合规库'" name="compliance" :size="15" />
-      <Icon v-else-if="item.kb === '广告投放'" name="ads" :size="15" />
-      <Icon v-else-if="item.kb === '物流仓储'" name="logistics" :size="15" />
-      <Icon v-else name="library" :size="15" />
+  <div class="card" :class="band">
+    <div class="head">
+      <div class="icon">
+        <Icon :name="iconName" :size="15" />
+      </div>
+      <div class="meta">
+        <div class="name">{{ item.kb }}</div>
+        <div class="sub">{{ item.docCount }} 篇 · {{ relTime(item.updatedAt) }}</div>
+      </div>
+      <div class="score" :class="band">{{ pct }}%</div>
     </div>
-    <div class="name">{{ item.kb }}</div>
-    <div class="count">{{ item.docCount }}<span>篇</span></div>
+
     <div class="bar">
-      <div class="fill" :style="{ width: item.coverage * 100 + '%' }" />
+      <div class="fill" :class="band" :style="{ width: pct + '%' }" />
     </div>
-    <div class="cov">{{ Math.round(item.coverage * 100) }}% 覆盖</div>
+
+    <div class="caption" :class="band">{{ bandLabel }}</div>
   </div>
 </template>
 
@@ -27,68 +68,85 @@ defineProps<{ item: HealthItem }>()
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.25s ease, border-color 0.25s ease;
 }
-.card.alert {
-  background: var(--danger-soft);
-  border-color: transparent;
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-float);
+  border-color: var(--brand);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .icon {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   background: var(--bg-surface);
   color: var(--brand);
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.card.alert .icon {
-  background: #fff;
-  color: var(--danger);
+.meta {
+  flex: 1;
+  min-width: 0;
 }
 .name {
-  font-size: 12px;
-  font-weight: 500;
-  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.count {
-  font-size: 16px;
-  font-weight: 600;
-  font-family: var(--font-display);
-}
-.count span {
+.sub {
   font-size: 11px;
-  font-weight: 400;
   color: var(--text-secondary);
-  margin-left: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.score {
+  flex-shrink: 0;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
 .bar {
-  height: 5px;
+  height: 6px;
   border-radius: var(--radius-pill);
   background: var(--bg-surface);
   overflow: hidden;
-  margin-top: 2px;
-}
-.card.alert .bar {
-  background: rgba(255, 255, 255, 0.6);
 }
 .fill {
   height: 100%;
   border-radius: var(--radius-pill);
-  background: var(--brand);
+  transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.card.alert .fill {
-  background: var(--danger);
-}
-.cov {
+.fill.good { background: var(--success); }
+.fill.mid { background: var(--warning); }
+.fill.low { background: var(--danger); }
+
+.caption {
   font-size: 11px;
-  color: var(--text-secondary);
+  font-weight: 500;
 }
+.caption.good { color: var(--success); }
+.caption.mid { color: var(--warning); }
+.caption.low { color: var(--danger); }
+
+.score.good { color: var(--success); }
+.score.mid { color: var(--warning); }
+.score.low { color: var(--danger); }
 </style>

@@ -14,6 +14,8 @@
   --danger: #EF4444;
   --danger-soft: #FEE2E2; /* SVG 实测红底角标 */
   --success: #10B981;
+  --warning: #F59E0B;
+  --warning-soft: #FEF3C7;
 
   --shadow-card: 0 1px 3px rgba(10, 22, 40, 0.06);
   --shadow-float: 0 8px 24px rgba(10, 22, 40, 0.12);
@@ -49,6 +51,8 @@
   --danger: #F87171;
   --danger-soft: #2A1414;
   --success: #34D399;
+  --warning: #FBBF24;
+  --warning-soft: #2A2310;
 
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.5);

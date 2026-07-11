@@ -36,11 +36,13 @@ const emit = defineEmits<{
     <!-- 知识库健康度 -->
     <div class="section">
       <div class="section-title">知识库健康度</div>
-      <HealthBar
-        v-for="h in knowledge.health"
-        :key="h.kb"
-        :item="h"
-      />
+      <div class="health-list">
+        <HealthBar
+          v-for="h in knowledge.health"
+          :key="h.kb"
+          :item="h"
+        />
+      </div>
     </div>
 
     <div class="divider" />
@@ -71,6 +73,11 @@ const emit = defineEmits<{
   font-weight: 600;
   color: var(--text-secondary);
   margin-bottom: 12px;
+}
+.health-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .empty {
   font-size: 12px;
