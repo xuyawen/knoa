@@ -12,7 +12,17 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:8000',
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        // SSE streaming: disable compression so http-proxy forwards chunks immediately
+        configure: (proxy: any) => {
+          proxy.on('proxyRes', (proxyRes: any) => {
+            // Remove compression — without it, the proxy buffers until decompression finishes
+            delete proxyRes.headers['content-encoding']
+          })
+        },
+      },
     },
   },
 })
