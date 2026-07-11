@@ -1,42 +1,56 @@
 <script setup lang="ts">
-import { sources, health } from '@/mocks/data'
+import { useChatStore } from '@/stores/chat'
+import { useKnowledgeStore } from '@/stores/knowledge'
 import SourceCard from './SourceCard.vue'
 import HealthBar from './HealthBar.vue'
 import TrendingList from './TrendingList.vue'
 
-const emit = defineEmits<{ (e: 'locate', id: number): void; (e: 'ask', q: string): void }>()
+const chat = useChatStore()
+const knowledge = useKnowledgeStore()
+
+const emit = defineEmits<{
+  (e: 'locate', id: number): void
+  (e: 'ask', q: string): void
+}>()
 </script>
 
 <template>
-  <aside class="panel">
-    <!-- 标题卡 -->
-    <div class="panel-head">
-      <div class="ph-title">答案溯源</div>
-      <div class="ph-sub">{{ sources.length }} 条来源 · 实时检索</div>
+  <div class="panel">
+    <!-- 答案溯源 -->
+    <div class="section">
+      <div class="section-title">答案溯源</div>
+      <div v-if="chat.sources.length === 0" class="empty">
+        提问后这里会显示答案来源
+      </div>
+      <SourceCard
+        v-for="s in chat.sources"
+        :key="s.id"
+        :source="s"
+        :active="chat.activeSourceId === s.id"
+        @locate="emit('locate', $event)"
+      />
     </div>
-
-    <!-- 来源卡片 -->
-    <SourceCard
-      v-for="s in sources"
-      :key="s.id"
-      :source="s"
-      @locate="emit('locate', $event)"
-    />
 
     <div class="divider" />
 
     <!-- 知识库健康度 -->
-    <div class="sec-title">知识库健康度</div>
-    <div class="health-grid">
-      <HealthBar v-for="h in health.slice(0, 3)" :key="h.kb" :item="h" />
+    <div class="section">
+      <div class="section-title">知识库健康度</div>
+      <HealthBar
+        v-for="h in knowledge.health"
+        :key="h.kb"
+        :item="h"
+      />
     </div>
 
     <div class="divider" />
 
     <!-- 今日高频 -->
-    <div class="sec-title">今日高频</div>
-    <TrendingList @ask="emit('ask', $event)" />
-  </aside>
+    <div class="section">
+      <div class="section-title">今日高频</div>
+      <TrendingList @ask="emit('ask', $event)" />
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -48,36 +62,24 @@ const emit = defineEmits<{ (e: 'locate', id: number): void; (e: 'ask', q: string
   background: var(--bg-surface);
   overflow-y: auto;
   padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
-.panel-head {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
   margin-bottom: 12px;
 }
-.ph-title {
-  font-size: 15px;
-  font-weight: 600;
-}
-.ph-sub {
+.empty {
   font-size: 12px;
-  color: var(--text-secondary);
-  margin-top: 2px;
+  color: var(--text-placeholder);
+  padding: 12px 0;
 }
 .divider {
   height: 1px;
   background: var(--border);
-  margin: 18px 0;
-}
-.sec-title {
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 12px;
-}
-.health-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  margin: 4px 0;
 }
 </style>

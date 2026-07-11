@@ -1,46 +1,46 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import ChatStream from '@/components/ChatStream.vue'
 import Composer from '@/components/Composer.vue'
 import SourcePanel from '@/components/SourcePanel.vue'
 import MobileWorkbench from '@/views/MobileWorkbench.vue'
-import { knowledgeBases } from '@/mocks/data'
+import { useKnowledgeStore } from '@/stores/knowledge'
+import { useChatStore } from '@/stores/chat'
 
-const activeBase = ref('compliance')
-const title = ref('全部知识')
+const knowledge = useKnowledgeStore()
+const chat = useChatStore()
+
 const collapsed = ref(false)
 const isMobile = ref(false)
-
 let mq: MediaQueryList | undefined
 
 function syncMobile() {
   isMobile.value = window.matchMedia('(max-width: 900px)').matches
 }
 
-function onSelectBase(id: string) {
-  activeBase.value = id
-  const kb = knowledgeBases.find((k) => k.id === id)
-  if (kb) title.value = kb.name
-}
 function onAsk(q: string) {
-  console.log('ask:', q)
+  chat.ask(q, knowledge.activeBase)
 }
+
 function onSend(q: string) {
-  console.log('send:', q)
+  chat.ask(q, knowledge.activeBase)
 }
+
 function onCite(id: number) {
-  console.log('cite:', id)
+  chat.locateSource(id)
 }
+
 function onLocate(id: number) {
-  console.log('locate:', id)
+  chat.locateSource(id)
 }
 
 onMounted(() => {
   syncMobile()
   mq = window.matchMedia('(max-width: 900px)')
   mq.addEventListener('change', syncMobile)
+  knowledge.load()
 })
 onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 </script>
@@ -50,13 +50,13 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 
   <div v-else class="workbench">
     <AppSidebar
-      :active-base="activeBase"
+      :active-base="knowledge.activeBase"
       :collapsed="collapsed"
-      @select-base="onSelectBase"
+      @select-base="knowledge.selectBase"
       @collapse="collapsed = !collapsed"
     />
     <div class="main">
-      <TopBar :title="title" @ask="onAsk" />
+      <TopBar :title="knowledge.activeBase ? knowledge.bases.find(b => b.id === knowledge.activeBase)?.name || '全部知识' : '全部知识'" @ask="onAsk" />
       <div class="body">
         <div class="chat-wrap">
           <ChatStream @cite="onCite" />
