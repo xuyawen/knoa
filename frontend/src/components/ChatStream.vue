@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { ref } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import MessageBubble from './MessageBubble.vue'
 import Icon from './Icon.vue'
