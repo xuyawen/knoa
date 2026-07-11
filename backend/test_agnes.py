@@ -2,7 +2,7 @@ import asyncio
 import json
 import httpx
 
-BASE = "http://127.0.0.1:8001"
+BASE = "http://127.0.0.1:8000"
 
 
 async def test_ask():
@@ -54,32 +54,34 @@ async def test_ask():
 
 
 async def _flush_event(event_type: str, data_str: str):
-    """Parse and print SSE event"""
+    """Parse and print SSE event.
+
+    Real payload shapes from /api/ask:
+      sources -> data is a JSON array (list of source objects)
+      delta   -> data is {"content": "..."}
+      done     -> data is {"messageId", "citations": [...], "sessionId"}
+    """
     try:
         data = json.loads(data_str)
     except json.JSONDecodeError:
-        data_str_preview = data_str[:100]
         if event_type == "delta":
-            print(f"[delta] {data_str_preview}", end="", flush=True)
-        elif event_type == "ping":
-            pass
+            print(f"[delta] {data_str[:100]}", end="", flush=True)
         else:
-            print(f"\n[{event_type}] (parse error: {data_str_preview[:60]})")
+            print(f"\n[{event_type}] (parse error: {data_str[:60]})")
         return
 
     if event_type == "delta":
-        content = data.get("data", {}).get("content", "") if isinstance(data.get("data"), dict) else ""
+        content = data.get("content", "") if isinstance(data, dict) else ""
         print(f"[delta] {content}", end="", flush=True)
     elif event_type == "error":
         print(f"\n\n[ERROR] {json.dumps(data, ensure_ascii=False)[:300]}")
     elif event_type == "sources":
-        sources = data.get("data", []) if isinstance(data.get("data"), list) else []
+        sources = data if isinstance(data, list) else data.get("sources", [])
         print(f"\n\n--- Sources ({len(sources)}) ---")
         for s in sources[:5]:
             print(f"  [{s.get('id')}] {s.get('title', '')} (conf={s.get('confidence')})")
     elif event_type == "done":
-        done = data.get("data", {})
-        print(f"\n\n[Done] citations={done.get('citations', [])}, sessionId={done.get('sessionId', 'N/A')}")
+        print(f"\n\n[Done] citations={data.get('citations', [])}, sessionId={data.get('sessionId', 'N/A')}")
     elif event_type == "ping":
         pass
 
