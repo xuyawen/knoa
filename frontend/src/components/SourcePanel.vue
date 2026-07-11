@@ -43,6 +43,7 @@ const emit = defineEmits<{ (e: 'locate', id: number): void; (e: 'ask', q: string
 .panel {
   width: var(--rightpanel-w);
   flex-shrink: 0;
+  min-width: 0;
   border-left: 1px solid var(--border);
   background: var(--bg-surface);
   overflow-y: auto;

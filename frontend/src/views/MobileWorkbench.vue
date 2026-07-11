@@ -47,7 +47,7 @@ function submit() {
 <template>
   <div class="mwb">
     <!-- 抽屉侧栏 -->
-    <AppSidebar mobile-open :active-base="'compliance'" @close="drawer = false" />
+    <AppSidebar :mobile-open="drawer" :active-base="'compliance'" @close="drawer = false" />
     <div v-if="drawer" class="overlay" @click="drawer = false" />
 
     <!-- 顶栏 -->

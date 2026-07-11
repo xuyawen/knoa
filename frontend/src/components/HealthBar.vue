@@ -53,6 +53,7 @@ defineProps<{ item: HealthItem }>()
 .name {
   font-size: 12px;
   font-weight: 500;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

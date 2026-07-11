@@ -84,6 +84,7 @@ const emit = defineEmits<{
 .sidebar {
   width: var(--sidebar-w);
   flex-shrink: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -109,12 +110,25 @@ const emit = defineEmits<{
   display: none;
 }
 .collapsed .workspace-switch {
-  justify-content: center;
-  padding: 9px 0;
+  display: none;
 }
 .collapsed .user-card {
   justify-content: center;
   padding: 10px 0;
+}
+.collapsed .brand {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 0 10px;
+  gap: 6px;
+}
+.collapsed .collapse {
+  margin-left: 0;
+}
+.collapsed .nav-item {
+  justify-content: center;
+  padding: 0;
 }
 
 /* 品牌区 */
@@ -323,6 +337,9 @@ const emit = defineEmits<{
   }
   .sidebar.mobile-open {
     transform: translateX(0);
+  }
+  .collapse {
+    display: none;
   }
 }
 </style>

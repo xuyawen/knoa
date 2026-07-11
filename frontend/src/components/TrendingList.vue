@@ -58,6 +58,7 @@ const emit = defineEmits<{ (e: 'ask', q: string): void }>()
 }
 .q {
   flex: 1;
+  min-width: 0;
   font-size: 13px;
   color: var(--text-primary);
   white-space: nowrap;
