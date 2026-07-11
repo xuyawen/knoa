@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { knowledgeBases, workspaceEntries } from '@/mocks/data'
+import { computed } from 'vue'
+import { useKnowledgeStore } from '@/stores/knowledge'
 import Icon from './Icon.vue'
 
+const knowledge = useKnowledgeStore()
+
 defineProps<{
-  activeBase?: string
   collapsed?: boolean
   mobileOpen?: boolean
 }>()
@@ -13,6 +15,10 @@ const emit = defineEmits<{
   (e: 'collapse'): void
   (e: 'close'): void
 }>()
+
+const activeBase = computed(() => knowledge.activeBase)
+const bases = computed(() => knowledge.bases)
+const workspaceEntries = ['文档管理', '问答记录'] // 静态次级入口
 </script>
 
 <template>
@@ -34,23 +40,23 @@ const emit = defineEmits<{
 
     <!-- 工作区切换 -->
     <button class="workspace-switch">
-      <span class="ws-name">全部知识</span>
+      <div v-if="!collapsed" class="ws-name">全部知识</div>
       <Icon name="chevron-down" :size="16" />
     </button>
 
     <!-- 知识库导航 -->
     <nav class="nav">
-      <div class="nav-label">知识库</div>
+      <div v-show="!collapsed" class="nav-label">知识库</div>
       <button
-        v-for="kb in knowledgeBases"
+        v-for="kb in bases"
         :key="kb.id"
         class="nav-item"
-        :class="{ active: kb.id === (activeBase || 'compliance') }"
+        :class="{ active: kb.id === activeBase }"
         @click="emit('select-base', kb.id)"
       >
         <span class="nav-icon"><Icon :name="kb.icon" :size="18" /></span>
-        <span class="nav-name">{{ kb.name }}</span>
-        <span v-if="kb.badge" class="nav-badge" :class="kb.badgeType">{{ kb.badge }}</span>
+        <span v-show="!collapsed" class="nav-name">{{ kb.name }}</span>
+        <span v-if="kb.badge && !collapsed" class="nav-badge" :class="kb.badgeType">{{ kb.badge }}</span>
       </button>
     </nav>
 

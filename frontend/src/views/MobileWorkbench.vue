@@ -1,34 +1,36 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import {
-  knowledgeBases,
-  workspaceEntries,
-  health,
-  messages,
-  trending,
-} from '@/mocks/data'
+import { useKnowledgeStore } from '@/stores/knowledge'
 import AppSidebar from '@/components/AppSidebar.vue'
 import Icon from '@/components/Icon.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import KnowledgeCard from '@/components/KnowledgeCard.vue'
 import MobileNav from '@/components/MobileNav.vue'
 
+const knowledge = useKnowledgeStore()
 const drawer = ref(false)
 const question = ref('')
 
-const answer = computed(() => messages.find((m) => m.role === 'assistant'))
+async function submit() {
+  const q = question.value.trim()
+  if (!q) return
+  await knowledge.load()
+  console.log('ask:', q)
+  question.value = ''
+}
 
 const kbCards = computed(() => {
-  const fromKb = knowledgeBases.map((k) => {
-    const h = health.find((x) => x.kb === k.name)
+  const healthMap = new Map(knowledge.health.map(h => [h.kb, h]))
+  const fromKb = knowledge.bases.map(kb => {
+    const h = healthMap.get(kb.name)
     return {
-      icon: k.icon,
-      name: k.name,
-      alert: k.id === 'compliance',
+      icon: kb.icon,
+      name: kb.name,
+      alert: kb.badge?.includes('待复核'),
       meta: h ? `${h.docCount} 篇 · ${Math.round(h.coverage * 100)}% 覆盖` : '',
     }
   })
-  const fromWs = workspaceEntries.slice(0, 1).map((e) => ({
+  const fromWs = ['文档管理'].map(e => ({
     icon: 'library',
     name: e,
     alert: false,
@@ -36,18 +38,12 @@ const kbCards = computed(() => {
   }))
   return [...fromKb, ...fromWs]
 })
-
-function submit() {
-  if (!question.value.trim()) return
-  console.log('ask:', question.value)
-  question.value = ''
-}
 </script>
 
 <template>
   <div class="mwb">
     <!-- 抽屉侧栏 -->
-    <AppSidebar :mobile-open="drawer" :active-base="'compliance'" @close="drawer = false" />
+    <AppSidebar :mobile-open="drawer" @close="drawer = false" />
     <div v-if="drawer" class="overlay" @click="drawer = false" />
 
     <!-- 顶栏 -->
@@ -94,25 +90,10 @@ function submit() {
         />
       </div>
 
-      <!-- 答案溯源预览 -->
-      <div class="sec-title">答案溯源</div>
-      <div class="answer-card" v-if="answer">
-        <div class="a-head">
-          <span class="a-avatar"><Icon name="sparkle" :size="14" /></span>
-          <span class="a-name">知海 · 运营知识助手</span>
-          <span class="a-tag">RAG 溯源</span>
-        </div>
-        <p class="a-body">{{ answer.content }}</p>
-        <div class="a-cites">
-          <span v-for="c in answer.citations" :key="c" class="cite">[{{ c }}]</span>
-          <span class="more">查看完整回答 ›</span>
-        </div>
-      </div>
-
       <!-- 今日高频 -->
       <div class="sec-title">今日高频</div>
       <ul class="trend">
-        <li v-for="(t, i) in trending" :key="i">
+        <li v-for="(t, i) in knowledge.trending" :key="i">
           <span class="rk" :class="{ top: i < 3 }">{{ i + 1 }}</span>
           <span class="tq">{{ t.question }}</span>
           <span class="tf"><Icon name="fire" :size="13" />{{ t.count }}</span>
@@ -242,71 +223,6 @@ function submit() {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   margin-bottom: 8px;
-}
-.answer-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 16px;
-  box-shadow: var(--shadow-card);
-  margin-bottom: 8px;
-}
-.a-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.a-avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--brand);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.a-name {
-  font-size: 13px;
-  font-weight: 600;
-}
-.a-tag {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--brand);
-  background: var(--chip-soft);
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-}
-.a-body {
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--text-primary);
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.a-cites {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-}
-.cite {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--brand);
-  background: var(--chip-soft);
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-}
-.more {
-  font-size: 12px;
-  color: var(--text-placeholder);
-  margin-left: auto;
 }
 .trend {
   list-style: none;

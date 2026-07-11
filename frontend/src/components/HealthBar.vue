@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { HealthItem } from '@/mocks/data'
+import type { HealthItem } from '@/types/api'
 import Icon from './Icon.vue'
 
 defineProps<{ item: HealthItem }>()

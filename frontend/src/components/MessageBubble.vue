@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ChatMessage } from '@/mocks/data'
+import type { ChatMessage } from '@/types/api'
 import Icon from './Icon.vue'
 import CitationChip from './CitationChip.vue'
 import FeedbackBar from './FeedbackBar.vue'

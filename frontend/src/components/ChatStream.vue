@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { messages } from '@/mocks/data'
+import { ref } from 'vue'
+import { useChatStore } from '@/stores/chat'
 import MessageBubble from './MessageBubble.vue'
 import Icon from './Icon.vue'
+
+const chat = useChatStore()
 
 const emit = defineEmits<{ (e: 'cite', id: number): void }>()
 
@@ -28,11 +31,14 @@ const activeFilter = ref('全部')
     <!-- 对话流 -->
     <div class="chat-scroll">
       <MessageBubble
-        v-for="m in messages"
+        v-for="m in chat.messages"
         :key="m.id"
         :message="m"
         @cite="emit('cite', $event)"
       />
+      <div v-if="chat.streaming && chat.messages.length > 0 && chat.messages[chat.messages.length - 1].content === ''" class="typing">
+        <span class="dot" /><span class="dot" /><span class="dot" />
+      </div>
       <div class="hint">
         <Icon name="sparkle" :size="14" />
         <span>答案由知海基于知识库检索生成，点击角标可查看溯源</span>
@@ -40,6 +46,7 @@ const activeFilter = ref('全部')
     </div>
   </div>
 </template>
+
 
 <style scoped>
 .chat-col {
@@ -89,6 +96,24 @@ const activeFilter = ref('全部')
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+.typing {
+  display: flex;
+  gap: 4px;
+  padding: 8px 2px;
+}
+.typing .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-placeholder);
+  animation: bounce 1.2s infinite;
+}
+.typing .dot:nth-child(2) { animation-delay: 0.2s; }
+.typing .dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-6px); opacity: 1; }
 }
 .hint {
   display: flex;

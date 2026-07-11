@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SourceItem } from '@/mocks/data'
+import type { SourceItem } from '@/types/api'
 import Icon from './Icon.vue'
 
 defineProps<{ source: SourceItem }>()
