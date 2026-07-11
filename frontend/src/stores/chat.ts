@@ -19,30 +19,33 @@ export const useChatStore = defineStore('chat', () => {
     sources.value = []
 
     // 创建 assistant 占位消息
-    const assistantMsg: ChatMessage = {
-      id: `a-${Date.now()}`,
+    const assistantId = `a-${Date.now()}`
+    messages.value.push({
+      id: assistantId,
       role: 'assistant',
       content: '',
       citations: [],
-    }
-    messages.value.push(assistantMsg)
+    })
+    // 取回 reactive 代理再赋值：push 进数组的是原始对象，
+    // 若直接改本地引用不会触发重渲染，必须走代理
+    const msg = messages.value[messages.value.length - 1]
 
     try {
       for await (const event of streamAsk(question, knowledgeBase, sessionId.value)) {
         if (event.event === 'sources') {
           sources.value = event.data
-          assistantMsg.sources = event.data
+          msg.sources = event.data
         } else if (event.event === 'delta') {
-          assistantMsg.content += event.data.content
+          msg.content += event.data.content
         } else if (event.event === 'done') {
-          assistantMsg.citations = event.data.citations
+          msg.citations = event.data.citations
           sessionId.value = event.data.sessionId
         } else if (event.event === 'error') {
-          assistantMsg.content += `\n\n[错误] ${event.data.message}`
+          msg.content += `\n\n[错误] ${event.data.message}`
         }
       }
     } catch (e) {
-      assistantMsg.content += `\n\n[错误] ${e}`
+      msg.content += `\n\n[错误] ${e}`
     } finally {
       streaming.value = false
     }
