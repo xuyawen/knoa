@@ -22,16 +22,18 @@ const isThinking = computed(
 
 const parts = computed(() => {
   if (props.message.role !== 'assistant') return null
+  // trimStart：清掉数据前导的换行/空格。否则 white-space:pre-wrap 会把 content 开头的 \n 渲染成"文字上方大量空白"
+  const content = props.message.content.trimStart()
   const re = /\[(\d+)\]/g
   const out: { text: string; cite?: number }[] = []
   let last = 0
   let m: RegExpExecArray | null
-  while ((m = re.exec(props.message.content)) !== null) {
-    if (m.index > last) out.push({ text: props.message.content.slice(last, m.index) })
+  while ((m = re.exec(content)) !== null) {
+    if (m.index > last) out.push({ text: content.slice(last, m.index) })
     out.push({ text: m[1], cite: Number(m[1]) })
     last = re.lastIndex
   }
-  if (last < props.message.content.length) out.push({ text: props.message.content.slice(last) })
+  if (last < content.length) out.push({ text: content.slice(last) })
   return out
 })
 
