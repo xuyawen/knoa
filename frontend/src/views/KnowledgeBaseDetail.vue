@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
@@ -89,6 +89,7 @@ async function onFilePicked(e: Event) {
 }
 
 onMounted(loadDocuments)
+watch(() => route.params.id, () => loadDocuments())
 </script>
 
 <template>
