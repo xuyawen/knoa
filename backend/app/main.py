@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import ask, feedback, health, knowledge, trending
+from app.routers import ask, feedback, health, knowledge, sources, trending
 
 
 @asynccontextmanager
@@ -25,3 +25,4 @@ app.include_router(knowledge.router, prefix="/api")
 app.include_router(trending.router, prefix="/api")
 app.include_router(ask.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
+app.include_router(sources.router, prefix="/api")

@@ -30,10 +30,19 @@ class TrendingItemOut(CamelModel):
 
 class SourceItemOut(CamelModel):
     id: int
+    chunk_id: str
     kb: str
     title: str
     snippet: str
     confidence: float
+
+
+class SourceDetailOut(CamelModel):
+    id: str
+    title: str
+    kb: str
+    content: str
+    chunk_index: int
 
 
 class KnowledgeBasesResponse(CamelModel):

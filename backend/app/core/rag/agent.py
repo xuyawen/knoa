@@ -369,8 +369,9 @@ class AgenticRAGAgent:
 
     def _format_sources(self, retrieved: list[dict]) -> list[dict]:
         return [
-            SourceItemOut(id=r["id"], kb=r["kb"], title=r["title"],
-                           snippet=r["snippet"], confidence=r["confidence"]).model_dump(by_alias=True)
+            SourceItemOut(id=r["id"], chunk_id=r["chunk_id"], kb=r["kb"],
+                           title=r["title"], snippet=r["snippet"],
+                           confidence=r["confidence"]).model_dump(by_alias=True)
             for r in retrieved
         ]
 

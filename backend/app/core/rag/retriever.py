@@ -95,6 +95,7 @@ class HybridRetriever:
             confidence = max(0.0, min(1.0, 1.0 - info["distance"]))
             results.append({
                 "id": seq,
+                "chunk_id": cid,
                 "content": info["content"],
                 "kb": info["kb_name"],
                 "title": info["doc_title"],
