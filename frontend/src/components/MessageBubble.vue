@@ -368,10 +368,17 @@ async function onCopy() {
 .step-item.abnormal .step-action {
   color: var(--warning, #f59e0b);
 }
-/* 收起态：去掉背景色块，压成一行轻量提示 */
+/* 收起态：完全压扁为内联行，不留任何容器空间 */
 .collapsed {
-  margin-bottom: 2px;
-  background: none;
+  display: inline;
+  background: none !important;
+  padding: 0;
+  margin-bottom: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+.collapsed .steps-toggle {
+  display: inline-flex;
   padding: 0;
 }
 .collapsed .steps-list { display: none; }
