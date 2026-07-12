@@ -155,20 +155,14 @@ def _should_skip_retrieval(question: str) -> bool:
 
 
 class AgenticRAGAgent:
-    """Agentic RAG 代理 — 用 LLM 驱动的决策闭环替代固定检索流程。
+    """Agentic RAG 代理 — 用 LLM 驱动的决策闭环替代固定检索流程。"""
 
-    与传统 pipeline 的区别：
-    - 不是"有问必检"，而是由模型判断该不该检
-    - 不是"检完就用"，而是先评估质量再决定要不要补检
-    - 支持多步迭代（默认最多3轮），复杂问题可以逐步收敛
-    """
-
-    MAX_STEPS = 3  # 最大检索轮数（防止无限循环和成本失控）
+    MAX_STEPS = 3
 
     def __init__(
         self,
         retriever: HybridRetriever,
-        llm,  # LLMProvider protocol（需支持 tool_call）
+        llm,
         redis: RedisStore,
         db: AsyncSession,
     ):
@@ -184,42 +178,28 @@ class AgenticRAGAgent:
         kb_id: str | None = None,
         session_id: str | None = None,
     ) -> AsyncIterator[dict]:
-        """主入口：返回 SSE 兼容的事件流。
-
-        Yielded events:
-          {"event": "thinking", "data": {"step": N, "action": "...", "detail": "..."}}
-          {"event": "sources",  "data": [...]}  # SourceItemOut dicts
-          {"event": "delta",    "data": {"content": "..."}}
-          {"event": "done",     "data": {"messageId": ..., "citations": ..., "sessionId": ...}}
-          {"event": "error",    "data": {"message": "..."}}
-        """
+        """主入口：返回 SSE 兼容的事件流。"""
         try:
             # ---- 会话 & 持久化 ----
             session = await self._get_or_create_session(session_id, question)
             self.db.add(ChatMessage(session_id=session.id, role="user", content=question))
             await self.db.flush()
 
-            # trending 计数
             try:
                 await self.redis.incr_trending(question)
             except Exception:
                 pass
 
-            # ---- 快速预分类：明显不需要检索的问题直接跳过 LLM 决策 ----
-            all_sources: list[dict] = []  # 两条路径共用（持久化需要）
-            final_answer_text: str = ""   # 同上
+            all_sources: list[dict] = []
+            final_answer_text: str = ""
 
+            # ── 快速预分类路径 ──
             if _should_skip_retrieval(question):
                 yield {
                     "event": "thinking",
-                    "data": {
-                        "step": 0,
-                        "action": "direct_answer",
-                        "detail": "识别为常识/实时问题，跳过检索直接回答",
-                        "raw_reasoning": "",
-                    },
+                    "data": {"step": 0, "action": "direct_answer",
+                             "detail": "识别为常识/实时问题，跳过检索直接回答", "raw_reasoning": ""},
                 }
-                # 用一次轻量 LLM 调用生成回复（不经过 agent 决策）
                 quick_messages = [
                     {"role": "system", "content": (
                         "你是「知海 Knoa」，一个跨境电商运营知识助手。"
@@ -233,26 +213,25 @@ class AgenticRAGAgent:
                     full_answer += delta
                     yield {"event": "delta", "data": {"content": delta}}
                 final_answer_text = full_answer
+
+            # ── Agent Loop 路径 ──
             else:
-                # ---- Agent Loop ----
                 messages = [
                     {"role": "system", "content": AGENT_SYSTEM_PROMPT},
                     {"role": "user", "content": question},
                 ]
                 step = 0
+                answer_from_loop = False  # 标记：答案是否已在循环内生成
 
                 while step < self.MAX_STEPS:
                     step += 1
-
-                    # 心跳 ping：在每次 LLM 调用前通知前端"我还在干活"
                     yield {"event": "ping", "data": {"ts": time.time(), "step": step}}
 
-                    # LLM 决策：调工具 or 直接回答
                     result: ToolCallResult = await self.llm.tool_call(
                         messages, tools=TOOLS_SCHEMA, temperature=0.2
                     )
 
-                    # 动作名归一化（prompt 决策可能因模型输出波动而偏离预设值）
+                    # 动作名归一化
                     name = result.name
                     if name not in ("retrieve", "supplement_search", "direct_answer"):
                         if "query" in result.arguments:
@@ -269,142 +248,103 @@ class AgenticRAGAgent:
                             raw_text=result.raw_text,
                         )
 
-                    # 推送 thinking 事件（前端可展示决策过程）
                     action_desc = self._describe_action(result)
                     yield {
                         "event": "thinking",
-                        "data": {
-                            "step": step,
-                            "action": result.name,
-                            "detail": action_desc,
-                            "raw_reasoning": result.raw_text[:500] if result.raw_text else "",
-                        },
+                        "data": {"step": step, "action": result.name,
+                                 "detail": action_desc,
+                                 "raw_reasoning": (result.raw_text or "")[:500]},
                     }
 
                     if result.name == "direct_answer":
-                        # LLM 认为不需要检索，直接回答
-                        final_answer_text = result.arguments.get("content", "")
+                        candidate = result.arguments.get("content", "").strip()
+                        if candidate:
+                            final_answer_text = candidate
+                        else:
+                            quick_msgs = [
+                                {"role": "system", "content": (
+                                    "你是「知海 Knoa」，一个跨境电商运营知识助手。"
+                                    "请简洁友好地回答用户的问题。不要自我介绍或罗列功能。"
+                                )},
+                                {"role": "user", "content": question},
+                            ]
+                            try:
+                                final_answer_text = await self.llm.chat(quick_msgs)
+                            except Exception:
+                                final_answer_text = "好的，收到！"
+                        # 直接在这里 yield，不依赖循环外的逻辑
+                        if final_answer_text:
+                            yield {"event": "delta", "data": {"content": final_answer_text}}
                         break
 
                     elif result.name == "retrieve":
                         query = result.arguments.get("query", question)
                         retrieved = await self.retriever.retrieve(query, kb_id, top_k=5)
-
                         if retrieved:
                             sources = self._format_sources(retrieved)
                             all_sources.extend(sources)
                             yield {"event": "sources", "data": sources}
-
-                            # 把检索结果注入上下文，让 LLM 决定下一步
                             context_text = self._sources_to_context(retrieved)
-                            messages.append({
-                                "role": "assistant",
-                                "content": f"[已调用检索 retrieve，针对「{query}」检索到 {len(retrieved)} 条相关文档]",
-                            })
-                            messages.append({
-                                "role": "user",
-                                "content": (
-                                    f"检索结果：\n{context_text}\n\n"
-                                    "请判断：\n"
-                                    "1. 这些信息足以回答用户的原问题吗？\n"
-                                    "2. 如果足够，请直接给出最终回答（action=direct_answer，content=回复内容）。\n"
-                                    "3. 如果不足，请调用 supplement_search 补充检索"
-                                    "（action=supplement_search，refined_query=更聚焦的查询词，gap_description=缺失的信息）。"
-                                ),
-                            })
-                            continue  # 进入下一轮决策
+                            messages.append({"role": "assistant", "content": f"[已调用检索 retrieve，针对「{query}」检索到 {len(retrieved)} 条相关文档]"})
+                            messages.append({"role": "user", "content": f"检索结果：\n{context_text}\n\n请判断：\n1. 这些信息足以回答用户的原问题吗？\n2. 如果足够，请直接给出最终回答（action=direct_answer，content=回复内容）。\n3. 如果不足，请调用 supplement_search 补充检索"})
+                            continue
                         else:
-                            # 检索无结果
-                            messages.append({
-                                "role": "assistant",
-                                "content": "[已调用 retrieve 工具，但未找到相关文档]",
-                            })
-                            messages.append({
-                                "role": "user",
-                                "content": (
-                                    "检索未找到相关结果。请判断：\n"
-                                    "- 如果你可以基于通用知识回答，请直接回复。\n"
-                                    "- 如果你认为知识库中可能有相关信息但没搜到，可以尝试 supplement_search 换个关键词。"
-                                ),
-                            })
+                            messages.append({"role": "assistant", "content": "[已调用 retrieve 工具，但未找到相关文档]"})
+                            messages.append({"role": "user", "content": "检索未找到相关结果。请基于通用知识回答或尝试 supplement_search。"})
                             continue
 
                     elif result.name == "supplement_search":
                         refined_query = result.arguments.get("refined_query", question)
                         gap = result.arguments.get("gap_description", "")
                         retrieved = await self.retriever.retrieve(refined_query, kb_id, top_k=5)
-
                         if retrieved:
                             sources = self._format_sources(retrieved)
                             all_sources.extend(sources)
                             yield {"event": "sources", "data": sources}
-
                             context_text = self._sources_to_context(retrieved)
-                            messages.append({
-                                "role": "assistant",
-                                "content": f"[已调用补充检索 supplement_search，针对「{gap}」检索到 {len(retrieved)} 条]",
-                            })
-                            messages.append({
-                                "role": "user",
-                                "content": (
-                                    f"补充检索结果：\n{context_text}\n\n"
-                                    "结合之前所有信息，请判断：\n"
-                                    "1. 现在信息是否足够回答用户问题？\n"
-                                    "2. 足够就 action=direct_answer 直接给最终回答；"
-                                    "不足可以再补充一次（最多3轮）。"
-                                ),
-                            })
+                            messages.append({"role": "assistant", "content": f"[已调用补充检索 supplement_search，针对「{gap}」检索到 {len(retrieved)} 条]"})
+                            messages.append({"role": "user", "content": f"补充检索结果：\n{context_text}\n\n结合之前所有信息，请判断是否足够回答。"})
                             continue
                         else:
-                            messages.append({
-                                "role": "assistant",
-                                "content": "[补充检索也未找到新结果]",
-                            })
-                            messages.append({
-                                "role": "user",
-                                "content": "补充检索也没结果。请基于已有信息尽量回答，或告知用户知识库暂无相关信息。",
-                            })
+                            messages.append({"role": "assistant", "content": "[补充检索也未找到新结果]"})
+                            messages.append({"role": "user", "content": "补充检索也没结果。请基于已有信息尽量回答。"})
                             continue
-
                     else:
-                        # 未知的工具名（兜底）
                         final_answer_text = f"抱歉，系统遇到了未知状态 ({result.name})。请重试。"
                         break
 
-                # ---- 流式生成最终答案（仅 Agent 路径需要） ----
-                    if not final_answer_text:
-                        # 构建最终 prompt（含所有累积的上下文）
-                        final_messages = self._build_final_prompt(
-                            question, all_sources, messages
-                        )
-                        full_answer = ""
-                        async for delta in self.llm.stream_chat(final_messages):
-                            full_answer += delta
-                            yield {"event": "delta", "data": {"content": delta}}
-                        final_answer_text = full_answer
-                    else:
-                        # direct_answer 路径：把文本拆成单个 delta 以保持前端兼容
-                        yield {"event": "delta", "data": {"content": final_answer_text}}
+                # ── 循环结束后，若尚未得到答案则流式生成 ──
+                if not final_answer_text:
+                    final_messages = self._build_final_prompt(question, all_sources, messages)
+                    full_answer = ""
+                    async for delta in self.llm.stream_chat(final_messages):
+                        full_answer += delta
+                        yield {"event": "delta", "data": {"content": delta}}
+                    final_answer_text = full_answer
+                # 无论哪种方式得到的答案，都作为单一 delta 输出
+                # （循环内 direct_answer 分支已通过 chat() 得到文本但未 yield）
+                if final_answer_text and not answer_from_loop:
+                    pass  # 由上面的 stream_chat 已经逐 token yield 了
+                elif final_answer_text:
+                    # 循环内 direct_answer 通过 chat() 得到完整文本，此处一次性 yield
+                    yield {"event": "delta", "data": {"content": final_answer_text}}
 
-            # ---- 持久化 + done 事件（两条路径共用） ----
+            # ---- 持久化 + done ----
+            if not final_answer_text.strip():
+                final_answer_text = "抱歉，我暂时无法生成回答，请稍后重试。"
+                yield {"event": "delta", "data": {"content": final_answer_text}}
+
             citations = self._extract_citations(final_answer_text)
             assistant_msg = ChatMessage(
-                session_id=session.id,
-                role="assistant",
-                content=final_answer_text,
-                citations=citations,
-                sources=all_sources,
+                session_id=session.id, role="assistant",
+                content=final_answer_text, citations=citations, sources=all_sources,
             )
             self.db.add(assistant_msg)
             await self.db.commit()
 
             yield {
                 "event": "done",
-                "data": {
-                    "messageId": str(assistant_msg.id),
-                    "citations": citations,
-                    "sessionId": str(session.id),
-                },
+                "data": {"messageId": str(assistant_msg.id), "citations": citations, "sessionId": str(session.id)},
             }
 
         except Exception as e:
@@ -429,57 +369,35 @@ class AgenticRAGAgent:
 
     def _format_sources(self, retrieved: list[dict]) -> list[dict]:
         return [
-            SourceItemOut(
-                id=r["id"], kb=r["kb"], title=r["title"],
-                snippet=r["snippet"], confidence=r["confidence"],
-            ).model_dump(by_alias=True)
+            SourceItemOut(id=r["id"], kb=r["kb"], title=r["title"],
+                           snippet=r["snippet"], confidence=r["confidence"]).model_dump(by_alias=True)
             for r in retrieved
         ]
 
     def _sources_to_context(self, retrieved: list[dict]) -> str:
-        parts = []
-        for r in retrieved:
-            parts.append(f"\n[{r['id']}] {r['title']} ({r['kb']})\n{r['content']}")
-        return "\n".join(parts)
+        return "\n".join(f"\n[{r['id']}] {r['title']} ({r['kb']})\n{r['content']}" for r in retrieved)
 
-    def _build_final_prompt(
-        self,
-        question: str,
-        all_sources: list[dict],
-        conversation_messages: list[dict],
-    ) -> list[dict]:
-        """构建最终流式生成的 prompt，含完整检索上下文。"""
-        context = ""
-        for s in all_sources:
-            context += f"\n[{s['id']}] {s['title']}\n{s.get('snippet', '')}\n"
-
+    def _build_final_prompt(self, question: str, all_sources: list[dict], _) -> list[dict]:
+        context = "\n".join(f"\n[{s['id']}] {s['title']}\n{s.get('snippet', '')}\n" for s in all_sources)
         system = (
             "你是「知海 Knoa」，一个跨境电商运营知识助手。\n"
             "请基于以下检索到的知识库内容回答用户问题，回答必须忠实于来源内容。\n\n"
-            "引用规则：\n"
-            "- 引用时使用 [1] [2] 这样的标注，数字对应来源编号\n"
-            "- 如果知识库内容不足以回答，明确告知用户\n\n"
+            "引用规则：引用时使用 [1] [2] 这样的标注；知识库不足则明确告知。\n\n"
             f"知识库来源：\n{context}"
         )
-        return [
-            {"role": "system", "content": system},
-            {"role": "user", "content": question},
-        ]
+        return [{"role": "system", "content": system}, {"role": "user", "content": question}]
 
-    def _extract_citations(self, text: str) -> list[int]:
-        import re
-        matches = re.findall(r"\[(\d+)\]", text)
-        return sorted(set(int(m) for m in matches))
+    @staticmethod
+    def _extract_citations(text: str) -> list[int]:
+        return sorted(set(int(m) for m in re.findall(r"\[(\d+)\]", text)))
 
     async def _get_or_create_session(self, session_id: str | None, question: str) -> ChatSession:
         if session_id:
-            result = await self.db.execute(
-                select(ChatSession).where(ChatSession.id == uuid.UUID(session_id))
-            )
-            session = result.scalar_one_or_none()
-            if session:
-                return session
-        session = ChatSession(title=question[:50])
-        self.db.add(session)
+            result = await self.db.execute(select(ChatSession).where(ChatSession.id == uuid.UUID(session_id)))
+            s = result.scalar_one_or_none()
+            if s:
+                return s
+        s = ChatSession(title=question[:50])
+        self.db.add(s)
         await self.db.flush()
-        return session
+        return s
