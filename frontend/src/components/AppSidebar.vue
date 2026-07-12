@@ -278,6 +278,9 @@ onMounted(() => {
 .nav-item.plain .nav-name {
   color: var(--text-secondary);
 }
+.nav-item.active.plain .nav-name {
+  color: #fff;
+}
 
 /* 用户卡 */
 .user-card {
