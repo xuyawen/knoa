@@ -250,10 +250,18 @@ class AgenticRAGAgent:
                         )
 
                     action_desc = self._describe_action(result)
+                    # ponytail: direct_answer 但已有检索结果时，实为「基于检索生成」，
+                    # 在前端就标成 generate，避免误导用户以为「没检索就回答」。
+                    display_action = result.name
+                    display_detail = action_desc
+                    if result.name == "direct_answer" and all_sources:
+                        display_action = "generate"
+                        display_detail = f"检索结果已充足（{len(all_sources)} 条），生成回答"
+
                     yield {
                         "event": "thinking",
-                        "data": {"step": step, "action": result.name,
-                                 "detail": action_desc,
+                        "data": {"step": step, "action": display_action,
+                                 "detail": display_detail,
                                  "raw_reasoning": (result.raw_text or "")[:500]},
                     }
 
@@ -264,12 +272,7 @@ class AgenticRAGAgent:
                         elif all_sources:
                             # 已有检索结果但 LLM 选了 direct_answer（无 content），
                             # 强制基于已有上下文流式生成，避免丢失已召回的 sources。
-                            yield {
-                                "event": "thinking",
-                                "data": {"step": step, "action": "generate",
-                                         "detail": f"基于 {len(all_sources)} 条检索结果生成回答",
-                                         "raw_reasoning": ""},
-                            }
+                            # 展示已在上方统一标为 generate，此处不再重复 yield thinking。
                             final_messages = self._build_final_prompt(question, all_sources, messages)
                             full_answer = ""
                             async for delta in self.llm.stream_chat(final_messages):
