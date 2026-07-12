@@ -44,7 +44,7 @@ const parts = computed(() => {
       <div class="head">
         <span class="avatar"><Icon name="sparkle" :size="15" /></span>
         <span class="name">知海 · 运营知识助手</span>
-        <span class="tag">
+        <span v-if="(message as any).sources?.length" class="tag">
           <span class="tag-dot" />
           RAG 溯源
         </span>

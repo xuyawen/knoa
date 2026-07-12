@@ -35,7 +35,7 @@ const activeFilter = ref('全部')
         :message="m"
         @cite="emit('cite', $event)"
       />
-      <div class="hint">
+      <div v-if="chat.sources.length" class="hint">
         <Icon name="sparkle" :size="14" />
         <span>答案由知海基于知识库检索生成，点击角标可查看溯源</span>
       </div>
