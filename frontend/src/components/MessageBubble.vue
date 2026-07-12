@@ -250,11 +250,11 @@ async function onCopy() {
   word-break: break-word;
 }
 
-/* 卡片内思考动画，品牌色跳动点 — 与上方内容左对齐 */
+/* 卡片内思考动画 — 与上方 steps-toggle 内容（图标后文字）左对齐 */
 .thinking {
   display: flex;
   gap: 5px;
-  padding: 4px 0;
+  padding: 4px 0 4px 30px;
 }
 .thinking .dot {
   width: 7px;
