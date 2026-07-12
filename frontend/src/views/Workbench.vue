@@ -50,9 +50,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 
   <div v-else class="workbench">
     <AppSidebar
-      :active-base="knowledge.activeBase"
       :collapsed="collapsed"
-      @select-base="knowledge.selectBase"
       @collapse="collapsed = !collapsed"
     />
     <div class="main">
