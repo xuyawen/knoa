@@ -1,7 +1,15 @@
 import { defineStore, acceptHMRUpdate } from 'pinia'
 import { ref } from 'vue'
-import { streamAsk, submitFeedback, deleteFeedback, getSourceDetail } from '@/api'
-import type { ChatMessage, SourceItem, SourceDetail } from '@/types/api'
+import {
+  streamAsk,
+  submitFeedback,
+  deleteFeedback,
+  getSourceDetail,
+  getSessions,
+  getSession,
+  createSession,
+} from '@/api'
+import type { ChatMessage, SourceItem, SourceDetail, ChatSession } from '@/types/api'
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
@@ -11,6 +19,9 @@ export const useChatStore = defineStore('chat', () => {
   const activeSourceId = ref<number | null>(null)
   const activeSourceDetail = ref<SourceDetail | null>(null)
   const loadingSource = ref(false)
+  const sessions = ref<ChatSession[]>([])
+  const historyOpen = ref(false)
+  const loadingHistory = ref(false)
 
   async function ask(question: string, knowledgeBase?: string | null) {
     if (streaming.value || !question.trim()) return
@@ -87,6 +98,67 @@ export const useChatStore = defineStore('chat', () => {
     activeSourceDetail.value = null
   }
 
+  // ── 多会话历史 ──
+  async function loadSessions() {
+    loadingHistory.value = true
+    try {
+      sessions.value = await getSessions()
+    } catch (e) {
+      console.error('加载会话列表失败', e)
+    } finally {
+      loadingHistory.value = false
+    }
+  }
+
+  function toggleHistory() {
+    historyOpen.value = !historyOpen.value
+    if (historyOpen.value) loadSessions()
+  }
+
+  function closeHistory() {
+    historyOpen.value = false
+  }
+
+  async function startNewChat() {
+    try {
+      const s = await createSession()
+      sessionId.value = s.id
+    } catch (e) {
+      console.error('新建会话失败', e)
+    }
+    messages.value = []
+    sources.value = []
+    historyOpen.value = false
+  }
+
+  async function switchSession(id: string) {
+    loadingHistory.value = true
+    try {
+      const detail = await getSession(id)
+      sessionId.value = detail.id
+      messages.value = detail.messages.map((m, i) => ({
+        id: `h-${i}-${m.role}`,
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        citations: m.citations ?? [],
+        sources: m.sources ?? [],
+        thinkingSteps: [],
+        feedback: null,
+      }))
+      // 汇总所有消息的 sources, 让历史回答里的引用能定位
+      const all: SourceItem[] = []
+      for (const m of detail.messages) {
+        if (m.sources) all.push(...m.sources)
+      }
+      sources.value = all
+      historyOpen.value = false
+    } catch (e) {
+      console.error('切换会话失败', e)
+    } finally {
+      loadingHistory.value = false
+    }
+  }
+
   // 反馈闭环：乐观更新本地状态 + 调接口（upsert / 取消）
   async function rateMessage(messageId: string | undefined, rating: 'up' | 'down') {
     if (!messageId) return
@@ -105,7 +177,10 @@ export const useChatStore = defineStore('chat', () => {
 
   return { messages, sources, streaming, sessionId, activeSourceId,
     activeSourceDetail, loadingSource,
-    ask, locateSource, clearActiveSource, openSource, closeSourceDetail, rateMessage }
+    sessions, historyOpen, loadingHistory,
+    ask, locateSource, clearActiveSource, openSource, closeSourceDetail,
+    loadSessions, toggleHistory, closeHistory, startNewChat, switchSession,
+    rateMessage }
 })
 
 // 支持 Pinia store 热更新（否则改 store 文件后 live 实例不会刷新，导致方法缺失）

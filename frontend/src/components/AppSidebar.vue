@@ -2,10 +2,12 @@
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useChatStore } from '@/stores/chat'
 import Icon from './Icon.vue'
 
 const route = useRoute()
 const knowledge = useKnowledgeStore()
+const chat = useChatStore()
 
 defineProps<{
   collapsed?: boolean
@@ -18,7 +20,6 @@ const emit = defineEmits<{
 }>()
 
 const bases = computed(() => knowledge.bases)
-const workspaceEntries = ['问答记录'] // 静态次级入口（文档管理已用 router-link）
 
 // 确保在任何页面刷新都能加载知识库列表
 onMounted(() => {
@@ -73,12 +74,8 @@ onMounted(() => {
       <router-link to="/knowledge-bases" class="nav-item plain" active-class="active">
         <span class="nav-name">文档管理</span>
       </router-link>
-      <button
-        v-for="entry in workspaceEntries.filter(e => e !== '文档管理')"
-        :key="entry"
-        class="nav-item plain"
-      >
-        <span class="nav-name">{{ entry }}</span>
+      <button class="nav-item plain" @click="chat.toggleHistory()">
+        <span class="nav-name">问答记录</span>
       </button>
     </nav>
 

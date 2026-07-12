@@ -4,6 +4,8 @@ import type {
   TrendingItem,
   DocumentItem,
   SourceDetail,
+  ChatSession,
+  SessionDetail,
 } from '@/types/api'
 
 export async function getKnowledgeBases(): Promise<KnowledgeBasesResponse> {
@@ -46,6 +48,31 @@ export async function uploadDocument(
 /** 溯源详情：按 chunk 的 UUID 取原文。 */
 export async function getSourceDetail(chunkId: string): Promise<SourceDetail> {
   const resp = await fetch(`/api/sources/${chunkId}`)
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 会话列表。 */
+export async function getSessions(): Promise<ChatSession[]> {
+  const resp = await fetch('/api/sessions')
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 新建空会话，返回 id。 */
+export async function createSession(): Promise<ChatSession> {
+  const resp = await fetch('/api/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: null }),
+  })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 拉取某会话的全部消息。 */
+export async function getSession(id: string): Promise<SessionDetail> {
+  const resp = await fetch(`/api/sessions/${id}`)
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }

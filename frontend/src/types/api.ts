@@ -44,6 +44,26 @@ export interface SourceDetail {
   chunkIndex: number
 }
 
+export interface ChatSession {
+  id: string
+  title: string
+  updatedAt: string
+  msgCount: number
+}
+
+export interface SessionMessage {
+  role: string
+  content: string
+  citations?: number[] | null
+  sources?: SourceItem[] | null
+}
+
+export interface SessionDetail {
+  id: string
+  title: string
+  messages: SessionMessage[]
+}
+
 /** Agent 决策步骤（Agentic RAG 的 thinking 事件） */
 export interface ThinkingStep {
   step: number          // 第几步 (1-based)
