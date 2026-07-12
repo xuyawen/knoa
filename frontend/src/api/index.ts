@@ -52,7 +52,9 @@ export async function* streamAsk(
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-      buffer += decoder.decode(value, { stream: true })
+      // FastAPI / sse-starlette emits CRLF (\r\n) line endings; normalize to LF
+      // so we can split events on "\n\n" regardless of the backend's line style.
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
 
       const events = buffer.split('\n\n')
       buffer = events.pop() || ''

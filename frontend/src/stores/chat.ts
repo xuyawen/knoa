@@ -26,26 +26,27 @@ export const useChatStore = defineStore('chat', () => {
       content: '',
       citations: [],
     })
-    // 取回 reactive 代理再赋值：push 进数组的是原始对象，
-    // 若直接改本地引用不会触发重渲染，必须走代理
-    const msg = messages.value[messages.value.length - 1]
+    // 始终通过 reactive 数组下标取值再赋值，确保改动走 Vue 的响应式代理
+    // （直接持有 push 前的本地引用会绕过代理、不触发重渲染）
+    const lastMsg = () => messages.value[messages.value.length - 1]
 
     try {
       for await (const event of streamAsk(question, knowledgeBase, sessionId.value)) {
+        const m = lastMsg()
         if (event.event === 'sources') {
           sources.value = event.data
-          msg.sources = event.data
+          m.sources = event.data
         } else if (event.event === 'delta') {
-          msg.content += event.data.content
+          m.content += event.data.content
         } else if (event.event === 'done') {
-          msg.citations = event.data.citations
+          m.citations = event.data.citations
           sessionId.value = event.data.sessionId
         } else if (event.event === 'error') {
-          msg.content += `\n\n[错误] ${event.data.message}`
+          m.content += `\n\n[错误] ${event.data.message}`
         }
       }
     } catch (e) {
-      msg.content += `\n\n[错误] ${e}`
+      lastMsg().content += `\n\n[错误] ${e}`
     } finally {
       streaming.value = false
     }
