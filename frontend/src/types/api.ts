@@ -18,6 +18,15 @@ export interface TrendingItem {
   count: number
 }
 
+export interface DocumentItem {
+  id: string
+  title: string
+  type: string      // 'MD' | 'TXT'
+  sizeKb: number
+  status: string     // '已审核' | '待复核'
+  updatedAt: string
+}
+
 export interface SourceItem {
   id: number
   kb: string

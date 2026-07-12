@@ -2,6 +2,7 @@ import type {
   KnowledgeBasesResponse,
   SSEEvent,
   TrendingItem,
+  DocumentItem,
 } from '@/types/api'
 
 export async function getKnowledgeBases(): Promise<KnowledgeBasesResponse> {
@@ -13,6 +14,31 @@ export async function getKnowledgeBases(): Promise<KnowledgeBasesResponse> {
 export async function getTrending(): Promise<TrendingItem[]> {
   const resp = await fetch('/api/trending')
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 列出某知识库下的文档。 */
+export async function getDocuments(kbId: string): Promise<DocumentItem[]> {
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/documents`)
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 上传单篇文档（.md / .txt）。前端用 FileReader 读文本后提交。 */
+export async function uploadDocument(
+  kbId: string,
+  filename: string,
+  content: string,
+): Promise<DocumentItem> {
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/documents`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, content }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
   return resp.json()
 }
 

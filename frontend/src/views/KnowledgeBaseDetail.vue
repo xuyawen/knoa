@@ -1,69 +1,94 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
+import { getDocuments, uploadDocument } from '@/api'
+import type { DocumentItem } from '@/types/api'
 
 const route = useRoute()
 
 const collapsed = ref(false)
 
-/* 硬数据 —— 后续对接 /api/knowledge-bases/:id 接口替换 */
+/* 硬数据 —— 详情页头部信息（详情接口留后续对接） */
 const kbMap: Record<string, {
   name: string
   icon: string
   description: string
-  docCount: number
-  updatedAt: string
 }> = {
   compliance: {
     name: '合规库',
     icon: 'compliance',
     description: '亚马逊平台合规政策、产品认证标准、知识产权法规等文档集合。',
-    docCount: 10,
-    updatedAt: '22 小时前更新',
   },
   ads: {
     name: '广告投放',
     icon: 'ads',
     description: 'PPC 广告策略、关键词优化、品牌推广、Sponsored Products 等实操指南。',
-    docCount: 10,
-    updatedAt: '22 小时前更新',
   },
   logistics: {
     name: '物流仓储',
     icon: 'logistics',
     description: 'FBA/FBM 物流方案、仓储管理、头程运输、清关流程、退换货处理。',
-    docCount: 10,
-    updatedAt: '22 小时前更新',
   },
   selection: {
     name: '选品策略',
     icon: 'selection',
     description: '市场调研方法论、竞品分析框架、选品工具使用、利润测算模板。',
-    docCount: 10,
-    updatedAt: '22 小时前更新',
   },
   service: {
     name: '客服话术',
     icon: 'service',
     description: '售前咨询话术、售后纠纷处理、Review 管理、客户沟通 SOP。',
-    docCount: 10,
-    updatedAt: '22 小时前更新',
   },
 }
 
 const kbId = computed(() => route.params.id as string)
-const kb = computed(() => kbMap[kbId.value] || { name: '未知', icon: 'library', description: '', docCount: 0, updatedAt: '' })
+const kb = computed(() => kbMap[kbId.value] || { name: '未知', icon: 'library', description: '' })
 
-/* 硬数据：该库下的文档列表（后续接 API） */
-const mockDocuments = [
-  { id: 1, title: 'CPC 认证要求详解', type: 'PDF', size: '2.4 MB', status: '已审核' },
-  { id: 2, title: 'FBA 头程运费对比表', type: 'XLSX', size: '156 KB', status: '待复核' },
-  { id: 3, title: '亚马逊 A-to-Z 索赔处理流程', type: 'DOCX', size: '890 KB', status: '已审核' },
-  { id: 4, title: 'PPC 广告竞价策略指南', type: 'PDF', size: '1.8 MB', status: '待复核' },
-]
+/* 真实文档列表（接 /api/knowledge-bases/:id/documents） */
+const documents = ref<DocumentItem[]>([])
+const loadingDocs = ref(false)
+const uploadError = ref<string | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+
+async function loadDocuments() {
+  loadingDocs.value = true
+  uploadError.value = null
+  try {
+    documents.value = await getDocuments(kbId.value)
+  } catch (e) {
+    console.error('加载文档失败', e)
+  } finally {
+    loadingDocs.value = false
+  }
+}
+
+function triggerUpload() {
+  fileInput.value?.click()
+}
+
+async function onFilePicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // 允许重复选同一文件
+  if (!file) return
+  if (!/\.(md|markdown|txt)$/i.test(file.name)) {
+    uploadError.value = `仅支持 .md / .txt，当前文件：${file.name}`
+    return
+  }
+  uploadError.value = null
+  try {
+    const content = await file.text()
+    await uploadDocument(kbId.value, file.name, content)
+    await loadDocuments()
+  } catch (e) {
+    uploadError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+onMounted(loadDocuments)
 </script>
 
 <template>
@@ -85,40 +110,53 @@ const mockDocuments = [
           <div class="kb-header-info">
             <h2 class="kb-title">{{ kb.name }}</h2>
             <p class="kb-desc">{{ kb.description }}</p>
-            <span class="kb-meta">{{ kb.docCount }} 篇 · {{ kb.updatedAt }}</span>
+            <span class="kb-meta">{{ documents.length }} 篇文档</span>
           </div>
         </div>
 
         <!-- 操作栏 -->
         <div class="toolbar">
-          <button class="btn-primary">
+          <button class="btn-primary" @click="triggerUpload" :disabled="loadingDocs">
             <Icon name="plus" :size="16" />
-            上传文档
+            {{ loadingDocs ? '上传中...' : '上传文档' }}
           </button>
           <div class="toolbar-right">
             <input type="text" placeholder="搜索文档..." class="search-input" />
           </div>
         </div>
+        <p v-if="uploadError" class="upload-error">{{ uploadError }}</p>
 
         <!-- 文档列表 -->
         <div class="doc-list">
-          <div v-for="doc in mockDocuments" :key="doc.id" class="doc-item">
+          <div v-for="doc in documents" :key="doc.id" class="doc-item">
             <div class="doc-icon">
               <Icon name="library" :size="18" />
             </div>
             <div class="doc-info">
               <span class="doc-title">{{ doc.title }}</span>
-              <span class="doc-meta">{{ doc.type }} · {{ doc.size }}</span>
+              <span class="doc-meta">{{ doc.type }} · {{ doc.sizeKb }} KB</span>
             </div>
             <span class="doc-status" :class="doc.status === '待复核' ? 'pending' : ''">
               {{ doc.status }}
             </span>
           </div>
-          <div v-if="mockDocuments.length === 0" class="empty-state">
+          <div v-if="!loadingDocs && documents.length === 0" class="empty-state">
             <Icon name="library" :size="36" />
             <p>暂无文档，点击上方按钮上传</p>
           </div>
+          <div v-if="loadingDocs" class="empty-state">
+            <p>加载中...</p>
+          </div>
         </div>
+
+        <!-- 隐藏的文件选择 -->
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".md,.markdown,.txt"
+          class="hidden-file"
+          @change="onFilePicked"
+        />
       </div>
     </div>
   </div>
@@ -247,6 +285,14 @@ const mockDocuments = [
 }
 .search-input:focus {
   border-color: var(--brand);
+}
+.upload-error {
+  margin: -8px 0 12px;
+  font-size: 12px;
+  color: var(--danger);
+}
+.hidden-file {
+  display: none;
 }
 
 /* 文档列表 */
