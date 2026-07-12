@@ -356,6 +356,11 @@ function sanitizeDetail(detail: string): string {
 .step-item.abnormal .step-action {
   color: var(--warning, #f59e0b);
 }
-/* 收起态 */
+/* 收起态：去掉背景色块，压成一行轻量提示 */
+.collapsed {
+  margin-bottom: 6px;
+  background: none;
+  padding: 0;
+}
 .collapsed .steps-list { display: none; }
 </style>
