@@ -57,19 +57,19 @@ onMounted(() => knowledgeStore.load())
 .kb-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-width: 520px;
+  gap: 6px;
+  max-width: 480px;
 }
 
 .kb-item {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px 18px;
+  gap: 12px;
+  padding: 11px 14px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  font-size: 15px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
   color: var(--text-primary);
   text-align: left;
   width: 100%;
@@ -85,9 +85,9 @@ onMounted(() => knowledgeStore.load())
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-md);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   background: var(--bg-subtle);
   color: var(--text-secondary);
   flex-shrink: 0;
