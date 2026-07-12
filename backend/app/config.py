@@ -29,6 +29,17 @@ class Settings(BaseSettings):
     RAG_CHUNK_SIZE: int = 500
     RAG_CHUNK_OVERLAP: int = 50
     RRF_K: int = 60
+    # Elasticsearch (Phase 2 混合检索；venv 装不了官方客户端，走 httpx 直连 REST)
+    ES_URL: str = "http://localhost:9200"
+    ES_USERNAME: str = ""            # 留空 = 不启用 Basic Auth
+    ES_PASSWORD: str = ""
+    ES_INDEX_PREFIX: str = "kb"      # 索引名格式: {prefix}_{kb_id}
+    ES_REQUEST_TIMEOUT: float = 10.0
+    # 鉴权 (Phase 2 RBAC)
+    JWT_SECRET: str = "dev-change-me"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 1440   # 24h
+    PBKDF2_ITERATIONS: int = 100_000
     # App
     APP_ENV: str = "development"
     CORS_ORIGINS: str = "http://localhost:5173"

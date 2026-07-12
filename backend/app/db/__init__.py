@@ -1,7 +1,9 @@
+import hashlib
+import secrets
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -94,4 +96,71 @@ class MessageFeedback(Base):
     )
     rating: Mapped[str] = mapped_column(String(10))  # 'up' | 'down'
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class User(Base):
+    """系统用户（Phase 2 RBAC）。单公司内使用，角色分 admin/editor/viewer。"""
+    __tablename__ = "app_user"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # 全局角色：admin(管用户+全部库) | editor(建库/传文档) | viewer(仅问答)
+    role: Mapped[str] = mapped_column(String(20), default="viewer", server_default="viewer")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    @staticmethod
+    def hash_password(password: str) -> str:
+        """PBKDF2-HMAC-SHA256 + 随机 salt，依赖库 hashlib/secrets，无第三方依赖。"""
+        from app.config import settings
+        salt = secrets.token_hex(16)
+        dk = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), bytes.fromhex(salt), settings.PBKDF2_ITERATIONS
+        )
+        return f"pbkdf2_sha256${settings.PBKDF2_ITERATIONS}${salt}${dk.hex()}"
+
+    def verify_password(self, password: str) -> bool:
+        try:
+            _, iter_s, salt, dk = self.password_hash.split("$")
+            dk2 = hashlib.pbkdf2_hmac(
+                "sha256", password.encode(), bytes.fromhex(salt), int(iter_s)
+            )
+            return secrets.compare_digest(dk2.hex(), dk)
+        except Exception:
+            return False
+
+
+class KBPermission(Base):
+    """知识库级权限（单公司内部门间隔离）。控制某用户能否访问/编辑某 KB。
+
+    不往 knowledge_base 表 ALTER 加 owner 列，避免无 Alembic 下的迁移麻烦；
+    KB 创建者自动获得该库 level='admin' 的一条记录即可。
+    """
+    __tablename__ = "kb_permission"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kb_id: Mapped[str] = mapped_column(ForeignKey("knowledge_base.id"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), index=True)
+    # 库级权限：admin(管理该库) | edit(可上传/删文档) | view(仅阅读/问答)
+    level: Mapped[str] = mapped_column(String(20), default="view", server_default="view")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Memory(Base):
+    """用户长期记忆（Mem0 轻量自研版，Phase 2 T4 使用）。
+
+    embedding 复用 JSONB + numpy 余弦，与 DocChunk 一致；检索时按 user_id 取
+    该用户记忆做相似度排序，注入 agent prompt。
+    """
+    __tablename__ = "memory"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list] = mapped_column(JSONB)
+    # 记忆类型：preference(偏好) | fact(事实) | feedback(反馈) 等，便于筛选
+    meta_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
