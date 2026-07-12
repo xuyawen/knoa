@@ -10,10 +10,10 @@
        - 复杂多步 → 检索 → LLM 评估结果是否足够 → 不够则补充检索 → 再评估...（最多3轮）
     3. 最终基于充分的信息流式生成回答
 
-工具定义（OpenAI function calling schema）：
-  - route_and_retrieve：路由分类 + 首次检索
-  - evaluate_results：评估检索结果相关性/充分性
+工具定义（OpenAI function calling schema，仅作为"可用动作"说明传给 LLM 做 JSON 决策）：
+  - retrieve：首次检索知识库
   - supplement_search：补充检索（用精炼后的查询词）
+  - direct_answer：不检索，直接回答（LLM 在 JSON 里用 action 字段表达）
 
 对外接口：
   async for event in agent.stream(question, kb_id, session_id):
@@ -22,7 +22,6 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from collections.abc import AsyncIterator
 
@@ -193,6 +192,23 @@ class AgenticRAGAgent:
                     messages, tools=TOOLS_SCHEMA, temperature=0.2
                 )
 
+                # 动作名归一化（prompt 决策可能因模型输出波动而偏离预设值）
+                name = result.name
+                if name not in ("retrieve", "supplement_search", "direct_answer"):
+                    if "query" in result.arguments:
+                        name = "retrieve"
+                    elif "refined_query" in result.arguments:
+                        name = "supplement_search"
+                    elif "content" in result.arguments:
+                        name = "direct_answer"
+                    else:
+                        name = "direct_answer"
+                    result = ToolCallResult(
+                        name=name,
+                        arguments=result.arguments,
+                        raw_text=result.raw_text,
+                    )
+
                 # 推送 thinking 事件（前端可展示决策过程）
                 action_desc = self._describe_action(result)
                 yield {
@@ -223,23 +239,17 @@ class AgenticRAGAgent:
                         context_text = self._sources_to_context(retrieved)
                         messages.append({
                             "role": "assistant",
-                            "content": f"[已调用 retrieve 工具，检索到 {len(retrieved)} 条相关文档]",
-                            "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "retrieve", "arguments": json.dumps({"query": query, "reason": result.arguments.get("reason", "")})}}],
+                            "content": f"[已调用检索 retrieve，针对「{query}」检索到 {len(retrieved)} 条相关文档]",
                         })
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": "call_1",
-                            "content": context_text,
-                        })
-
-                        # 追问 LLM：这些结果够不够？要补检还是直接答？
                         messages.append({
                             "role": "user",
                             "content": (
-                                "以上是检索结果。请判断：\n"
+                                f"检索结果：\n{context_text}\n\n"
+                                "请判断：\n"
                                 "1. 这些信息足以回答用户的原问题吗？\n"
-                                "2. 如果足够，请直接给出最终回答（不要再调任何工具）。\n"
-                                "3. 如果不足，请调用 supplement_search 工具补充检索。"
+                                "2. 如果足够，请直接给出最终回答（action=direct_answer，content=回复内容）。\n"
+                                "3. 如果不足，请调用 supplement_search 补充检索"
+                                "（action=supplement_search，refined_query=更聚焦的查询词，gap_description=缺失的信息）。"
                             ),
                         })
                         continue  # 进入下一轮决策
@@ -272,22 +282,16 @@ class AgenticRAGAgent:
                         context_text = self._sources_to_context(retrieved)
                         messages.append({
                             "role": "assistant",
-                            "content": f"[已调用 supplement_search 工具，针对「{gap}」补充检索到 {len(retrieved)} 条]",
-                            "tool_calls": [{"id": f"call_{step}", "type": "function", "function": {"name": "supplement_search", "arguments": json.dumps({"refined_query": refined_query, "gap_description": gap})}}],
+                            "content": f"[已调用补充检索 supplement_search，针对「{gap}」检索到 {len(retrieved)} 条]",
                         })
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": f"call_{step}",
-                            "content": context_text,
-                        })
-
-                        # 再次追问
                         messages.append({
                             "role": "user",
                             "content": (
-                                "这是补充检索结果。结合之前的全部信息，请判断：\n"
-                                "1. 现在信息是否已经足够回答用户问题？\n"
-                                "2. 足够就直接给最终回答；不足可以再补充一次（最多3轮）。\n"
+                                f"补充检索结果：\n{context_text}\n\n"
+                                "结合之前所有信息，请判断：\n"
+                                "1. 现在信息是否足够回答用户问题？\n"
+                                "2. 足够就 action=direct_answer 直接给最终回答；"
+                                "不足可以再补充一次（最多3轮）。"
                             ),
                         })
                         continue

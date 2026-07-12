@@ -88,52 +88,101 @@ class OpenAICompatProvider:
         *,
         temperature: float | None = None,
     ) -> ToolCallResult:
-        """结构化 function calling — 让 LLM 选择并返回一个工具调用。
+        """结构化决策 — 用"提示词约束 JSON 输出"替代原生 function calling。
+
+        原因：Agnes 推理模型的 OpenAI 兼容端点对 tools 支持有缺陷，
+        传 tools 会回占位函数名 example_function_name，导致决策失败。
+        改为让模型只输出一个 JSON 决策对象，本地解析，跨 Provider 稳定。
 
         Args:
             messages: 对话历史（含 system prompt）
-            tools: OpenAI tool schema 列表
+            tools: OpenAI tool schema 列表（仅用于构造"可用动作"说明）
             temperature: 覆盖默认温度（agent 决策建议偏低，0.1~0.3）
 
         Returns:
-            ToolCallResult: name / arguments(解析后dict) / raw_text
+            ToolCallResult: name / arguments(解析后dict) / raw_text(思考文字)
         """
+        decision = self._build_decision_prompt(tools)
+        augmented = list(messages)
+        if augmented and augmented[0].get("role") == "system":
+            augmented[0] = {
+                "role": "system",
+                "content": augmented[0]["content"] + "\n\n" + decision,
+            }
+        else:
+            augmented.insert(0, {"role": "system", "content": decision})
+
         response = await self.client.chat.completions.create(
             model=self.model,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",  # LLM 自主决定是否调工具
+            messages=augmented,
             temperature=temperature or 0.2,  # agent 决策用更低温度，更确定
             max_tokens=self.max_tokens,
         )
-        choice = response.choices[0]
-        msg = choice.message
+        msg = response.choices[0].message
+        content = (getattr(msg, "content", "") or "").strip()
 
-        # 提取 reasoning_text（如有），用于前端展示"思考过程"
+        # 抓取 reasoning（如有），用于前端展示思考过程
         raw_text = ""
         try:
             extra = getattr(msg, "__pydantic_extra__", {}) or {}
             raw_text = extra.get("reasoning_content", "") or ""
         except AttributeError:
             pass
+        if not raw_text:
+            raw_text = content  # 兜底：用 JSON 文本当思考
 
-        # 有工具调用 → 返回结构化结果
-        if getattr(msg, "tool_calls", None) and msg.tool_calls:
-            tc = msg.tool_calls[0]
+        parsed = self._extract_json(content)
+        name = parsed.get("action") or parsed.get("name") or "direct_answer"
+        args = {k: v for k, v in parsed.items() if k not in ("action", "name")}
+        return ToolCallResult(name=name, arguments=args, raw_text=raw_text)
+
+    @staticmethod
+    def _build_decision_prompt(tools: list[dict]) -> str:
+        """把 OpenAI tools schema 转成一段"强制 JSON 输出"指令。"""
+        lines = [
+            "你的一次性决策必须且只能以一个 JSON 对象输出，不要包含任何解释性"
+            "文字，不要使用 markdown 代码块。",
+            "可用的动作（action）及参数：",
+        ]
+        for t in tools:
+            fn = t.get("function", t)
+            name = fn.get("name", "")
+            desc = fn.get("description", "")
+            props = fn.get("parameters", {}).get("properties", {})
+            req = fn.get("parameters", {}).get("required", [])
+            param_parts = []
+            for p, spec in props.items():
+                param_parts.append(f"{p}({spec.get('type', '')}: {spec.get('description', '')})")
+            param_desc = "；".join(param_parts) if param_parts else "无"
+            lines.append(f'- action="{name}"：{desc} | 参数 {param_desc} | 必填 {req}')
+        lines.append('输出 JSON 示例：{"action": "retrieve", "query": "...", "reason": "..."}')
+        lines.append('若直接回答：{"action": "direct_answer", "content": "你的回复内容"}')
+        return "\n".join(lines)
+
+    @staticmethod
+    def _extract_json(text: str) -> dict:
+        """从模型输出里稳健地抽出 JSON 对象（兼容 ```json 围栏 / 前后缀噪声）。"""
+        import re
+
+        text = (text or "").strip()
+        if not text:
+            return {}
+        # 去掉 ```json ... ``` 围栏
+        if "```" in text:
+            m = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+            if m:
+                text = m.group(1).strip()
+        # 直接解析
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        # 截取第一个 { 到最后一个 }
+        s = text.find("{")
+        e = text.rfind("}")
+        if s != -1 and e != -1 and e > s:
             try:
-                args = json.loads(tc.function.arguments or "{}")
-            except json.JSONDecodeArgsError:
-                args = {"raw": tc.function.arguments or ""}
-            return ToolCallResult(
-                name=tc.function.name,
-                arguments=args,
-                raw_text=raw_text,
-            )
-
-        # 没有工具调用 → LLM 直接回答（说明问题不需要检索）
-        content = (getattr(msg, "content", "") or "").strip()
-        return ToolCallResult(
-            name="direct_answer",
-            arguments={"content": content},
-            raw_text=raw_text,
-        )
+                return json.loads(text[s : e + 1])
+            except json.JSONDecodeError:
+                pass
+        return {}
