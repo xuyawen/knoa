@@ -12,7 +12,7 @@ const iconName = computed(() => {
     case '物流仓储': return 'logistics'
     case '选品策略': return 'selection'
     case '客服话术': return 'service'
-    default: return 'library'
+    default: return 'fire'
   }
 })
 
