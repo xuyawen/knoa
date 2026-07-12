@@ -223,7 +223,6 @@ class AgenticRAGAgent:
                     {"role": "user", "content": question},
                 ]
                 step = 0
-                answer_from_loop = False  # 标记：答案是否已在循环内生成
 
                 while step < self.MAX_STEPS:
                     step += 1
@@ -262,7 +261,23 @@ class AgenticRAGAgent:
                         candidate = result.arguments.get("content", "").strip()
                         if candidate:
                             final_answer_text = candidate
+                        elif all_sources:
+                            # 已有检索结果但 LLM 选了 direct_answer（无 content），
+                            # 强制基于已有上下文流式生成，避免丢失已召回的 sources。
+                            yield {
+                                "event": "thinking",
+                                "data": {"step": step, "action": "generate",
+                                         "detail": f"基于 {len(all_sources)} 条检索结果生成回答",
+                                         "raw_reasoning": ""},
+                            }
+                            final_messages = self._build_final_prompt(question, all_sources, messages)
+                            full_answer = ""
+                            async for delta in self.llm.stream_chat(final_messages):
+                                full_answer += delta
+                                yield {"event": "delta", "data": {"content": delta}}
+                            final_answer_text = full_answer
                         else:
+                            # 无任何检索结果时才走纯通用回答
                             quick_msgs = [
                                 {"role": "system", "content": (
                                     "你是「知海 Knoa」，一个跨境电商运营知识助手。"
@@ -274,9 +289,12 @@ class AgenticRAGAgent:
                                 final_answer_text = await self.llm.chat(quick_msgs)
                             except Exception:
                                 final_answer_text = "好的，收到！"
-                        # 直接在这里 yield，不依赖循环外的逻辑
-                        if final_answer_text:
-                            yield {"event": "delta", "data": {"content": final_answer_text}}
+                        if final_answer_text and not any(
+                            d.get("event") == "delta" for d in []  # 已在上面逐 token yield 了则跳过
+                        ):
+                            # 只有非流式路径（candidate / chat）才需要一次性 yield
+                            if not all_sources or candidate:
+                                yield {"event": "delta", "data": {"content": final_answer_text}}
                         break
 
                     elif result.name == "retrieve":
@@ -288,7 +306,7 @@ class AgenticRAGAgent:
                             yield {"event": "sources", "data": sources}
                             context_text = self._sources_to_context(retrieved)
                             messages.append({"role": "assistant", "content": f"[已调用检索 retrieve，针对「{query}」检索到 {len(retrieved)} 条相关文档]"})
-                            messages.append({"role": "user", "content": f"检索结果：\n{context_text}\n\n请判断：\n1. 这些信息足以回答用户的原问题吗？\n2. 如果足够，请直接给出最终回答（action=direct_answer，content=回复内容）。\n3. 如果不足，请调用 supplement_search 补充检索"})
+                            messages.append({"role": "user", "content": f"检索结果：\n{context_text}\n\n基于以上信息，请直接给出最终回答。如果信息明显不足，才调用 supplement_search（大多数情况下直接回答即可）。"})
                             continue
                         else:
                             messages.append({"role": "assistant", "content": "[已调用 retrieve 工具，但未找到相关文档]"})
@@ -305,7 +323,7 @@ class AgenticRAGAgent:
                             yield {"event": "sources", "data": sources}
                             context_text = self._sources_to_context(retrieved)
                             messages.append({"role": "assistant", "content": f"[已调用补充检索 supplement_search，针对「{gap}」检索到 {len(retrieved)} 条]"})
-                            messages.append({"role": "user", "content": f"补充检索结果：\n{context_text}\n\n结合之前所有信息，请判断是否足够回答。"})
+                            messages.append({"role": "user", "content": f"补充检索结果：\n{context_text}\n\n结合之前所有信息，请直接给出最终回答。"})
                             continue
                         else:
                             messages.append({"role": "assistant", "content": "[补充检索也未找到新结果]"})
@@ -317,19 +335,20 @@ class AgenticRAGAgent:
 
                 # ── 循环结束后，若尚未得到答案则流式生成 ──
                 if not final_answer_text:
+                    if all_sources:
+                        # 有检索结果但循环耗尽（MAX_STEPS）仍未给答案，基于上下文生成
+                        yield {
+                            "event": "thinking",
+                            "data": {"step": step, "action": "generate",
+                                     "detail": f"达到最大步数，基于 {len(all_sources)} 条结果生成回答",
+                                     "raw_reasoning": ""},
+                        }
                     final_messages = self._build_final_prompt(question, all_sources, messages)
                     full_answer = ""
                     async for delta in self.llm.stream_chat(final_messages):
                         full_answer += delta
                         yield {"event": "delta", "data": {"content": delta}}
                     final_answer_text = full_answer
-                # 无论哪种方式得到的答案，都作为单一 delta 输出
-                # （循环内 direct_answer 分支已通过 chat() 得到文本但未 yield）
-                if final_answer_text and not answer_from_loop:
-                    pass  # 由上面的 stream_chat 已经逐 token yield 了
-                elif final_answer_text:
-                    # 循环内 direct_answer 通过 chat() 得到完整文本，此处一次性 yield
-                    yield {"event": "delta", "data": {"content": final_answer_text}}
 
             # ---- 持久化 + done ----
             if not final_answer_text.strip():
@@ -359,6 +378,8 @@ class AgenticRAGAgent:
     def _describe_action(self, result: ToolCallResult) -> str:
         if result.name == "direct_answer":
             return "判断为无需检索，直接回答"
+        if result.name == "generate":
+            return "基于检索结果生成回答"
         if result.name == "retrieve":
             q = result.arguments.get("query", "")[:60]
             reason = result.arguments.get("reason", "")[:40]
