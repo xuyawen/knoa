@@ -18,7 +18,7 @@ const emit = defineEmits<{
 
 const activeBase = computed(() => knowledge.activeBase)
 const bases = computed(() => knowledge.bases)
-const workspaceEntries = ['文档管理', '问答记录'] // 静态次级入口
+const workspaceEntries = ['问答记录'] // 静态次级入口（文档管理已用 router-link）
 </script>
 
 <template>
@@ -63,8 +63,11 @@ const workspaceEntries = ['文档管理', '问答记录'] // 静态次级入口
     <!-- 工作区次级入口 -->
     <nav class="nav secondary">
       <div class="nav-label">工作区</div>
+      <router-link to="/knowledge-bases" class="nav-item plain" active-class="active">
+        <span class="nav-name">文档管理</span>
+      </router-link>
       <button
-        v-for="entry in workspaceEntries"
+        v-for="entry in workspaceEntries.filter(e => e !== '文档管理')"
         :key="entry"
         class="nav-item plain"
       >
