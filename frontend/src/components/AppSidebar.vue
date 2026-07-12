@@ -2,12 +2,10 @@
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useKnowledgeStore } from '@/stores/knowledge'
-import { useChatStore } from '@/stores/chat'
 import Icon from './Icon.vue'
 
 const route = useRoute()
 const knowledge = useKnowledgeStore()
-const chat = useChatStore()
 
 defineProps<{
   collapsed?: boolean
@@ -80,9 +78,9 @@ onMounted(() => {
       <router-link to="/knowledge-bases" class="nav-item plain" active-class="active">
         <span class="nav-name">文档管理</span>
       </router-link>
-      <button class="nav-item plain" @click="chat.toggleHistory()">
+      <router-link to="/history" class="nav-item plain" active-class="active">
         <span class="nav-name">问答记录</span>
-      </button>
+      </router-link>
     </nav>
 
     <!-- 底部用户卡 -->
