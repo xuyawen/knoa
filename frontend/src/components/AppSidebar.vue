@@ -44,7 +44,7 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- 工作区入口（问问知海 / 文档管理 / 问答记录） -->
+    <!-- 工作区入口（智能问答 / 文档管理 / 问答记录） -->
     <nav class="nav">
       <div class="nav-label">工作区</div>
       <router-link
@@ -52,8 +52,8 @@ onMounted(() => {
         class="nav-item plain"
         :class="{ active: route.path === '/' }"
       >
-        <span class="nav-icon"><Icon name="chat" :size="18" /></span>
-        <span class="nav-name">问问知海</span>
+        <span class="nav-icon"><Icon name="sparkle" :size="18" /></span>
+        <span class="nav-name">智能问答</span>
       </router-link>
       <router-link to="/knowledge-bases" class="nav-item plain" active-class="active">
         <span class="nav-icon"><Icon name="library" :size="18" /></span>

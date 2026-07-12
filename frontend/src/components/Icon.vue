@@ -64,9 +64,6 @@ defineProps<{ name: string; size?: number }>()
     <template v-else-if="name === 'library'">
       <path d="M4 4h4v16H4zM10 4h4v16h-4zM17 5l3 1-3 14-3-1z" />
     </template>
-    <template v-else-if="name === 'chat'">
-      <path d="M21 11.5a8 8 0 01-11.5 7.2L4 20l1-4.5A8 8 0 1121 11.5z" />
-    </template>
     <template v-else-if="name === 'user'">
       <circle cx="12" cy="8" r="3.5" />
       <path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6" />
