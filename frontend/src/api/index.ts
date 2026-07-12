@@ -26,9 +26,10 @@ export async function* streamAsk(
   sessionId?: string | null,
   opts?: { timeoutMs?: number },
 ): AsyncGenerator<SSEEvent> {
-  // 客户端超时保护：防止后端挂起导致 UI 永远转圈
+  // 客户端超时保护：Agentic RAG 多步决策链可能需要多次 LLM 调用（每轮 15~40s），
+  // 90s 对复杂问题不够用，拉到 180s 给足余量
   const controller = new AbortController()
-  const timeoutMs = opts?.timeoutMs ?? 90_000
+  const timeoutMs = opts?.timeoutMs ?? 180_000
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
