@@ -79,88 +79,101 @@ const kbCards = computed(() => {
       </div>
     </header>
 
-    <!-- 首页 -->
-    <main v-if="tab === 'home'" class="scroll">
-      <div class="greet">
-        <h2>你好，运营小王</h2>
-        <p>向知海提问，获取带溯源的运营答案</p>
+    <!-- 内容区：tab 切换带过渡（kb ↔ chat 等） -->
+    <Transition name="tab" mode="out-in">
+      <div
+        class="pane"
+        :class="{
+          scroll: tab === 'home' || tab === 'kb' || tab === 'me',
+          'scroll center': tab === 'me',
+          'chat-view': tab === 'chat',
+        }"
+        :key="tab"
+      >
+        <!-- 首页 -->
+        <template v-if="tab === 'home'">
+          <div class="greet">
+            <h2>你好，运营小王</h2>
+            <p>向知海提问，获取带溯源的运营答案</p>
+          </div>
+
+          <form class="qcard" @submit.prevent="submit">
+            <input
+              v-model="question"
+              type="text"
+              placeholder="向知海提问…"
+            />
+            <button class="qsend" type="submit" title="发送">
+              <Icon name="send" :size="16" />
+            </button>
+          </form>
+
+          <div class="sec-title">知识库</div>
+          <div class="kb-grid">
+            <KnowledgeCard
+              v-for="c in kbCards"
+              :key="c.name"
+              :icon="c.icon"
+              :name="c.name"
+              :meta="c.meta"
+              :alert="c.alert"
+            />
+          </div>
+
+          <div class="sec-title">今日高频</div>
+          <ul class="trend">
+            <li v-for="(t, i) in knowledge.trending" :key="i">
+              <span class="rk" :class="{ top: i < 3 }">{{ i + 1 }}</span>
+              <span class="tq">{{ t.question }}</span>
+              <span class="tf"><Icon name="fire" :size="13" />{{ t.count }}</span>
+            </li>
+          </ul>
+        </template>
+
+        <!-- 知识库 -->
+        <template v-else-if="tab === 'kb'">
+          <div class="sec-title">知识库</div>
+          <div class="kb-grid">
+            <KnowledgeCard
+              v-for="c in kbCards"
+              :key="c.name"
+              :icon="c.icon"
+              :name="c.name"
+              :meta="c.meta"
+              :alert="c.alert"
+            />
+          </div>
+        </template>
+
+        <!-- 问答 -->
+        <template v-else-if="tab === 'chat'">
+          <div class="chat-bar">
+            <span class="chat-title">知海问答</span>
+            <button
+              class="src-btn"
+              :class="{ on: sourceCount > 0 }"
+              :disabled="sourceCount === 0"
+              @click="showSources = true"
+            >
+              <Icon name="search" :size="14" />
+              溯源 {{ sourceCount }}
+            </button>
+          </div>
+
+          <ChatStream class="chat-flex" @cite="onCite" />
+
+          <Composer class="m-composer" @send="send" />
+        </template>
+
+        <!-- 我的 -->
+        <template v-else>
+          <div class="empty-me">
+            <Icon name="user" :size="28" />
+            <p>「我的」功能即将上线</p>
+          </div>
+        </template>
       </div>
-
-      <form class="qcard" @submit.prevent="submit">
-        <input
-          v-model="question"
-          type="text"
-          placeholder="向知海提问…"
-        />
-        <button class="qsend" type="submit" title="发送">
-          <Icon name="send" :size="16" />
-        </button>
-      </form>
-
-      <div class="sec-title">知识库</div>
-      <div class="kb-grid">
-        <KnowledgeCard
-          v-for="c in kbCards"
-          :key="c.name"
-          :icon="c.icon"
-          :name="c.name"
-          :meta="c.meta"
-          :alert="c.alert"
-        />
-      </div>
-
-      <div class="sec-title">今日高频</div>
-      <ul class="trend">
-        <li v-for="(t, i) in knowledge.trending" :key="i">
-          <span class="rk" :class="{ top: i < 3 }">{{ i + 1 }}</span>
-          <span class="tq">{{ t.question }}</span>
-          <span class="tf"><Icon name="fire" :size="13" />{{ t.count }}</span>
-        </li>
-      </ul>
-    </main>
-
-    <!-- 知识库 -->
-    <main v-else-if="tab === 'kb'" class="scroll">
-      <div class="sec-title">知识库</div>
-      <div class="kb-grid">
-        <KnowledgeCard
-          v-for="c in kbCards"
-          :key="c.name"
-          :icon="c.icon"
-          :name="c.name"
-          :meta="c.meta"
-          :alert="c.alert"
-        />
-      </div>
-    </main>
-
-    <!-- 问答 -->
-    <div v-else-if="tab === 'chat'" class="chat-view">
-      <div class="chat-bar">
-        <span class="chat-title">知海问答</span>
-        <button
-          class="src-btn"
-          :class="{ on: sourceCount > 0 }"
-          :disabled="sourceCount === 0"
-          @click="showSources = true"
-        >
-          <Icon name="search" :size="14" />
-          溯源 {{ sourceCount }}
-        </button>
-      </div>
-
-      <ChatStream class="chat-flex" @cite="onCite" />
-
-      <Composer class="m-composer" @send="send" />
-    </div>
-
-    <!-- 我的 -->
-    <main v-else class="scroll center">
-      <div class="empty-me">
-        <Icon name="user" :size="28" />
-        <p>「我的」功能即将上线</p>
-      </div>
-    </main>
+    </Transition>
 
     <!-- 溯源底部弹层 -->
     <div v-if="showSources" class="sheet-mask" @click="showSources = false">
@@ -475,5 +488,20 @@ const kbCards = computed(() => {
 @keyframes sheetUp {
   from { transform: translateY(100%); }
   to { transform: translateY(0); }
+}
+
+/* tab 切换过渡：轻微上滑淡入，kb ↔ chat 等都顺 */
+.tab-enter-active,
+.tab-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+.tab-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.tab-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 </style>
