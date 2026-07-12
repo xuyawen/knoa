@@ -185,10 +185,12 @@ class AgenticRAGAgent:
             self.db.add(ChatMessage(session_id=session.id, role="user", content=question))
             await self.db.flush()
 
-            try:
-                await self.redis.incr_trending(question)
-            except Exception:
-                pass
+            # ponytail: 只统计真实业务提问，过滤打招呼/闲聊/天气等，避免污染"高频问题"
+            if not _should_skip_retrieval(question):
+                try:
+                    await self.redis.incr_trending(question)
+                except Exception:
+                    pass
 
             all_sources: list[dict] = []
             final_answer_text: str = ""
