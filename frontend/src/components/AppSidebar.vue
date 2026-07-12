@@ -56,9 +56,11 @@ onMounted(() => {
         <span class="nav-name">问问知海</span>
       </router-link>
       <router-link to="/knowledge-bases" class="nav-item plain" active-class="active">
+        <span class="nav-icon"><Icon name="library" :size="18" /></span>
         <span class="nav-name">文档管理</span>
       </router-link>
       <router-link to="/history" class="nav-item plain" active-class="active">
+        <span class="nav-icon"><Icon name="clock" :size="18" /></span>
         <span class="nav-name">问答记录</span>
       </router-link>
     </nav>
