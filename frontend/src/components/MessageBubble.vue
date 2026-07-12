@@ -40,8 +40,38 @@ function stepIcon(action: string): string {
     case 'direct_answer': return 'check'
     case 'retrieve': return 'search'
     case 'supplement_search': return 'refresh'
-    default: return 'sparkle'
+    default: return 'alert-circle'  // 未知/异常动作用警告图标
   }
+}
+
+/** 把内部 action 名转成用户可读的中文标签 */
+function stepActionLabel(action: string): string {
+  switch (action) {
+    case 'direct_answer': return '直接回答'
+    case 'retrieve': return '检索知识库'
+    case 'supplement_search': return '补充检索'
+    default: return '未知操作'
+  }
+}
+
+/** 判断某个 thinking step 是否属于异常/未知动作 */
+function isAbnormalStep(s: import('@/types/api').ThinkingStep): boolean {
+  return !['direct_answer', 'retrieve', 'supplement_search'].includes(s.action)
+}
+
+/** 脱敏 detail 文本：把内部工具名等实现细节隐藏 */
+function sanitizeDetail(detail: string): string {
+  if (!detail) return ''
+  // 匹配类似 "执行 xxx"、"调用 xxx" 这类包含疑似内部标识符的文本
+  const internalPattern = /(?:执行|调用)\s+[a-zA-Z_][a-zA-Z0-9_]*/
+  if (internalPattern.test(detail)) {
+    return '系统在判断处理策略时遇到了异常状态，已自动降级为直接回答'
+  }
+  // 如果 detail 太长（>60字符）且包含 raw_reasoning 特征，也截断
+  if (detail.length > 80) {
+    return detail.slice(0, 76) + '...'
+  }
+  return detail
 }
 </script>
 
@@ -71,10 +101,18 @@ function stepIcon(action: string): string {
           <Icon :name="showSteps ? 'chevron-down' : 'chevron-right'" :size="12" />
         </button>
         <div v-show="showSteps" class="steps-list">
-          <div v-for="(s, i) in steps" :key="i" class="step-item">
+          <div
+            v-for="(s, i) in steps"
+            :key="i"
+            class="step-item"
+            :class="{ abnormal: isAbnormalStep(s) }"
+          >
             <span class="step-num">{{ s.step }}</span>
             <Icon :name="stepIcon(s.action)" :size="13" :class="'step-icon ' + s.action" />
-            <span class="step-text">{{ s.detail }}</span>
+            <span class="step-text">
+              <span class="step-action">{{ stepActionLabel(s.action) }}</span>
+              <span v-if="sanitizeDetail(s.detail)" class="step-detail">{{ sanitizeDetail(s.detail) }}</span>
+            </span>
           </div>
         </div>
       </div>
@@ -284,12 +322,39 @@ function stepIcon(action: string): string {
 .step-icon.direct_answer { color: #22c55e; }   /* 绿：直接答 */
 .step-icon.retrieve { color: var(--brand); }     /* 蓝：检索 */
 .step-icon.supplement_search { color: #f59e0b; } /* 橙：补检 */
+/* 未匹配到已知动作 → 警告色（异常步骤） */
+.step-icon:not(.direct_answer):not(.retrieve):not(.supplement_search) {
+  color: var(--warning, #f59e0b);
+}
 .step-text {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.step-action {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.step-detail {
+  font-size: 11.5px;
+  color: var(--text-placeholder);
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* ── 异常步骤视觉区分 ── */
+.step-item.abnormal {
+  background: color-mix(in srgb, var(--warning, #f59e0b) 8%, transparent);
+  border-radius: 6px;
+  padding: 5px 8px !important;
+  margin: 2px -4px;
+  border-left: 2.5px solid var(--warning, #f59e0b);
+}
+.step-item.abnormal .step-action {
+  color: var(--warning, #f59e0b);
 }
 /* 收起态 */
 .collapsed .steps-list { display: none; }
