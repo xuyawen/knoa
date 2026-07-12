@@ -138,7 +138,7 @@ class WebSearcher:
     # ── BoCha 博查 web-search（需 key，中文检索质量最佳）──
     async def _search_bocha(self, query: str, max_results: int) -> list[dict]:
         resp = await self._client.post(
-            "https://api.bocha.ai/v1/web-search",
+            "https://api.bocha.cn/v1/web-search",
             headers={
                 "Authorization": f"Bearer {settings.BOCHA_API_KEY}",
                 "Content-Type": "application/json",
@@ -151,7 +151,12 @@ class WebSearcher:
             },
         )
         resp.raise_for_status()
-        return self._parse_bocha(resp.json(), max_results)
+        data = resp.json()
+        # 博查在 key 无效/配额耗尽时仍返回 HTTP 200，需靠顶层 code 判断真实成败，
+        # 否则会把空数据误判为成功，阻断向 Tavily/DDG 的降级。
+        if data.get("code") not in (200, None):
+            raise RuntimeError(f"BoCha error code={data.get('code')} msg={data.get('msg')}")
+        return self._parse_bocha(data, max_results)
 
     @staticmethod
     def _parse_bocha(data: dict, max_results: int) -> list[dict]:
