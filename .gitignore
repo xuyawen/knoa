@@ -22,3 +22,7 @@ __pycache__/
 
 # local memory (do not sync)
 .workbuddy/
+
+# KB seed markdown — NOT authoritative, DB (pgvector) is the source of truth.
+# These files live on disk locally for re-ingest only; never track in git.
+backend/app/data/markdown/
