@@ -94,7 +94,7 @@ defineProps<{ name: string; size?: number }>()
       <path d="M4 7h16M4 12h16M4 17h16" />
     </template>
     <template v-else-if="name === 'fire'">
-      <path d="M12 3c1 3-1.5 4.5-1.5 7A2.5 2.5 0 0013 12c.5-1 .5-2 0-3 2 1.5 3.5 4 3.5 6.5A5.5 5.5 0 1112 3z" />
+      <path fill="currentColor" d="M12 3c1 3-1.5 4.5-1.5 7A2.5 2.5 0 0013 12c.5-1 .5-2 0-3 2 1.5 3.5 4 3.5 6.5A5.5 5.5 0 1112 3z" />
     </template>
     <template v-else-if="name === 'check'">
       <path d="M5 13l4 4L19 7" />
