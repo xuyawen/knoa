@@ -3,6 +3,7 @@ import type {
   SSEEvent,
   TrendingItem,
   DocumentItem,
+  SourceDetail,
 } from '@/types/api'
 
 export async function getKnowledgeBases(): Promise<KnowledgeBasesResponse> {
@@ -39,6 +40,13 @@ export async function uploadDocument(
     const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
     throw new Error(err.detail || `HTTP ${resp.status}`)
   }
+  return resp.json()
+}
+
+/** 溯源详情：按 chunk 的 UUID 取原文。 */
+export async function getSourceDetail(chunkId: string): Promise<SourceDetail> {
+  const resp = await fetch(`/api/sources/${chunkId}`)
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }
 

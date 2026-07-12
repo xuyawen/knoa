@@ -29,10 +29,19 @@ export interface DocumentItem {
 
 export interface SourceItem {
   id: number
+  chunkId: string
   kb: string
   title: string
   snippet: string
   confidence: number
+}
+
+export interface SourceDetail {
+  id: string
+  title: string
+  kb: string
+  content: string
+  chunkIndex: number
 }
 
 /** Agent 决策步骤（Agentic RAG 的 thinking 事件） */

@@ -1,7 +1,7 @@
 import { defineStore, acceptHMRUpdate } from 'pinia'
 import { ref } from 'vue'
-import { streamAsk, submitFeedback, deleteFeedback } from '@/api'
-import type { ChatMessage, SourceItem } from '@/types/api'
+import { streamAsk, submitFeedback, deleteFeedback, getSourceDetail } from '@/api'
+import type { ChatMessage, SourceItem, SourceDetail } from '@/types/api'
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
@@ -9,6 +9,8 @@ export const useChatStore = defineStore('chat', () => {
   const streaming = ref(false)
   const sessionId = ref<string | null>(null)
   const activeSourceId = ref<number | null>(null)
+  const activeSourceDetail = ref<SourceDetail | null>(null)
+  const loadingSource = ref(false)
 
   async function ask(question: string, knowledgeBase?: string | null) {
     if (streaming.value || !question.trim()) return
@@ -70,6 +72,21 @@ export const useChatStore = defineStore('chat', () => {
     activeSourceId.value = null
   }
 
+  async function openSource(chunkId: string) {
+    loadingSource.value = true
+    try {
+      activeSourceDetail.value = await getSourceDetail(chunkId)
+    } catch (e) {
+      console.error('加载溯源详情失败', e)
+    } finally {
+      loadingSource.value = false
+    }
+  }
+
+  function closeSourceDetail() {
+    activeSourceDetail.value = null
+  }
+
   // 反馈闭环：乐观更新本地状态 + 调接口（upsert / 取消）
   async function rateMessage(messageId: string | undefined, rating: 'up' | 'down') {
     if (!messageId) return
@@ -86,7 +103,9 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  return { messages, sources, streaming, sessionId, activeSourceId, ask, locateSource, clearActiveSource, rateMessage }
+  return { messages, sources, streaming, sessionId, activeSourceId,
+    activeSourceDetail, loadingSource,
+    ask, locateSource, clearActiveSource, openSource, closeSourceDetail, rateMessage }
 })
 
 // 支持 Pinia store 热更新（否则改 store 文件后 live 实例不会刷新，导致方法缺失）

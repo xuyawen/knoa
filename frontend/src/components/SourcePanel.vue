@@ -2,6 +2,7 @@
 import { useChatStore } from '@/stores/chat'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import SourceCard from './SourceCard.vue'
+import SourceDetailDrawer from './SourceDetailDrawer.vue'
 import HealthBar from './HealthBar.vue'
 import TrendingList from './TrendingList.vue'
 
@@ -28,6 +29,7 @@ const emit = defineEmits<{
         :source="s"
         :active="chat.activeSourceId === s.id"
         @locate="emit('locate', $event)"
+        @open="chat.openSource($event)"
       />
     </div>
 
@@ -52,6 +54,12 @@ const emit = defineEmits<{
       <div class="section-title">今日高频</div>
       <TrendingList @ask="emit('ask', $event)" />
     </div>
+
+    <SourceDetailDrawer
+      :detail="chat.activeSourceDetail"
+      :loading="chat.loadingSource"
+      @close="chat.closeSourceDetail()"
+    />
   </div>
 </template>
 

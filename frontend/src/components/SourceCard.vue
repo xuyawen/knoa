@@ -3,7 +3,10 @@ import type { SourceItem } from '@/types/api'
 import Icon from './Icon.vue'
 
 defineProps<{ source: SourceItem }>()
-const emit = defineEmits<{ (e: 'locate', id: number): void }>()
+const emit = defineEmits<{
+  (e: 'locate', id: number): void
+  (e: 'open', chunkId: string): void
+}>()
 </script>
 
 <template>
@@ -16,7 +19,7 @@ const emit = defineEmits<{ (e: 'locate', id: number): void }>()
     </div>
     <div class="title">{{ source.title }}</div>
     <div class="snippet">{{ source.snippet }}</div>
-    <div class="foot">
+    <div class="foot" @click.stop="emit('open', source.chunkId)">
       <span class="loc">查看溯源</span>
       <Icon name="external" :size="13" />
     </div>
