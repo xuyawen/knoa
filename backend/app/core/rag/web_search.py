@@ -3,10 +3,11 @@
 设计约束：项目 venv 无法 pip 安装第三方包，因此只依赖已安装的 httpx
 （与 LLM/Embedding 调用同源），并尽量用标准库做结果解析。
 
-Provider 策略：
-  - 优先 Tavily API（需 TAVILY_API_KEY，专为 LLM 检索设计，质量最稳）
-  - 未配置 key 时，回退 DuckDuckGo HTML 接口（无需 key，httpx + 正则解析）
-  - 任一 provider 失败都不影响主链路：返回空列表，由调用方决定降级
+Provider 策略（优先级从高到低）：
+  - BoCha 博查 web-search（需 BOCHA_API_KEY，中文/国内信息覆盖好，质量最稳）
+  - Tavily API（需 TAVILY_API_KEY，专为 LLM 检索设计）
+  - 二者均无 key 时，回退 DuckDuckGo HTML 接口（无需 key，httpx + 正则解析）
+  - 任一 provider 失败都自动降级到下一个，全失败才返回空列表
 
 返回结构统一为 SourceItemOut 兼容的 dict：
   {"id": int, "title": str, "url": str, "snippet": str,
@@ -46,11 +47,16 @@ class WebSearcher:
         await self._client.aclose()
 
     async def search(self, query: str, max_results: int = 5) -> list[dict]:
-        """返回联网检索结果（统一结构）。异常时返回空列表，不抛出。"""
+        """返回联网检索结果（统一结构）。provider 依优先级尝试，异常逐级降级，全失败返回空列表。"""
+        if settings.BOCHA_API_KEY:
+            try:
+                return await self._search_bocha(query, max_results)
+            except Exception as e:  # BoCha 失败降级到 Tavily / DDG，保证联网能力可用
+                print(f"[web_search] BoCha failed, fallback: {e}")
         if settings.TAVILY_API_KEY:
             try:
                 return await self._search_tavily(query, max_results)
-            except Exception as e:  # Tavily 失败降级到 DDG，保证联网能力可用
+            except Exception as e:
                 print(f"[web_search] Tavily failed, fallback to DDG: {e}")
         try:
             return await self._search_ddg(query, max_results)
@@ -120,6 +126,53 @@ class WebSearcher:
                     "id": i,
                     "title": title,
                     "url": _extract_ddg_url(href),
+                    "snippet": snippet,
+                    "source_type": "web",
+                    "kb": "web",
+                    "chunk_id": f"web:{i}",
+                }
+            )
+        return out
+
+
+    # ── BoCha 博查 web-search（需 key，中文检索质量最佳）──
+    async def _search_bocha(self, query: str, max_results: int) -> list[dict]:
+        resp = await self._client.post(
+            "https://api.bocha.ai/v1/web-search",
+            headers={
+                "Authorization": f"Bearer {settings.BOCHA_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "query": query,
+                "count": max_results,
+                "freshness": "noLimit",
+                "summary": True,
+            },
+        )
+        resp.raise_for_status()
+        return self._parse_bocha(resp.json(), max_results)
+
+    @staticmethod
+    def _parse_bocha(data: dict, max_results: int) -> list[dict]:
+        items = data.get("data", {}).get("webPages", {}).get("value", [])
+        out: list[dict] = []
+        for i, it in enumerate(items[:max_results], 1):
+            title = (it.get("name") or it.get("title") or "").strip()
+            if not title:
+                continue
+            url = it.get("url") or ""
+            snippet = (
+                it.get("summary")
+                or it.get("snippet")
+                or it.get("description")
+                or (it.get("markdown") or "")
+            )[:300]
+            out.append(
+                {
+                    "id": i,
+                    "title": title,
+                    "url": url,
                     "snippet": snippet,
                     "source_type": "web",
                     "kb": "web",

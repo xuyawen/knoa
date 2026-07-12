@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "deepseek-chat"
     LLM_TEMPERATURE: float = 0.3
     LLM_MAX_TOKENS: int = 2000
-    # 联网搜索（web_search 工具）：优先 Tavily，留空则走无 key 的 DuckDuckGo
+    # 联网搜索（web_search 工具）：优先 BoCha（中文检索更准），其次 Tavily，
+    # 二者均留空则走无 key 的 DuckDuckGo HTML 兜底
+    BOCHA_API_KEY: str = ""
     TAVILY_API_KEY: str = ""
     # LangSmith (M4 启用)
     LANGSMITH_TRACING: bool = False
