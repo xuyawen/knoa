@@ -1,0 +1,39 @@
+from datetime import datetime
+
+from pydantic import Field
+
+from app.models.knowledge import CamelModel
+
+
+class LoginIn(CamelModel):
+    username: str
+    password: str
+
+
+class UserOut(CamelModel):
+    id: str
+    username: str
+    display_name: str | None = None
+    role: str                                   # admin | editor | viewer
+    is_active: bool = True
+    created_at: datetime | None = None
+
+
+class TokenOut(CamelModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
+class UserCreateIn(CamelModel):
+    username: str = Field(..., min_length=2, max_length=64)
+    password: str = Field(..., min_length=6, max_length=128)
+    display_name: str | None = None
+    role: str = "viewer"                         # admin | editor | viewer
+
+
+class UserUpdateIn(CamelModel):
+    display_name: str | None = None
+    role: str | None = None
+    is_active: bool | None = None
+    password: str | None = None

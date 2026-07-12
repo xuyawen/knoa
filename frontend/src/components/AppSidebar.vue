@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useAuthStore } from '@/stores/auth'
 import Icon from './Icon.vue'
 
 const route = useRoute()
+const router = useRouter()
 const knowledge = useKnowledgeStore()
+const auth = useAuthStore()
+
+const ROLE_LABEL: Record<string, string> = { admin: '管理员', editor: '编辑', viewer: '访客' }
+
+function onLogout() {
+  auth.logout()
+  router.replace('/login')
+}
 
 defineProps<{
   collapsed?: boolean
@@ -63,6 +73,10 @@ onMounted(() => {
         <span class="nav-icon"><Icon name="clock" :size="18" /></span>
         <span class="nav-name">问答记录</span>
       </router-link>
+      <router-link v-if="auth.isAdmin" to="/users" class="nav-item plain" active-class="active">
+        <span class="nav-icon"><Icon name="users" :size="18" /></span>
+        <span class="nav-name">用户管理</span>
+      </router-link>
     </nav>
 
     <!-- 知识库导航 -->
@@ -83,13 +97,13 @@ onMounted(() => {
 
     <!-- 底部用户卡 -->
     <div class="user-card">
-      <div class="avatar">运</div>
+      <div class="avatar">{{ (auth.user?.displayName || auth.user?.username || '?').charAt(0) }}</div>
       <div class="user-info">
-        <span class="user-name">运营小王</span>
-        <span class="user-role">运营专家</span>
+        <span class="user-name">{{ auth.user?.displayName || auth.user?.username }}</span>
+        <span class="user-role">{{ ROLE_LABEL[auth.user?.role || ''] || auth.user?.role }}</span>
       </div>
-      <button class="settings" title="设置">
-        <Icon name="gear" :size="16" />
+      <button class="settings" title="退出登录" @click="onLogout">
+        <Icon name="logout" :size="16" />
       </button>
     </div>
   </aside>

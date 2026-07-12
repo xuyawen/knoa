@@ -7,22 +7,23 @@ import type {
   ChatSession,
   SessionDetail,
 } from '@/types/api'
+import { authHeaders } from './http'
 
 export async function getKnowledgeBases(): Promise<KnowledgeBasesResponse> {
-  const resp = await fetch('/api/knowledge-bases')
+  const resp = await fetch('/api/knowledge-bases', { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }
 
 export async function getTrending(): Promise<TrendingItem[]> {
-  const resp = await fetch('/api/trending')
+  const resp = await fetch('/api/trending', { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }
 
 /** 列出某知识库下的文档。 */
 export async function getDocuments(kbId: string): Promise<DocumentItem[]> {
-  const resp = await fetch(`/api/knowledge-bases/${kbId}/documents`)
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/documents`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }
@@ -35,7 +36,7 @@ export async function uploadDocument(
 ): Promise<DocumentItem> {
   const resp = await fetch(`/api/knowledge-bases/${kbId}/documents`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ filename, content }),
   })
   if (!resp.ok) {
@@ -47,14 +48,14 @@ export async function uploadDocument(
 
 /** 溯源详情：按 chunk 的 UUID 取原文。 */
 export async function getSourceDetail(chunkId: string): Promise<SourceDetail> {
-  const resp = await fetch(`/api/sources/${chunkId}`)
+  const resp = await fetch(`/api/sources/${chunkId}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }
 
 /** 会话列表。 */
 export async function getSessions(): Promise<ChatSession[]> {
-  const resp = await fetch('/api/sessions')
+  const resp = await fetch('/api/sessions', { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }
@@ -63,7 +64,7 @@ export async function getSessions(): Promise<ChatSession[]> {
 export async function createSession(): Promise<ChatSession> {
   const resp = await fetch('/api/sessions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ title: null }),
   })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
@@ -72,7 +73,7 @@ export async function createSession(): Promise<ChatSession> {
 
 /** 拉取某会话的全部消息。 */
 export async function getSession(id: string): Promise<SessionDetail> {
-  const resp = await fetch(`/api/sessions/${id}`)
+  const resp = await fetch(`/api/sessions/${id}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }
@@ -81,7 +82,7 @@ export async function getSession(id: string): Promise<SessionDetail> {
 export async function submitFeedback(messageId: string, rating: 'up' | 'down') {
   const resp = await fetch('/api/feedback', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ messageId, rating }),
   })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
@@ -90,7 +91,7 @@ export async function submitFeedback(messageId: string, rating: 'up' | 'down') {
 
 /** 取消对某条回答的反馈。 */
 export async function deleteFeedback(messageId: string) {
-  const resp = await fetch(`/api/feedback/${messageId}`, { method: 'DELETE' })
+  const resp = await fetch(`/api/feedback/${messageId}`, { method: 'DELETE', headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }
@@ -114,7 +115,7 @@ export async function* streamAsk(
   try {
     const resp = await fetch('/api/ask', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ question, knowledgeBase, sessionId }),
       signal: controller.signal,
     })

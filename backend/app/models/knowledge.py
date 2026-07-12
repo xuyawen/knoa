@@ -64,3 +64,9 @@ class DocumentOut(CamelModel):
 class DocumentUploadIn(CamelModel):
     filename: str
     content: str
+
+
+class KBCreateIn(CamelModel):
+    name: str
+    icon: str | None = None
+    description: str | None = None

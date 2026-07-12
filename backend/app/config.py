@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 1440   # 24h
     PBKDF2_ITERATIONS: int = 100_000
+    # 初始管理员（首次启动、且无任何用户时自动创建；生产请改 .env）
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = "admin123"
+    ADMIN_DISPLAY_NAME: str = "系统管理员"
     # App
     APP_ENV: str = "development"
     CORS_ORIGINS: str = "http://localhost:5173"

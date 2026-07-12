@@ -95,6 +95,28 @@ export interface KnowledgeBasesResponse {
   health: HealthItem[]
 }
 
+export interface UserOut {
+  id: string
+  username: string
+  displayName: string | null
+  role: string         // admin | editor | viewer
+  isActive: boolean
+  createdAt: string | null
+}
+
+export interface TokenOut {
+  accessToken: string
+  tokenType: string
+  user: UserOut
+}
+
+export interface UserCreate {
+  username: string
+  password: string
+  displayName?: string | null
+  role?: string       // 默认 viewer
+}
+
 export type SSEEvent =
   | { event: 'thinking'; data: ThinkingStep }
   | { event: 'sources'; data: SourceItem[] }
