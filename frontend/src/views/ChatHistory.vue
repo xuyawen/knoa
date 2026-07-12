@@ -103,16 +103,16 @@ onMounted(() => chat.loadSessions())
 .session-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-width: 560px;
+  gap: 6px;
+  width: 100%;
 }
 
 .session-item {
   text-align: left;
-  padding: 16px 18px;
+  padding: 11px 14px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   width: 100%;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
@@ -133,7 +133,7 @@ onMounted(() => chat.loadSessions())
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .session-meta {
   display: flex;
