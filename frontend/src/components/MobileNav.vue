@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import Icon from './Icon.vue'
 
 const tabs = [
@@ -8,7 +7,7 @@ const tabs = [
   { key: 'chat', label: '问答', icon: 'chat' },
   { key: 'me', label: '我的', icon: 'user' },
 ]
-const active = ref('home')
+const active = defineModel<string>({ default: 'home' })
 </script>
 
 <template>

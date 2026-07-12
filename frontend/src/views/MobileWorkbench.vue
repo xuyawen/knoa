@@ -1,22 +1,43 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useChatStore } from '@/stores/chat'
 import AppSidebar from '@/components/AppSidebar.vue'
 import Icon from '@/components/Icon.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import KnowledgeCard from '@/components/KnowledgeCard.vue'
 import MobileNav from '@/components/MobileNav.vue'
+import ChatStream from '@/components/ChatStream.vue'
+import Composer from '@/components/Composer.vue'
+import SourcePanel from '@/components/SourcePanel.vue'
 
 const knowledge = useKnowledgeStore()
+const chat = useChatStore()
+
 const drawer = ref(false)
+const tab = ref('home')
 const question = ref('')
+const showSources = ref(false)
+
+const sourceCount = computed(() => chat.sources.length)
 
 async function submit() {
   const q = question.value.trim()
   if (!q) return
-  await knowledge.load()
-  console.log('ask:', q)
   question.value = ''
+  await knowledge.load()
+  send(q)
+}
+
+function send(q: string) {
+  chat.ask(q, knowledge.activeBase)
+  tab.value = 'chat'
+  showSources.value = false
+}
+
+function onCite(id: number) {
+  chat.locateSource(id)
+  if (sourceCount.value > 0) showSources.value = true
 }
 
 const kbCards = computed(() => {
@@ -58,9 +79,8 @@ const kbCards = computed(() => {
       </div>
     </header>
 
-    <!-- 滚动内容 -->
-    <main class="scroll">
-      <!-- 问候 + 提问卡 -->
+    <!-- 首页 -->
+    <main v-if="tab === 'home'" class="scroll">
       <div class="greet">
         <h2>你好，运营小王</h2>
         <p>向知海提问，获取带溯源的运营答案</p>
@@ -77,7 +97,6 @@ const kbCards = computed(() => {
         </button>
       </form>
 
-      <!-- 知识库网格 -->
       <div class="sec-title">知识库</div>
       <div class="kb-grid">
         <KnowledgeCard
@@ -90,7 +109,6 @@ const kbCards = computed(() => {
         />
       </div>
 
-      <!-- 今日高频 -->
       <div class="sec-title">今日高频</div>
       <ul class="trend">
         <li v-for="(t, i) in knowledge.trending" :key="i">
@@ -101,7 +119,65 @@ const kbCards = computed(() => {
       </ul>
     </main>
 
-    <MobileNav />
+    <!-- 知识库 -->
+    <main v-else-if="tab === 'kb'" class="scroll">
+      <div class="sec-title">知识库</div>
+      <div class="kb-grid">
+        <KnowledgeCard
+          v-for="c in kbCards"
+          :key="c.name"
+          :icon="c.icon"
+          :name="c.name"
+          :meta="c.meta"
+          :alert="c.alert"
+        />
+      </div>
+    </main>
+
+    <!-- 问答 -->
+    <div v-else-if="tab === 'chat'" class="chat-view">
+      <div class="chat-bar">
+        <span class="chat-title">知海问答</span>
+        <button
+          class="src-btn"
+          :class="{ on: sourceCount > 0 }"
+          :disabled="sourceCount === 0"
+          @click="showSources = true"
+        >
+          <Icon name="search" :size="14" />
+          溯源 {{ sourceCount }}
+        </button>
+      </div>
+
+      <ChatStream class="chat-flex" @cite="onCite" />
+
+      <Composer class="m-composer" @send="send" />
+    </div>
+
+    <!-- 我的 -->
+    <main v-else class="scroll center">
+      <div class="empty-me">
+        <Icon name="user" :size="28" />
+        <p>「我的」功能即将上线</p>
+      </div>
+    </main>
+
+    <!-- 溯源底部弹层 -->
+    <div v-if="showSources" class="sheet-mask" @click="showSources = false">
+      <div class="sheet" @click.stop>
+        <div class="sheet-head">
+          <span>答案溯源</span>
+          <button class="sheet-close" @click="showSources = false">
+            <Icon name="chevron-down" :size="18" />
+          </button>
+        </div>
+        <div class="sheet-body">
+          <SourcePanel @locate="onCite" @ask="send" />
+        </div>
+      </div>
+    </div>
+
+    <MobileNav v-model="tab" />
   </div>
 </template>
 
@@ -166,6 +242,19 @@ const kbCards = computed(() => {
   flex: 1;
   overflow-y: auto;
   padding: 20px 20px calc(90px + env(safe-area-inset-bottom));
+}
+.scroll.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.empty-me {
+  text-align: center;
+  color: var(--text-placeholder);
+}
+.empty-me p {
+  margin-top: 8px;
+  font-size: 13px;
 }
 .greet {
   margin-bottom: 14px;
@@ -268,5 +357,123 @@ const kbCards = computed(() => {
   font-size: 12px;
   color: var(--text-secondary);
   flex-shrink: 0;
+}
+
+/* 问答视图：顶栏 + 对话流 + 输入框，底部留出导航高度 */
+.chat-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: calc(62px + env(safe-area-inset-bottom));
+}
+.chat-bar {
+  flex-shrink: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.chat-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.src-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+  color: var(--text-placeholder);
+  font-size: 12px;
+  font-weight: 500;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.src-btn.on {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+.src-btn:disabled {
+  opacity: 0.5;
+}
+/* ChatStream 在移动端铺满，内部滚动 */
+.chat-flex {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.m-composer {
+  flex-shrink: 0;
+}
+
+/* 溯源底部弹层 */
+.sheet-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  animation: fade 0.2s ease;
+}
+.sheet {
+  width: 100%;
+  max-height: 78%;
+  background: var(--bg-page);
+  border-radius: 16px 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: sheetUp 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sheet-head {
+  flex-shrink: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.sheet-close {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+/* 让桌面端 SourcePanel 在弹层里铺满 */
+.sheet-body :deep(.panel) {
+  width: 100%;
+  min-width: 0;
+  border-left: none;
+  border-radius: 0;
+  overflow: visible;
+  padding: 16px;
+}
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
 }
 </style>
