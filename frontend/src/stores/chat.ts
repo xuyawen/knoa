@@ -1,4 +1,4 @@
-import { defineStore } from 'pinia'
+import { defineStore, acceptHMRUpdate } from 'pinia'
 import { ref } from 'vue'
 import { streamAsk, submitFeedback, deleteFeedback } from '@/api'
 import type { ChatMessage, SourceItem } from '@/types/api'
@@ -88,3 +88,8 @@ export const useChatStore = defineStore('chat', () => {
 
   return { messages, sources, streaming, sessionId, activeSourceId, ask, locateSource, clearActiveSource, rateMessage }
 })
+
+// 支持 Pinia store 热更新（否则改 store 文件后 live 实例不会刷新，导致方法缺失）
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useChatStore, import.meta.hot))
+}

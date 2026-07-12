@@ -1,4 +1,4 @@
-import { defineStore } from 'pinia'
+import { defineStore, acceptHMRUpdate } from 'pinia'
 import { ref } from 'vue'
 import { getKnowledgeBases, getTrending } from '@/api'
 import type { KnowledgeBase, HealthItem, TrendingItem } from '@/types/api'
@@ -32,3 +32,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
 
   return { bases, health, trending, activeBase, loaded, load, selectBase }
 })
+
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useKnowledgeStore, import.meta.hot))
+}
