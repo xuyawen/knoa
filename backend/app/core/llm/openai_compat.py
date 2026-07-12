@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI
 
-from app.core.llm.base import LLMConfig
+from app.core.llm.base import LLMConfig, ToolCallResult
 
 try:
     from langsmith import traceable
@@ -78,3 +79,61 @@ class OpenAICompatProvider:
         msg = response.choices[0].message
         # 只返回真正的回答 content，丢弃 reasoning_content（推理过程不对外暴露）
         return (getattr(msg, "content", "") or "").strip()
+
+    @traceable(name="llm_tool_call", tags=["llm", "tool"])
+    async def tool_call(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        temperature: float | None = None,
+    ) -> ToolCallResult:
+        """结构化 function calling — 让 LLM 选择并返回一个工具调用。
+
+        Args:
+            messages: 对话历史（含 system prompt）
+            tools: OpenAI tool schema 列表
+            temperature: 覆盖默认温度（agent 决策建议偏低，0.1~0.3）
+
+        Returns:
+            ToolCallResult: name / arguments(解析后dict) / raw_text
+        """
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",  # LLM 自主决定是否调工具
+            temperature=temperature or 0.2,  # agent 决策用更低温度，更确定
+            max_tokens=self.max_tokens,
+        )
+        choice = response.choices[0]
+        msg = choice.message
+
+        # 提取 reasoning_text（如有），用于前端展示"思考过程"
+        raw_text = ""
+        try:
+            extra = getattr(msg, "__pydantic_extra__", {}) or {}
+            raw_text = extra.get("reasoning_content", "") or ""
+        except AttributeError:
+            pass
+
+        # 有工具调用 → 返回结构化结果
+        if getattr(msg, "tool_calls", None) and msg.tool_calls:
+            tc = msg.tool_calls[0]
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeArgsError:
+                args = {"raw": tc.function.arguments or ""}
+            return ToolCallResult(
+                name=tc.function.name,
+                arguments=args,
+                raw_text=raw_text,
+            )
+
+        # 没有工具调用 → LLM 直接回答（说明问题不需要检索）
+        content = (getattr(msg, "content", "") or "").strip()
+        return ToolCallResult(
+            name="direct_answer",
+            arguments={"content": content},
+            raw_text=raw_text,
+        )

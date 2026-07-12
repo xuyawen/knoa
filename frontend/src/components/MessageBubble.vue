@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ChatMessage } from '@/types/api'
 import { useChatStore } from '@/stores/chat'
 import Icon from './Icon.vue'
@@ -10,6 +10,10 @@ const props = defineProps<{ message: ChatMessage }>()
 const emit = defineEmits<{ (e: 'cite', id: number): void }>()
 
 const chat = useChatStore()
+
+// Agent 决策步骤（Agentic RAG thinking events）
+const steps = computed(() => (props.message.thinkingSteps || []) as import('@/types/api').ThinkingStep[])
+const showSteps = ref(true)  // 决策链默认展开
 
 // 占位消息已创建但尚未收到首个 token 时，显示卡片内"正在思考"动画
 const isThinking = computed(
@@ -30,6 +34,15 @@ const parts = computed(() => {
   if (last < props.message.content.length) out.push({ text: props.message.content.slice(last) })
   return out
 })
+
+function stepIcon(action: string): string {
+  switch (action) {
+    case 'direct_answer': return 'check'
+    case 'retrieve': return 'search'
+    case 'supplement_search': return 'refresh'
+    default: return 'sparkle'
+  }
+}
 </script>
 
 <template>
@@ -50,8 +63,24 @@ const parts = computed(() => {
         </span>
       </div>
 
+      <!-- Agent 决策链（Agentic RAG thinking steps） -->
+      <div v-if="steps.length" class="agent-steps" :class="{ collapsed: !showSteps }">
+        <button class="steps-toggle" @click="showSteps = !showSteps">
+          <Icon name="sparkle" :size="12" />
+          <span>思考过程 ({{ steps.length }}步)</span>
+          <Icon :name="showSteps ? 'chevron-down' : 'chevron-right'" :size="12" />
+        </button>
+        <div v-show="showSteps" class="steps-list">
+          <div v-for="(s, i) in steps" :key="i" class="step-item">
+            <span class="step-num">{{ s.step }}</span>
+            <Icon :name="stepIcon(s.action)" :size="13" :class="'step-icon ' + s.action" />
+            <span class="step-text">{{ s.detail }}</span>
+          </div>
+        </div>
+      </div>
+
       <!-- 思考态：卡片内的跳动点 -->
-      <div v-if="isThinking" class="thinking">
+      <div v-else-if="isThinking" class="thinking">
         <span class="dot" /><span class="dot" /><span class="dot" />
       </div>
 
@@ -201,4 +230,67 @@ const parts = computed(() => {
     transform: translateY(-5px);
   }
 }
+
+/* ── Agent 决策链 (Agentic RAG thinking steps) ── */
+.agent-steps {
+  margin-bottom: 12px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--brand) 4%, transparent);
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+.steps-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.steps-toggle:hover {
+  color: var(--brand);
+}
+.steps-list {
+  padding: 0 12px 10px;
+}
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.step-num {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-subtle);
+  color: var(--text-placeholder);
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.step-icon { flex-shrink: 0; }
+.step-icon.direct_answer { color: #22c55e; }   /* 绿：直接答 */
+.step-icon.retrieve { color: var(--brand); }     /* 蓝：检索 */
+.step-icon.supplement_search { color: #f59e0b; } /* 橙：补检 */
+.step-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 收起态 */
+.collapsed .steps-list { display: none; }
 </style>

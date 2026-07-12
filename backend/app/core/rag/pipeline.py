@@ -1,153 +1,57 @@
-import re
-import uuid
+"""RAG Pipeline — 对外入口，内部委托给 AgenticRAGAgent。
+
+这个模块保留是为了：
+1. 保持 ask router 的 import 路径不变 (app.core.rag.pipeline)
+2. 作为传统 RAG → Agentic RAG 的适配层
+3. 未来如果要切回传统模式（性能对比），只需改这里
+
+实际逻辑已全部迁移到 agent.py。
+"""
+
 from collections.abc import AsyncIterator
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.llm.base import LLMProvider
+from app.core.rag.agent import AgenticRAGAgent
 from app.core.rag.retriever import HybridRetriever
 from app.core.store.redis_store import RedisStore
-from app.db import ChatMessage, ChatSession
-from app.models.knowledge import SourceItemOut
-
-try:
-    from langsmith import traceable
-except ImportError:
-    def traceable(**kwargs):
-        def decorator(fn):
-            return fn
-        return decorator
-
-
-# 打招呼/闲聊模式匹配：命中时跳过 RAG 检索，直接让 LLM 友好回复
-# 注意：问候字用 [..]+ 量词，可匹配"你好"(你+好)这类连续组合；
-# 字符类 [..] 本身只匹配单个字符，会导致"你好"无法整体命中。
-_GREETING_PATTERNS = [
-    r"^[你好嗨嘿哈哟]+[吗嘛呢吧呀啊哎哦~！!?？\.。,，\s]*$",
-    r"^(hi|hello|hey|hii|hallo|哈喽|哈佬)[!！?？~～\s]*$",
-    r"^在[吗嘛]$",
-    r"^[好的?]$",
-    r"^(谢谢|感谢|多谢|thx|thanks|thank you)[!！?？\s]*$",
-    r"^(再见|拜拜|拜拜了|晚安|早安|午安)[!！?？\s]*$",
-]
+from app.db import ChatSession
+from app.config import settings
 
 
 class RAGPipeline:
+    """Agentic RAG Pipeline（代理到 AgenticRAGAgent）。
+
+    接口与原版完全兼容，内部已从"固定检索-生成"升级为
+    "LLM 自主决策的智能检索闭环"。
+    """
+
     def __init__(
         self,
         retriever: HybridRetriever,
         llm: LLMProvider,
         redis: RedisStore,
         db: AsyncSession,
+        max_steps: int = 3,
     ):
-        self.retriever = retriever
-        self.llm = llm
-        self.redis = redis
-        self.db = db
+        self._agent = AgenticRAGAgent(retriever, llm, redis, db)
+        self._agent.MAX_STEPS = max_steps
 
-    @traceable(name="rag_pipeline", tags=["rag", "stream"])
     async def stream_answer(
         self,
         question: str,
         kb_id: str | None = None,
         session_id: str | None = None,
     ) -> AsyncIterator[dict]:
-        try:
-            # 1. 获取或创建会话
-            session = await self._get_or_create_session(session_id, question)
+        """流式回答 — 事件格式与前端 SSE 消费端兼容。
 
-            # 2. 保存用户消息
-            self.db.add(ChatMessage(session_id=session.id, role="user", content=question))
-            await self.db.flush()
-
-            # 3. 更新 trending 计数
-            try:
-                await self.redis.incr_trending(question)
-            except Exception:
-                pass  # ponytail: Redis 不可用不影响问答
-
-            # 4. 检索（打招呼/闲聊跳过，避免无意义检索）
-            is_greeting = any(re.match(p, question.strip(), re.I) for p in _GREETING_PATTERNS)
-            retrieved = [] if is_greeting else await self.retriever.retrieve(question, kb_id, top_k=5)
-
-            # 5. 发送 sources 事件
-            sources = [
-                SourceItemOut(
-                    id=r["id"], kb=r["kb"], title=r["title"],
-                    snippet=r["snippet"], confidence=r["confidence"],
-                ).model_dump(by_alias=True)
-                for r in retrieved
-            ]
-            # 只在有实际来源时才推送 sources 事件（纯闲聊不推）
-            if sources:
-                yield {"event": "sources", "data": sources}
-
-            # 6. 构建 prompt + 流式生成
-            messages = self._build_prompt(question, retrieved)
-            full_answer = ""
-            async for delta in self.llm.stream_chat(messages):
-                full_answer += delta
-                yield {"event": "delta", "data": {"content": delta}}
-
-            # 7. 提取引用 + 保存 assistant 消息
-            citations = self._extract_citations(full_answer)
-            assistant_msg = ChatMessage(
-                session_id=session.id,
-                role="assistant",
-                content=full_answer,
-                citations=citations,
-                sources=sources,
-            )
-            self.db.add(assistant_msg)
-            await self.db.commit()
-
-            # 8. 发送 done 事件
-            yield {
-                "event": "done",
-                "data": {
-                    "messageId": str(assistant_msg.id),
-                    "citations": citations,
-                    "sessionId": str(session.id),
-                },
-            }
-        except Exception as e:
-            yield {"event": "error", "data": {"message": str(e)}}
-
-    def _build_prompt(self, question: str, retrieved: list[dict]) -> list[dict]:
-        context = ""
-        for r in retrieved:
-            context += f"\n[{r['id']}] {r['title']} ({r['kb']})\n{r['content']}\n"
-
-        system = (
-            "你是「知海 Knoa」，一个跨境电商运营知识助手。\n"
-            "请基于以下检索到的知识库内容回答用户问题，回答必须忠实于来源内容。\n\n"
-            "引用规则：\n"
-            "- 引用时使用 [1] [2] 这样的标注，数字对应来源编号\n"
-            "- 如果知识库内容不足以回答，明确告知用户\n\n"
-            "语气与长度：\n"
-            "- 用户只是打招呼或闲聊（如「你好」「在吗」「你是谁」）时，只用一句话友好回应，不要做自我介绍、不要罗列功能清单\n"
-            "- 涉及真实业务问题时再展开回答并引用来源\n\n"
-            f"知识库来源：\n{context}"
-        )
-        return [
-            {"role": "system", "content": system},
-            {"role": "user", "content": question},
-        ]
-
-    def _extract_citations(self, text: str) -> list[int]:
-        matches = re.findall(r"\[(\d+)\]", text)
-        return sorted(set(int(m) for m in matches))
-
-    async def _get_or_create_session(self, session_id: str | None, question: str) -> ChatSession:
-        if session_id:
-            result = await self.db.execute(
-                select(ChatSession).where(ChatSession.id == uuid.UUID(session_id))
-            )
-            session = result.scalar_one_or_none()
-            if session:
-                return session
-        session = ChatSession(title=question[:50])
-        self.db.add(session)
-        await self.db.flush()
-        return session
+        Events:
+          thinking   — Agent 决策步骤（新增，前端可选渲染）
+          sources    — 知识库来源片段列表
+          delta      — 流式回答文本片段
+          done       — 完成（含 messageId / citations / sessionId）
+          error      — 错误信息
+        """
+        async for event in self._agent.stream_answer(question, kb_id, session_id):
+            yield event

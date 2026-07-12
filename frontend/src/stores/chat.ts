@@ -25,6 +25,7 @@ export const useChatStore = defineStore('chat', () => {
       role: 'assistant',
       content: '',
       citations: [],
+      thinkingSteps: [],
     })
     // 始终通过 reactive 数组下标取值再赋值，确保改动走 Vue 的响应式代理
     // （直接持有 push 前的本地引用会绕过代理、不触发重渲染）
@@ -33,7 +34,11 @@ export const useChatStore = defineStore('chat', () => {
     try {
       for await (const event of streamAsk(question, knowledgeBase, sessionId.value)) {
         const m = lastMsg()
-        if (event.event === 'sources') {
+        if (event.event === 'thinking') {
+          // Agent 决策步骤：追加到当前消息的思考链
+          if (!m.thinkingSteps) m.thinkingSteps = []
+          m.thinkingSteps.push(event.data)
+        } else if (event.event === 'sources') {
           sources.value = event.data
           m.sources = event.data
         } else if (event.event === 'delta') {
