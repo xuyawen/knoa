@@ -58,7 +58,7 @@ onMounted(() => knowledgeStore.load())
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-width: 480px;
+  width: 100%;
 }
 
 .kb-item {
