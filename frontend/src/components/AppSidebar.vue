@@ -44,15 +44,22 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- 主对话入口（知识库对话界面） -->
+    <!-- 工作区入口（问问知海 / 文档管理 / 问答记录） -->
     <nav class="nav">
+      <div class="nav-label">工作区</div>
       <router-link
         to="/"
-        class="nav-item"
+        class="nav-item plain"
         :class="{ active: route.path === '/' }"
       >
         <span class="nav-icon"><Icon name="chat" :size="18" /></span>
         <span class="nav-name">问问知海</span>
+      </router-link>
+      <router-link to="/knowledge-bases" class="nav-item plain" active-class="active">
+        <span class="nav-name">文档管理</span>
+      </router-link>
+      <router-link to="/history" class="nav-item plain" active-class="active">
+        <span class="nav-name">问答记录</span>
       </router-link>
     </nav>
 
@@ -69,17 +76,6 @@ onMounted(() => {
         <span class="nav-icon"><Icon :name="kb.icon" :size="18" /></span>
         <span v-show="!collapsed" class="nav-name">{{ kb.name }}</span>
         <span v-if="kb.badge && !collapsed" class="nav-badge" :class="kb.badgeType">{{ kb.badge }}</span>
-      </router-link>
-    </nav>
-
-    <!-- 工作区次级入口 -->
-    <nav class="nav secondary">
-      <div class="nav-label">工作区</div>
-      <router-link to="/knowledge-bases" class="nav-item plain" active-class="active">
-        <span class="nav-name">文档管理</span>
-      </router-link>
-      <router-link to="/history" class="nav-item plain" active-class="active">
-        <span class="nav-name">问答记录</span>
       </router-link>
     </nav>
 
@@ -213,9 +209,6 @@ onMounted(() => {
   flex-direction: column;
   gap: 2px;
   margin-top: 8px;
-}
-.nav.secondary {
-  margin-top: 14px;
 }
 .nav-label {
   font-size: 11px;
