@@ -60,9 +60,10 @@ class OpenAICompatProvider:
                 extra_fields = {}
             reasoning = extra_fields.get("reasoning_content", "") or ""
 
-            text = content + reasoning
-            if text:
-                yield text
+            # ponytail: 推理内容只用于服务端调试/可观测，绝不拼进用户可见的回答，
+            # 否则会把模型的"思考过程"整段泄漏给用户（表现为回答又臭又长）
+            if content:
+                yield content
 
     async def chat(
         self, messages: list[dict[str, str]], temperature: float | None = None
@@ -75,9 +76,5 @@ class OpenAICompatProvider:
             max_tokens=self.max_tokens,
         )
         msg = response.choices[0].message
-        # 先取 reasoning_content(经 getattr), 再 fallback content
-        try:
-            reasoning = getattr(msg, "reasoning_content", "") or ""
-        except Exception:
-            reasoning = ""
-        return (reasoning + getattr(msg, "content", "") or "").strip()
+        # 只返回真正的回答 content，丢弃 reasoning_content（推理过程不对外暴露）
+        return (getattr(msg, "content", "") or "").strip()
