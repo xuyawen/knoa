@@ -13,7 +13,7 @@ const chat = useChatStore()
 
 // Agent 决策步骤（Agentic RAG thinking events）
 const steps = computed(() => (props.message.thinkingSteps || []) as import('@/types/api').ThinkingStep[])
-const showSteps = ref(true)  // 决策链默认展开
+const showSteps = ref(false)  // 决策链默认收起
 
 // 占位消息已创建但尚未收到首个 token 时，显示卡片内"正在思考"动画
 const isThinking = computed(
@@ -117,8 +117,8 @@ function sanitizeDetail(detail: string): string {
         </div>
       </div>
 
-      <!-- 思考态：卡片内的跳动点（仅决策步骤还没到达、仍在流式决策时） -->
-      <div v-if="isThinking && !steps.length" class="thinking">
+      <!-- 思考态：卡片内的跳动点（只要还在等 content 就显示，不因 steps 到达而消失） -->
+      <div v-if="isThinking" class="thinking">
         <span class="dot" /><span class="dot" /><span class="dot" />
       </div>
 
