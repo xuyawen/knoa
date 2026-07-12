@@ -46,6 +46,18 @@ onMounted(() => {
       </button>
     </div>
 
+    <!-- 主对话入口（知识库对话界面） -->
+    <nav class="nav">
+      <router-link
+        to="/"
+        class="nav-item"
+        :class="{ active: route.path === '/' }"
+      >
+        <span class="nav-icon"><Icon name="chat" :size="18" /></span>
+        <span class="nav-name">问问知海</span>
+      </router-link>
+    </nav>
+
     <!-- 知识库导航 -->
     <nav class="nav">
       <div v-show="!collapsed" class="nav-label">知识库</div>
