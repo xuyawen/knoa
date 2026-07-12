@@ -117,13 +117,13 @@ function sanitizeDetail(detail: string): string {
         </div>
       </div>
 
-      <!-- 思考态：卡片内的跳动点 -->
-      <div v-else-if="isThinking" class="thinking">
+      <!-- 思考态：卡片内的跳动点（仅决策步骤还没到达、仍在流式决策时） -->
+      <div v-if="isThinking && !steps.length" class="thinking">
         <span class="dot" /><span class="dot" /><span class="dot" />
       </div>
 
-      <!-- 正文 + 反馈 -->
-      <template v-else>
+      <!-- 正文 + 反馈（有内容即显示，与思考面板互不排斥） -->
+      <template v-if="!isThinking">
         <p class="body">
           <template v-for="(p, i) in parts" :key="i">
             <CitationChip
