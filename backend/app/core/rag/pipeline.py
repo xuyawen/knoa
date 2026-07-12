@@ -20,6 +20,17 @@ except ImportError:
         return decorator
 
 
+# 打招呼/闲聊模式匹配：命中时跳过 RAG 检索，直接让 LLM 友好回复
+_GREETING_PATTERNS = [
+    r"^[你好哈嗨嘿哟](\s|[\!！\?？\.。,，~～]*)?$",
+    r"^(hi|hello|hey|嗨|哈喽)(\s|[\!！\~～]*)?$",
+    r"^在吗?(吗)?(\s|[\!！\?？]*)?$",
+    r"^[好的?](\s|$)",
+    r"^(谢谢|感谢|thx|thanks)(\s|[\!！]*)?$",
+    r"^[再见拜拜晚安](\s|[\!！]*)?$",
+]
+
+
 class RAGPipeline:
     def __init__(
         self,
@@ -54,8 +65,9 @@ class RAGPipeline:
             except Exception:
                 pass  # ponytail: Redis 不可用不影响问答
 
-            # 4. 检索
-            retrieved = await self.retriever.retrieve(question, kb_id, top_k=5)
+            # 4. 检索（打招呼/闲聊跳过，避免无意义检索）
+            is_greeting = any(re.match(p, question.strip(), re.I) for p in _GREETING_PATTERNS)
+            retrieved = [] if is_greeting else await self.retriever.retrieve(question, kb_id, top_k=5)
 
             # 5. 发送 sources 事件
             sources = [
@@ -65,7 +77,9 @@ class RAGPipeline:
                 ).model_dump(by_alias=True)
                 for r in retrieved
             ]
-            yield {"event": "sources", "data": sources}
+            # 只在有实际来源时才推送 sources 事件（纯闲聊不推）
+            if sources:
+                yield {"event": "sources", "data": sources}
 
             # 6. 构建 prompt + 流式生成
             messages = self._build_prompt(question, retrieved)
