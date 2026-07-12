@@ -2,25 +2,49 @@
 import type { SourceItem } from '@/types/api'
 import Icon from './Icon.vue'
 
-defineProps<{ source: SourceItem }>()
+const props = defineProps<{ source: SourceItem }>()
 const emit = defineEmits<{
   (e: 'locate', id: number): void
   (e: 'open', chunkId: string): void
 }>()
+
+function isWeb(): boolean {
+  return props.source.sourceType === 'web'
+}
+
+// 知识库来源：点击定位（右栏高亮）；联网来源：直接打开原文外链
+function onCardClick() {
+  if (isWeb() && props.source.url) {
+    window.open(props.source.url, '_blank')
+  } else {
+    emit('locate', props.source.id)
+  }
+}
+
+function onFootClick() {
+  if (isWeb() && props.source.url) {
+    window.open(props.source.url, '_blank')
+  } else {
+    emit('open', props.source.chunkId)
+  }
+}
 </script>
 
 <template>
-  <button class="card" @click="emit('locate', source.id)">
+  <button class="card" :class="{ web: isWeb() }" @click="onCardClick">
     <div class="head">
-      <span class="kb">{{ source.kb }}</span>
-      <span class="conf" :class="{ low: source.confidence < 0.9 }">
+      <span class="tag" :class="isWeb() ? 'web' : 'kb'">
+        <Icon :name="isWeb() ? 'external' : 'library'" :size="12" />
+        {{ isWeb() ? '联网' : source.kb }}
+      </span>
+      <span v-if="!isWeb()" class="conf" :class="{ low: source.confidence < 0.9 }">
         {{ Math.round(source.confidence * 100) }}%
       </span>
     </div>
     <div class="title">{{ source.title }}</div>
     <div class="snippet">{{ source.snippet }}</div>
-    <div class="foot" @click.stop="emit('open', source.chunkId)">
-      <span class="loc">查看溯源</span>
+    <div class="foot" @click.stop="onFootClick">
+      <span class="loc">{{ isWeb() ? '查看原文' : '查看溯源' }}</span>
       <Icon name="external" :size="13" />
     </div>
   </button>
@@ -48,10 +72,27 @@ const emit = defineEmits<{
   justify-content: space-between;
   margin-bottom: 6px;
 }
-.kb {
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
-  color: var(--brand);
   font-weight: 500;
+}
+.tag.kb {
+  color: var(--brand);
+}
+.tag.web {
+  color: var(--warning, #f59e0b);
+  background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+}
+.card.web {
+  border-color: color-mix(in srgb, var(--warning, #f59e0b) 35%, var(--border));
+}
+.card.web:hover {
+  border-color: var(--warning, #f59e0b);
 }
 .conf {
   font-size: 12px;

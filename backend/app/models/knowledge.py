@@ -35,6 +35,8 @@ class SourceItemOut(CamelModel):
     title: str
     snippet: str
     confidence: float
+    source_type: str = "kb"   # 'kb' | 'web'
+    url: str | None = None      # 联网来源的原始链接
 
 
 class SourceDetailOut(CamelModel):

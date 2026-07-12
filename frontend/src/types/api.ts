@@ -34,6 +34,8 @@ export interface SourceItem {
   title: string
   snippet: string
   confidence: number
+  sourceType?: 'kb' | 'web'   // 来源类型：知识库 / 联网
+  url?: string                // 联网来源的原始链接
 }
 
 export interface SourceDetail {

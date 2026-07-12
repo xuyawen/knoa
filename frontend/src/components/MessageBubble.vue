@@ -37,11 +37,16 @@ const parts = computed(() => {
   return out
 })
 
+const hasWebSource = computed(() =>
+  (props.message.sources || []).some((s: any) => s.sourceType === 'web'),
+)
+
 function stepIcon(action: string): string {
   switch (action) {
     case 'direct_answer': return 'check'
     case 'retrieve': return 'search'
     case 'supplement_search': return 'refresh'
+    case 'web_search': return 'external'
     default: return 'alert-circle'  // 未知/异常动作用警告图标
   }
 }
@@ -52,6 +57,7 @@ function stepActionLabel(action: string): string {
     case 'direct_answer': return '直接回答'
     case 'retrieve': return '检索知识库'
     case 'supplement_search': return '补充检索'
+    case 'web_search': return '联网搜索'
     case 'generate': return '生成回答'
     default: return '未知操作'
   }
@@ -59,7 +65,7 @@ function stepActionLabel(action: string): string {
 
 /** 判断某个 thinking step 是否属于异常/未知动作 */
 function isAbnormalStep(s: import('@/types/api').ThinkingStep): boolean {
-  return !['direct_answer', 'retrieve', 'supplement_search', 'generate'].includes(s.action)
+  return !['direct_answer', 'retrieve', 'supplement_search', 'generate', 'web_search'].includes(s.action)
 }
 
 /** 脱敏 detail 文本：把内部工具名等实现细节隐藏 */
@@ -102,10 +108,10 @@ async function onCopy() {
       <div class="head">
         <span class="avatar"><Icon name="sparkle" :size="15" /></span>
         <span class="name">知海 · 运营知识助手</span>
-        <span v-if="(message as any).sources?.length" class="tag">
-          <span class="tag-dot" />
-          RAG 溯源
-        </span>
+          <span v-if="(message as any).sources?.length" class="tag" :class="{ web: hasWebSource }">
+            <span class="tag-dot" />
+            {{ hasWebSource ? '联网参考' : 'RAG 溯源' }}
+          </span>
       </div>
 
       <!-- Agent 决策链（Agentic RAG thinking steps） -->
@@ -237,6 +243,10 @@ async function onCopy() {
   border-radius: var(--radius-pill);
   margin-left: auto;
   font-weight: 500;
+}
+.tag.web {
+  color: var(--warning, #f59e0b);
+  background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
 }
 .tag-dot {
   width: 5px;
