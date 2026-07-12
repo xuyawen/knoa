@@ -46,6 +46,41 @@ class DocumentIngester:
             await db.flush()
         await db.commit()
 
+    async def ingest_text(
+        self,
+        kb_id: str,
+        title: str,
+        content: str,
+        db: AsyncSession,
+        source_path: str = "upload",
+    ) -> Document:
+        """单篇文本摄入：建 Document + 切分 + 向量化 + 写 DocChunk。"""
+        doc = Document(
+            kb_id=kb_id,
+            title=title,
+            source_path=source_path,
+            content_md=content,
+        )
+        db.add(doc)
+        await db.flush()
+
+        chunks = self.chunker.chunk(content, title)
+        texts = [c["content"] for c in chunks]
+        if texts:
+            embeddings = await self.embedder.embed(texts)
+            for chunk_data, embedding in zip(chunks, embeddings, strict=True):
+                db.add(
+                    DocChunk(
+                        document_id=doc.id,
+                        kb_id=kb_id,
+                        chunk_index=chunk_data["index"],
+                        content=chunk_data["content"],
+                        embedding=embedding,
+                    )
+                )
+        await db.commit()
+        return doc
+
     def _extract_title(self, content: str, fallback: str) -> str:
         for line in content.split("\n"):
             line = line.strip()

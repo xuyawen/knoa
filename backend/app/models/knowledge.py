@@ -39,3 +39,17 @@ class SourceItemOut(CamelModel):
 class KnowledgeBasesResponse(CamelModel):
     knowledge_bases: list[KnowledgeBaseOut]
     health: list[HealthItemOut]
+
+
+class DocumentOut(CamelModel):
+    id: str
+    title: str
+    type: str          # 'MD' | 'TXT'
+    size_kb: float
+    status: str         # '已审核' | '待复核'
+    updated_at: str
+
+
+class DocumentUploadIn(CamelModel):
+    filename: str
+    content: str
