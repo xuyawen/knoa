@@ -73,6 +73,18 @@ function sanitizeDetail(detail: string): string {
   }
   return detail
 }
+
+// 反馈闭环：点赞/点踩 + 复制
+function onRate(value: 'up' | 'down') {
+  chat.rateMessage(props.message.messageId, value)
+}
+async function onCopy() {
+  try {
+    await navigator.clipboard.writeText(props.message.content)
+  } catch {
+    /* 剪贴板不可用时静默 */
+  }
+}
 </script>
 
 <template>
@@ -137,10 +149,10 @@ function sanitizeDetail(detail: string): string {
 
         <FeedbackBar
           :citations="message.citations"
+          :rating="message.feedback"
           @cite="emit('cite', $event)"
-          @like="() => {}"
-          @dislike="() => {}"
-          @copy="() => {}"
+          @rate="onRate"
+          @copy="onCopy"
         />
       </template>
     </div>

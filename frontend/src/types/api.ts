@@ -41,6 +41,13 @@ export interface ChatMessage {
   citations?: number[]
   sources?: SourceItem[]
   thinkingSteps?: ThinkingStep[]  // Agentic RAG 决策链（仅 assistant）
+  messageId?: string            // 服务端真实消息 id（来自 done 事件）
+  feedback?: 'up' | 'down' | null  // 本地/服务端反馈状态
+}
+
+export interface FeedbackPayload {
+  messageId: string
+  rating: 'up' | 'down'
 }
 
 export interface KnowledgeBasesResponse {

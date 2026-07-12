@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import Icon from './Icon.vue'
 
-defineProps<{ citations?: number[] }>()
+const props = defineProps<{ citations?: number[]; rating?: 'up' | 'down' | null }>()
 const emit = defineEmits<{
-  (e: 'like'): void
-  (e: 'dislike'): void
+  (e: 'rate', value: 'up' | 'down'): void
   (e: 'copy'): void
   (e: 'cite', id: number): void
 }>()
@@ -23,10 +22,20 @@ const emit = defineEmits<{
 
     <span class="spacer" />
 
-    <button class="fb" title="有帮助" @click="emit('like')">
+    <button
+      class="fb"
+      :class="{ active: props.rating === 'up' }"
+      title="有帮助"
+      @click="emit('rate', 'up')"
+    >
       <Icon name="thumb-up" :size="15" />
     </button>
-    <button class="fb" title="没帮助" @click="emit('dislike')">
+    <button
+      class="fb"
+      :class="{ active: props.rating === 'down' }"
+      title="没帮助"
+      @click="emit('rate', 'down')"
+    >
       <Icon name="thumb-down" :size="15" />
     </button>
     <button class="fb" title="复制" @click="emit('copy')">
@@ -82,5 +91,10 @@ const emit = defineEmits<{
   color: var(--brand);
   border-color: var(--brand);
   background: var(--brand-soft);
+}
+.fb.active {
+  color: #fff;
+  border-color: var(--brand);
+  background: var(--brand);
 }
 </style>

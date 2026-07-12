@@ -79,3 +79,17 @@ class Trending(Base):
     question: Mapped[str] = mapped_column(String(500))
     count: Mapped[int] = mapped_column(Integer, default=0)
     date: Mapped[date] = mapped_column(Date, index=True)
+
+
+class MessageFeedback(Base):
+    """用户对单条回答的喜好反馈（👍/👎）。按 message_id 做 upsert。"""
+
+    __tablename__ = "message_feedback"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("chat_message.id"), index=True
+    )
+    rating: Mapped[str] = mapped_column(String(10))  # 'up' | 'down'
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

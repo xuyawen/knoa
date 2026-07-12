@@ -16,6 +16,24 @@ export async function getTrending(): Promise<TrendingItem[]> {
   return resp.json()
 }
 
+/** 提交/更新对某条回答的反馈（👍/👎）。 */
+export async function submitFeedback(messageId: string, rating: 'up' | 'down') {
+  const resp = await fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messageId, rating }),
+  })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 取消对某条回答的反馈。 */
+export async function deleteFeedback(messageId: string) {
+  const resp = await fetch(`/api/feedback/${messageId}`, { method: 'DELETE' })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
 /**
  * SSE 流式问答。POST /api/ask -> text/event-stream
  * 因为是 POST, 不能用 EventSource, 用 fetch + ReadableStream 手动解析

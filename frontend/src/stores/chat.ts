@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { streamAsk } from '@/api'
+import { streamAsk, submitFeedback, deleteFeedback } from '@/api'
 import type { ChatMessage, SourceItem } from '@/types/api'
 
 export const useChatStore = defineStore('chat', () => {
@@ -45,6 +45,7 @@ export const useChatStore = defineStore('chat', () => {
           m.content += event.data.content
         } else if (event.event === 'done') {
           m.citations = event.data.citations
+          m.messageId = event.data.messageId
           sessionId.value = event.data.sessionId
         } else if (event.event === 'error') {
           m.content += `\n\n[错误] ${event.data.message}`
@@ -69,5 +70,21 @@ export const useChatStore = defineStore('chat', () => {
     activeSourceId.value = null
   }
 
-  return { messages, sources, streaming, sessionId, activeSourceId, ask, locateSource, clearActiveSource }
+  // 反馈闭环：乐观更新本地状态 + 调接口（upsert / 取消）
+  async function rateMessage(messageId: string | undefined, rating: 'up' | 'down') {
+    if (!messageId) return
+    const msg = messages.value.find((m) => m.messageId === messageId)
+    if (!msg) return
+    // 点同一个 = 取消
+    const next: 'up' | 'down' | null = msg.feedback === rating ? null : rating
+    msg.feedback = next
+    try {
+      if (next) await submitFeedback(messageId, next)
+      else await deleteFeedback(messageId)
+    } catch {
+      // 接口失败不影响本地体验，静默
+    }
+  }
+
+  return { messages, sources, streaming, sessionId, activeSourceId, ask, locateSource, clearActiveSource, rateMessage }
 })
