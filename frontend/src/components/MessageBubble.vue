@@ -250,11 +250,11 @@ async function onCopy() {
   word-break: break-word;
 }
 
-/* 卡片内思考动画，品牌色跳动点 */
+/* 卡片内思考动画，品牌色跳动点 — 与上方内容左对齐 */
 .thinking {
   display: flex;
   gap: 5px;
-  padding: 6px 2px;
+  padding: 4px 0;
 }
 .thinking .dot {
   width: 7px;
@@ -370,7 +370,7 @@ async function onCopy() {
 }
 /* 收起态：去掉背景色块，压成一行轻量提示 */
 .collapsed {
-  margin-bottom: 6px;
+  margin-bottom: 2px;
   background: none;
   padding: 0;
 }
