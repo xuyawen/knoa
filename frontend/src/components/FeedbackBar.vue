@@ -32,8 +32,6 @@ const emit = defineEmits<{
     <button class="fb" title="复制" @click="emit('copy')">
       <Icon name="copy" :size="15" />
     </button>
-
-    <span class="sign">知海 · 运营知识助手</span>
   </div>
 </template>
 
@@ -41,10 +39,10 @@ const emit = defineEmits<{
 .feedback {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 14px;
+  gap: 6px;
+  margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--bg-subtle);
   flex-wrap: wrap;
 }
 .src-chip {
@@ -69,14 +67,14 @@ const emit = defineEmits<{
   flex: 1;
 }
 .fb {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: var(--radius-pill);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
+  color: var(--text-placeholder);
+  border: 1px solid var(--bg-subtle);
   background: var(--bg-surface);
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
@@ -84,10 +82,5 @@ const emit = defineEmits<{
   color: var(--brand);
   border-color: var(--brand);
   background: var(--brand-soft);
-}
-.sign {
-  font-size: 12px;
-  color: var(--text-placeholder);
-  white-space: nowrap;
 }
 </style>
