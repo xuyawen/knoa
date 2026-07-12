@@ -23,6 +23,7 @@ class DocumentIngester:
                 title=title,
                 source_path=str(md_file),
                 content_md=content,
+                status="已审核",  # 开发者灌库的内容视为已审核/可检索
             )
             db.add(doc)
             await db.flush()
@@ -60,6 +61,7 @@ class DocumentIngester:
             title=title,
             source_path=source_path,
             content_md=content,
+            status="待复核",  # 用户上传文档待人工复核后再纳入正式知识
         )
         db.add(doc)
         await db.flush()

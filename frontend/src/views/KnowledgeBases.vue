@@ -1,19 +1,17 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
+import { useKnowledgeStore } from '@/stores/knowledge'
 
 const collapsed = ref(false)
 
-/* 硬数据 — 后续对接 upload / 知识库 CRUD 接口后替换 */
-const knowledgeBases = [
-  { id: 'compliance', name: '合规库', icon: 'compliance', badge: '5 份待复核', badgeType: 'danger' },
-  { id: 'ads', name: '广告投放', icon: 'ads' },
-  { id: 'logistics', name: '物流仓储', icon: 'logistics' },
-  { id: 'selection', name: '选品策略', icon: 'selection' },
-  { id: 'service', name: '客服话术', icon: 'service' },
-]
+// 接真实 KB 列表（含实时"待复核"角标），来自 /api/knowledge-bases
+const knowledgeStore = useKnowledgeStore()
+const knowledgeBases = computed(() => knowledgeStore.bases)
+
+onMounted(() => knowledgeStore.load())
 </script>
 
 <template>

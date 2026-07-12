@@ -8,11 +8,11 @@ from app.database import AsyncSessionLocal, init_db
 from app.db import KnowledgeBase, Trending
 
 KB_SEEDS = [
-    {"id": "compliance", "name": "合规库", "icon": "compliance", "pending_count": 5},
-    {"id": "ads", "name": "广告投放", "icon": "ads", "pending_count": 0},
-    {"id": "logistics", "name": "物流仓储", "icon": "logistics", "pending_count": 0},
-    {"id": "selection", "name": "选品策略", "icon": "selection", "pending_count": 0},
-    {"id": "service", "name": "客服话术", "icon": "service", "pending_count": 0},
+    {"id": "compliance", "name": "合规库", "icon": "compliance"},
+    {"id": "ads", "name": "广告投放", "icon": "ads"},
+    {"id": "logistics", "name": "物流仓储", "icon": "logistics"},
+    {"id": "selection", "name": "选品策略", "icon": "selection"},
+    {"id": "service", "name": "客服话术", "icon": "service"},
 ]
 
 TRENDING_SEEDS = [

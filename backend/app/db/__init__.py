@@ -28,6 +28,8 @@ class Document(Base):
     title: Mapped[str] = mapped_column(String(200))
     source_path: Mapped[str] = mapped_column(String(500))
     content_md: Mapped[str] = mapped_column(Text)
+    # 文档状态：'已审核'(已入库/可检索) | '待复核'(用户上传待人工复核)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="已审核", server_default="已审核")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     kb: Mapped["KnowledgeBase"] = relationship(back_populates="documents")

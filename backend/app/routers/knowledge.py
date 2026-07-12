@@ -42,11 +42,17 @@ async def get_knowledge_bases(db: AsyncSession = Depends(get_db)):
         latest = await db.scalar(
             select(func.max(Document.updated_at)).where(Document.kb_id == kb.id)
         )
+        # 实时统计该库下"待复核"文档数（不再读写死的 pending_count 列）
+        pending_count = await db.scalar(
+            select(func.count(Document.id)).where(
+                Document.kb_id == kb.id, Document.status == "待复核"
+            )
+        )
 
         badge = None
         badge_type = None
-        if kb.pending_count > 0:
-            badge = f"{kb.pending_count} 份待复核"
+        if pending_count and pending_count > 0:
+            badge = f"{pending_count} 份待复核"
             badge_type = "danger"
 
         kb_list.append(
@@ -80,7 +86,7 @@ async def list_documents(kb_id: str, db: AsyncSession = Depends(get_db)):
             title=d.title,
             type="MD" if d.source_path.endswith((".md", ".markdown")) else "TXT",
             size_kb=round(len(d.content_md.encode("utf-8", errors="ignore")) / 1024, 2),
-            status="待复核",
+            status=d.status,
             updated_at=d.updated_at.isoformat() if d.updated_at else "",
         )
         for d in docs
@@ -122,7 +128,7 @@ async def upload_document(
         title=doc.title,
         type=ftype,
         size_kb=round(len(payload.content.encode("utf-8", errors="ignore")) / 1024, 2),
-        status="待复核",
+        status=doc.status,
         updated_at=doc.updated_at.isoformat() if doc.updated_at else "",
     )
 
