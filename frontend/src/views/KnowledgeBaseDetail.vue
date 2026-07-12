@@ -72,6 +72,13 @@ const mockDocuments = [
     <div class="main">
       <TopBar :title="kb.name" />
       <div class="body">
+        <!-- 面包屑 -->
+        <nav class="breadcrumb">
+          <router-link to="/knowledge-bases" class="crumb-link">知识库</router-link>
+          <span class="crumb-sep">/</span>
+          <span class="crumb-current">{{ kb.name }}</span>
+        </nav>
+
         <!-- 库信息卡片 -->
         <div class="kb-header">
           <div class="kb-header-icon"><Icon :name="kb.icon" :size="28" /></div>
@@ -133,6 +140,28 @@ const mockDocuments = [
   flex: 1;
   padding: 24px 32px;
   overflow-y: auto;
+}
+
+/* 面包屑 */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  font-size: 13px;
+}
+.crumb-link {
+  color: var(--brand);
+  transition: opacity 0.15s ease;
+}
+.crumb-link:hover {
+  opacity: 0.75;
+}
+.crumb-sep {
+  color: var(--text-placeholder);
+}
+.crumb-current {
+  color: var(--text-secondary);
 }
 
 /* 库信息卡片 */
