@@ -52,13 +52,14 @@ function stepActionLabel(action: string): string {
     case 'direct_answer': return '直接回答'
     case 'retrieve': return '检索知识库'
     case 'supplement_search': return '补充检索'
+    case 'generate': return '生成回答'
     default: return '未知操作'
   }
 }
 
 /** 判断某个 thinking step 是否属于异常/未知动作 */
 function isAbnormalStep(s: import('@/types/api').ThinkingStep): boolean {
-  return !['direct_answer', 'retrieve', 'supplement_search'].includes(s.action)
+  return !['direct_answer', 'retrieve', 'supplement_search', 'generate'].includes(s.action)
 }
 
 /** 脱敏 detail 文本：把内部工具名等实现细节隐藏 */
