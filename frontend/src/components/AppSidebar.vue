@@ -46,12 +46,6 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- 工作区切换（回到对话首页） -->
-    <router-link to="/" class="workspace-switch">
-      <div v-if="!collapsed" class="ws-name">全部知识</div>
-      <Icon name="chevron-down" :size="16" />
-    </router-link>
-
     <!-- 知识库导航 -->
     <nav class="nav">
       <div v-show="!collapsed" class="nav-label">知识库</div>
@@ -117,12 +111,8 @@ onMounted(() => {
 .collapsed .nav-name,
 .collapsed .nav-badge,
 .collapsed .nav-label,
-.collapsed .ws-name,
 .collapsed .user-info,
 .collapsed .settings {
-  display: none;
-}
-.collapsed .workspace-switch {
   display: none;
 }
 .collapsed .user-card {
@@ -205,25 +195,6 @@ onMounted(() => {
 }
 .collapsed .collapse {
   transform: rotate(180deg);
-}
-
-/* 工作区切换 */
-.workspace-switch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 4px;
-  padding: 9px 12px;
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  font-weight: 500;
-  color: var(--text-primary);
-  font-size: 14px;
-  transition: border-color 0.15s ease;
-}
-.workspace-switch:hover {
-  border-color: var(--brand);
 }
 
 /* 导航 */
