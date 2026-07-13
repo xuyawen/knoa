@@ -59,6 +59,18 @@ function dismissSuccess() {
   if (successTimer) clearTimeout(successTimer)
 }
 
+// 失败提示（同一套悬浮 toast，红色）
+const errorMsg = ref('')
+let errorTimer: ReturnType<typeof setTimeout> | undefined
+function scheduleErrorClear() {
+  if (errorTimer) clearTimeout(errorTimer)
+  errorTimer = setTimeout(() => { errorMsg.value = '' }, 3000)
+}
+function dismissError() {
+  errorMsg.value = ''
+  if (errorTimer) clearTimeout(errorTimer)
+}
+
 // 弹窗状态
 const showPwd = ref(false)                       // 重置密码弹窗
 const pwdTarget = ref<UserOut | null>(null)      // 正在重置密码的用户
@@ -201,14 +213,19 @@ function closeDel() {
 
 async function confirmDel() {
   if (!delTarget.value) return
+  const name = delTarget.value.username
   delSubmitting.value = true
   delError.value = ''
   try {
     await deleteUser(delTarget.value.id)
     users.value = users.value.filter((x) => x.id !== delTarget.value!.id)
     closeDel()
+    successMsg.value = `用户「${name}」已删除`
+    scheduleClear()
   } catch (e) {
-    delError.value = e instanceof Error ? e.message : '删除失败'
+    closeDel()
+    errorMsg.value = e instanceof Error ? e.message : '删除失败'
+    scheduleErrorClear()
   } finally {
     delSubmitting.value = false
   }
@@ -221,6 +238,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
   if (successTimer) clearTimeout(successTimer)
+  if (errorTimer) clearTimeout(errorTimer)
 })
 </script>
 
@@ -234,6 +252,13 @@ onUnmounted(() => {
           <transition name="toast">
             <div v-if="successMsg" class="toast" role="status" @click="dismissSuccess">
               {{ successMsg }}
+            </div>
+          </transition>
+        </Teleport>
+        <Teleport to="body">
+          <transition name="toast">
+            <div v-if="errorMsg" class="toast err-toast" role="alert" @click="dismissError">
+              {{ errorMsg }}
             </div>
           </transition>
         </Teleport>
@@ -413,7 +438,6 @@ onUnmounted(() => {
             <p class="m-warn">
               此操作不可恢复，将永久删除用户 <strong>{{ delTarget?.username }}</strong> 及其所有权限记录。
             </p>
-            <p v-if="delError" class="err">{{ delError }}</p>
           </div>
           <footer class="m-foot">
             <button class="mini" type="button" :disabled="delSubmitting" @click="closeDel">取消</button>
@@ -639,6 +663,13 @@ onUnmounted(() => {
 .toast-enter-from,
 .toast-leave-to { opacity: 0; }
 @keyframes toast-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 失败提示 toast：同款悬浮，红色 */
+.toast.err-toast {
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  color: #ef4444;
+}
 
 /* 新建用户弹窗 */
 .modal-overlay {
