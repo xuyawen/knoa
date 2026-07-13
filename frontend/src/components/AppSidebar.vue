@@ -146,8 +146,8 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 8px 0 12px;
-  gap: 10px;
+  padding: 10px 0 6px;
+  gap: 14px;
 }
 .collapsed .collapse {
   margin-left: 0;
