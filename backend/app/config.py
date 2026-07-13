@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     MEMORY_ENABLED: bool = True        # 总开关：false 则完全跳过记忆抽取/召回/注入
     MEMORY_TOP_K: int = 5               # 每轮问答注入 prompt 的相关记忆条数
     MEMORY_SIM_THRESHOLD: float = 0.92  # 新记忆与旧记忆余弦相似度超此值则更新而非新增（去重/冲突消解）
+    # 知识图谱 / Graph RAG（Phase 3 T1；Postgres 图存储，无需 Neo4j server）
+    GRAPH_ENABLED: bool = True         # 总开关：false 则跳过建图与图检索，回退普通 RAG
+    GRAPH_TOP_K: int = 5               # 每轮问答图检索召回的实体种子数（再去 1 跳扩展）
     ES_URL: str = "http://localhost:9200"
     ES_USERNAME: str = ""            # 留空 = 不启用 Basic Auth
     ES_PASSWORD: str = ""

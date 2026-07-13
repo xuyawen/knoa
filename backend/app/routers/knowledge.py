@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.graph import GraphStore
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.es_client import ESClient
 from app.core.rag.ingestor import DocumentIngester
@@ -15,7 +16,7 @@ from app.core.security import (
     require_roles,
 )
 from app.db import DocChunk, Document, KBPermission, KnowledgeBase, User
-from app.deps import get_db, get_embedder
+from app.deps import get_db, get_embedder, get_llm
 from app.models.knowledge import (
     DocumentOut,
     DocumentUploadIn,
@@ -168,7 +169,8 @@ async def upload_document(
             detail=f"不支持的文件格式 .{ext or '未知'}，当前仅支持 .md / .txt（PDF 解析将在后续阶段支持）",
         )
 
-    ingester = DocumentIngester(embedder, es=ESClient())
+    # 知识图谱（Phase 3 T1）：上传文档时也抽实体进图，与 seed 摄入一致
+    ingester = DocumentIngester(embedder, es=ESClient(), graph=GraphStore(get_llm(), embedder))
     doc = await ingester.ingest_text(
         kb_id, _extract_title(payload.content, filename), payload.content, db, filename
     )

@@ -164,3 +164,37 @@ class Memory(Base):
     # 记忆类型：preference(偏好) | fact(事实) | feedback(反馈) 等，便于筛选
     meta_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KGNode(Base):
+    """知识图谱节点（Phase 3 T1 Graph RAG）。
+
+    用 Postgres 存图（不依赖 Neo4j server，沙箱起不了）。实体由 LLM 在摄入时抽取，
+    embedding 复用 JSONB+numpy 余弦，与 DocChunk/Memory 同方案；检索时把问题向量
+    与节点向量做余弦挑种子节点，再沿 kg_edge 做 1 跳扩展，收集相关 chunk。
+    (kb_id, label) 作为实体去重键（同库同名实体只留首次出现的 chunk）。
+    """
+    __tablename__ = "kg_node"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kb_id: Mapped[str] = mapped_column(ForeignKey("knowledge_base.id"), index=True)
+    label: Mapped[str] = mapped_column(String(200))            # 实体名（如 "FBA 头程"）
+    type: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 实体类别（政策/物流/费用/流程...）
+    chunk_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("doc_chunk.id"))  # 该实体首次出现的 chunk
+    embedding: Mapped[list] = mapped_column(JSONB)             # 实体 label 的向量，检索时与问题向量算余弦
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KGEdge(Base):
+    """知识图谱边（Phase 3 T1）。from_label/to_label 存实体 label 字符串（非外键），
+
+    避免实体删除时级联复杂；连通性由 (kb_id, from_label, to_label, relation) 去重保证。
+    """
+    __tablename__ = "kg_edge"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kb_id: Mapped[str] = mapped_column(ForeignKey("knowledge_base.id"), index=True)
+    from_label: Mapped[str] = mapped_column(String(200))   # 起点实体 label
+    to_label: Mapped[str] = mapped_column(String(200))     # 终点实体 label
+    relation: Mapped[str] = mapped_column(String(100))     # 关系（属于 / 导致 / 需要 / 影响...）
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

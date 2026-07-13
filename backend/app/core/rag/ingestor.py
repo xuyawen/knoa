@@ -1,9 +1,11 @@
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rag.chunker import MarkdownChunker
 from app.core.rag.embeddings import EmbeddingModel
+from app.core.graph import GraphStore
 from app.core.rag.es_client import ESClient
 from app.db import DocChunk, Document
 
@@ -15,11 +17,14 @@ class DocumentIngester:
         chunk_size: int = 500,
         overlap: int = 50,
         es: ESClient | None = None,
+        graph: GraphStore | None = None,
     ):
         self.embedder = embedder
         self.chunker = MarkdownChunker(chunk_size, overlap)
         # ES 客户端（可选）：传入则摄入时双写到 ES 索引，否则只写 pgvector
         self._es = es
+        # 知识图谱（可选）：传入则摄入时抽取实体/关系写入图（Phase 3 T1）
+        self._graph = graph
 
     async def ingest_dir(self, kb_id: str, dir_path: Path, db: AsyncSession):
         md_files = sorted(dir_path.glob("*.md"))
@@ -59,6 +64,11 @@ class DocumentIngester:
                 # 双写 ES（幂等：用确定性 _id，失败静默不影响主流程）
                 await self._sync_es_chunk(kb_id, doc, chunk_data, embedding)
             await db.flush()
+
+            # 建图：把这篇文档的 chunk 交给 GraphStore 抽取实体/关系（失败静默跳过）
+            if self._graph is not None:
+                chunk_infos = await self._chunk_infos(db, doc.id)
+                await self._graph.extract(kb_id, doc.title, chunk_infos, db)
         await db.commit()
 
     async def _sync_es_chunk(
@@ -119,8 +129,32 @@ class DocumentIngester:
                     )
                 )
                 await self._sync_es_chunk(kb_id, doc, chunk_data, embedding)
+            await db.flush()
+
+            # 建图（与 ingest_dir 一致）：上传文档也要抽实体进图谱
+            if self._graph is not None:
+                chunk_infos = await self._chunk_infos(db, doc.id)
+                await self._graph.extract(kb_id, doc.title, chunk_infos, db)
         await db.commit()
         return doc
+
+    async def _chunk_infos(self, db: AsyncSession, doc_id: object) -> list[dict]:
+        """从 DB 取某文档的全部 chunk（按 chunk_index 排序），拼成图抽取要的结构。
+
+        GraphStore.extract 需要每个 chunk 的 content + 真实 chunk_id（建表后才生成），
+        所以得在 DocChunk 入库 flush 之后从 DB 查回来，而不是用 chunker 的原始输出。
+        """
+        rows = (
+            await db.execute(
+                select(DocChunk)
+                .where(DocChunk.document_id == doc_id)
+                .order_by(DocChunk.chunk_index)
+            )
+        ).scalars().all()
+        return [
+            {"index": c.chunk_index, "content": c.content, "chunk_id": c.id}
+            for c in rows
+        ]
 
     def _extract_title(self, content: str, fallback: str) -> str:
         for line in content.split("\n"):

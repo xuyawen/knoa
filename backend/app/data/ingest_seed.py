@@ -9,6 +9,8 @@ from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.es_client import ESClient
 from app.core.rag.ingestor import DocumentIngester
 from app.database import AsyncSessionLocal, init_db
+from app.core.graph import GraphStore
+from app.deps import get_llm
 
 KB_DIRS = ["compliance", "ads", "logistics", "selection", "service"]
 
@@ -16,15 +18,20 @@ KB_DIRS = ["compliance", "ads", "logistics", "selection", "service"]
 async def main():
     await init_db()
     embedder = EmbeddingModel(settings.EMBEDDING_MODEL)
+    # 知识图谱（Phase 3 T1）：seed 同时建图
+    graph = GraphStore(get_llm(), embedder)
     # 双写：若 ES_ENABLED=True 则摄入同时写入 ES 索引（幂等覆盖）
     ingester = DocumentIngester(
-        embedder, settings.RAG_CHUNK_SIZE, settings.RAG_CHUNK_OVERLAP, es=ESClient()
+        embedder, settings.RAG_CHUNK_SIZE, settings.RAG_CHUNK_OVERLAP, es=ESClient(), graph=graph
     )
 
     async with AsyncSessionLocal() as db:
         # 清空旧数据 (幂等)
         await db.execute(text("DELETE FROM doc_chunk"))
         await db.execute(text("DELETE FROM document"))
+        # 清空旧图谱：seed 是「重建全集」路径，避免实体/边重复堆积与孤儿节点
+        await db.execute(text("DELETE FROM kg_edge"))
+        await db.execute(text("DELETE FROM kg_node"))
         await db.commit()
 
         base = Path(__file__).parent / "markdown"

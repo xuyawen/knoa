@@ -43,8 +43,15 @@ class RAGPipeline:
         if settings.MEMORY_ENABLED and user_id and embedder:
             from app.core.memory import MemoryStore
             memory = MemoryStore(embedder)
+
+        # 知识图谱（Phase 3 T1）：开关开启 + 有向量器时构造 GraphStore 传给 agent
+        graph = None
+        if settings.GRAPH_ENABLED and embedder:
+            from app.core.graph import GraphStore
+            graph = GraphStore(llm, embedder)
+
         self._agent = AgenticRAGAgent(
-            retriever, llm, redis, db, user_id=user_id, memory=memory
+            retriever, llm, redis, db, user_id=user_id, memory=memory, graph=graph
         )
         self._agent.MAX_STEPS = max_steps
 

@@ -218,6 +218,7 @@ class AgenticRAGAgent:
         db: AsyncSession,
         user_id: str | None = None,
         memory: "MemoryStore | None" = None,
+        graph: "GraphStore | None" = None,
     ):
         self.retriever = retriever
         self.llm = llm
@@ -225,7 +226,9 @@ class AgenticRAGAgent:
         self.db = db
         self.user_id = user_id
         self.memory = memory
+        self.graph = graph
         self._memories: list[str] = []  # 本轮召回的该用户长期记忆
+        self._graph_chunks: list[dict] = []  # 本轮图检索召回的相关 chunk
 
     @traceable(name="agentic_rag_stream", tags=["agent", "rag"])
     async def stream_answer(
@@ -260,6 +263,23 @@ class AgenticRAGAgent:
 
             all_sources: list[dict] = []
             final_answer_text: str = ""
+
+            # ── Graph RAG：图感知检索，把实体关系相关的 chunk 也拉进来当来源 ──
+            # 仅对真实业务问题生效（跳过打招呼/闲聊）；kb_id 为空（纯通用问答）也跳过。
+            if self.graph and settings.GRAPH_ENABLED and kb_id and not _should_skip_retrieval(question):
+                try:
+                    self._graph_chunks = await self.graph.retrieve_related_chunks(
+                        question, kb_id, self.db, settings.GRAPH_TOP_K
+                    )
+                    if self._graph_chunks:
+                        # 接在知识库来源之后连续编号，避免与 [1..N] 撞号
+                        for i, g in enumerate(self._graph_chunks, len(all_sources) + 1):
+                            g["id"] = i
+                            g["chunk_id"] = f"graph:{i}"
+                        all_sources.extend(self._graph_chunks)
+                        yield {"event": "sources", "data": self._format_sources(self._graph_chunks)}
+                except Exception as e:
+                    logger.warning("graph retrieve failed (skip inject): %s", e)
 
             # ── 快速预分类路径 ──
             if _should_skip_retrieval(question):
