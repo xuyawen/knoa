@@ -1,9 +1,38 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import Icon from './Icon.vue'
 import ThemeToggle from './ThemeToggle.vue'
+import { useAuthStore } from '@/stores/auth'
 
 defineProps<{ title?: string; subtitle?: string }>()
 const emit = defineEmits<{ (e: 'ask', q: string): void }>()
+
+const router = useRouter()
+const auth = useAuthStore()
+const menuOpen = ref(false)
+const accountWrap = ref<HTMLElement | null>(null)
+
+const ROLE_LABEL: Record<string, string> = { admin: '管理员', editor: '编辑', viewer: '访客' }
+
+function toggleMenu() {
+  menuOpen.value = !menuOpen.value
+}
+
+function onDocClick(e: MouseEvent) {
+  const el = accountWrap.value
+  if (!el || el.contains(e.target as Node)) return
+  menuOpen.value = false
+}
+
+function onLogout() {
+  auth.logout()
+  menuOpen.value = false
+  router.replace('/login')
+}
+
+onMounted(() => document.addEventListener('click', onDocClick))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
 </script>
 
 <template>
@@ -23,9 +52,25 @@ const emit = defineEmits<{ (e: 'ask', q: string): void }>()
 
     <!-- 右：操作区 -->
     <div class="actions">
-      <button class="icon-btn" title="通知"><Icon name="bell" :size="18" /></button>
       <ThemeToggle />
-      <div class="account" title="运营小王">运</div>
+      <div class="account-wrap" ref="accountWrap">
+        <button class="account" @click.stop="toggleMenu" :title="auth.user?.displayName || auth.user?.username">
+          {{ (auth.user?.displayName || auth.user?.username || '?').charAt(0) }}
+        </button>
+        <transition name="menu-fade">
+          <div v-if="menuOpen" class="account-menu">
+            <div class="menu-header">
+              <span class="menu-name">{{ auth.user?.displayName || auth.user?.username }}</span>
+              <span class="menu-role">{{ ROLE_LABEL[auth.user?.role || ''] || auth.user?.role }}</span>
+            </div>
+            <div class="menu-divider" />
+            <button class="menu-item danger" @click="onLogout">
+              <Icon name="logout" :size="16" />
+              <span>退出登录</span>
+            </button>
+          </div>
+        </transition>
+      </div>
     </div>
   </header>
 </template>
@@ -132,6 +177,73 @@ const emit = defineEmits<{ (e: 'ask', q: string): void }>()
   justify-content: center;
   font-weight: 600;
   font-size: 13px;
+  transition: opacity 0.15s ease;
+}
+.account:hover {
+  opacity: 0.85;
+}
+.account-wrap {
+  position: relative;
+}
+.account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 200px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-float);
+  padding: 8px;
+  z-index: 50;
+}
+.menu-header {
+  padding: 8px 10px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.menu-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+.menu-role {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: background 0.15s ease;
+}
+.menu-item:hover {
+  background: var(--bg-subtle);
+}
+.menu-item.danger {
+  color: var(--danger);
+}
+.menu-item.danger:hover {
+  background: var(--danger-soft);
+}
+.menu-fade-enter-active,
+.menu-fade-leave-active {
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 @media (max-width: 900px) {
