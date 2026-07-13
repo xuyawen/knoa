@@ -51,7 +51,7 @@ onMounted(() => {
         </div>
       </router-link>
       <button class="collapse" :title="collapsed ? '展开' : '收起'" @click="collapsed ? emit('expand') : emit('collapse')">
-        <Icon name="chevron-right" :size="18" />
+        <Icon name="chevron-left" :size="18" />
       </button>
     </div>
 
@@ -146,11 +146,14 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 6px 0 10px;
-  gap: 6px;
+  padding: 8px 0 12px;
+  gap: 10px;
 }
 .collapsed .collapse {
   margin-left: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
 }
 .collapsed .nav-item {
   justify-content: center;
