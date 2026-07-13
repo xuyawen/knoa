@@ -121,6 +121,7 @@ async function onSubmit() {
     const u = await createUser({ ...form.value })
     users.value = [...users.value, u]
     successMsg.value = `用户「${u.username}」创建成功`
+    submitting.value = false
     closeCreate()
     scheduleClear()
   } catch (e) {
@@ -229,11 +230,13 @@ onUnmounted(() => {
     <div class="main">
       <TopBar title="用户管理" subtitle="管理系统用户与角色" />
       <div class="body">
-        <transition name="toast">
-          <div v-if="successMsg" class="toast" role="status" @click="dismissSuccess">
-            {{ successMsg }}
-          </div>
-        </transition>
+        <Teleport to="body">
+          <transition name="toast">
+            <div v-if="successMsg" class="toast" role="status" @click="dismissSuccess">
+              {{ successMsg }}
+            </div>
+          </transition>
+        </Teleport>
         <!-- 操作栏：搜索 + 新建 -->
         <div class="toolbar">
           <form class="search-form" @submit.prevent>
@@ -611,24 +614,31 @@ onUnmounted(() => {
 .row-err { margin: 8px 0 0; }
 .empty { color: var(--text-secondary); font-size: 13px; margin: 10px 0 0; }
 
-/* 成功提示 toast */
+/* 成功提示 toast（悬浮，fixed 顶部居中） */
 .toast {
-  align-self: flex-start;
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
   display: inline-flex;
   align-items: center;
-  padding: 10px 16px;
+  padding: 12px 20px;
   border-radius: var(--radius-md);
-  background: rgba(34, 197, 94, 0.14);
-  border: 1px solid rgba(34, 197, 94, 0.4);
+  background: rgba(34, 197, 94, 0.16);
+  border: 1px solid rgba(34, 197, 94, 0.45);
   color: #22c55e;
   font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
-  animation: m-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: var(--shadow-float);
+  animation: toast-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .toast-enter-active,
-.toast-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.toast-leave-active { transition: opacity 0.2s ease; }
 .toast-enter-from,
-.toast-leave-to { opacity: 0; transform: translateY(-6px); }
+.toast-leave-to { opacity: 0; }
+@keyframes toast-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* 新建用户弹窗 */
 .modal-overlay {
