@@ -115,7 +115,13 @@ async def create_knowledge_base(
         icon=payload.icon or "📚",
         description=payload.description,
     )
+    # 先落库并提交，再写库级权限。
+    # 异步连接池下「同一 commit 内多表写入」可能落到不同物理连接，
+    # 导致子表外键看不到未提交的父行而失败；先提交父行可保证
+    # knowledge_base 对已提交的子事务全局可见，外键必然可满足。
     db.add(kb)
+    await db.commit()
+    await db.refresh(kb)
     db.add(KBPermission(kb_id=kb_id, user_id=user.id, level="admin"))
     await db.commit()
     await db.refresh(kb)

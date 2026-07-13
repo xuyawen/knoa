@@ -84,3 +84,51 @@ jobs:
         run: |
           uv run python -m alembic -c alembic.ini upgrade head
           uv run python -m alembic -c alembic.ini check
+
+  pytest:
+    name: Backend tests (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    # 测试用独立库 knoa_pytest；conftest 读 KNOA_TEST_PG_* 拼连接串，
+    # 默认 localhost:5433，这里用 service 映射出的 5432。
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: knoa
+          POSTGRES_PASSWORD: knoa
+          POSTGRES_DB: knoa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U knoa"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      KNOA_TEST_PG_HOST: localhost
+      KNOA_TEST_PG_PORT: "5432"
+      KNOA_TEST_REDIS_HOST: localhost
+      KNOA_TEST_REDIS_PORT: "6379"
+      LOG_LEVEL: WARNING
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies (uv.lock)
+        run: uv sync --frozen
+
+      # 跑通整套 pytest：API 冒烟 / SSE 问答 / 混合检索 / 迁移契约。
+      # LLM/Embedding/Redis/Graph 全部由 conftest 的 dependency_overrides
+      # 换成测试替身，无需任何 API key。
+      - name: Run pytest
+        run: uv run --group dev python -m pytest -v

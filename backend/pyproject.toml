@@ -25,6 +25,22 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ruff>=0.8.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# 默认 fixture loop scope = session：让 prepare_test_db 这种
+# session 级异步 fixture 能拿到 session 级 loop runner（否则
+# ScopeMismatch）。真正「跟着测试走」的 db_session / client /
+# _dispose_engine_after_test 在各自定义处用 loop_scope="function"
+# 显式覆盖，使其跑在所属测试的 function loop 上，从而它们的
+# asyncpg 连接与测试同 loop，避免 attached to a different loop。
+asyncio_default_fixture_loop_scope = "session"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
 ]
 
 [tool.ruff]

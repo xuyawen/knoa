@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 from functools import lru_cache
 
+from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -11,9 +12,24 @@ from app.core.store.redis_store import RedisStore
 from app.database import AsyncSessionLocal
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionLocal() as session:
-        yield session
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """每个 HTTP 请求一个 DB 会话（请求级单例）。
+
+    同一次请求里所有依赖（鉴权取 user、建库时写 knowledge_base
+    + kb_permission）共享同一个 session / 同一条连接，从而保证
+    「同一事务内多表写入」落在同一连接（外键彼此可见）。
+    请求结束统一关闭会话。这是 FastAPI 推荐的请求级会话模式，
+    也顺带规避了「多个 Depends(get_db) 各自 checkout 一条连接」
+    导致的跨连接事务问题。
+    """
+    db = getattr(request.state, "db", None)
+    if db is None:
+        db = AsyncSessionLocal()
+        request.state.db = db
+    try:
+        yield db
+    finally:
+        await db.close()
 
 
 @lru_cache
