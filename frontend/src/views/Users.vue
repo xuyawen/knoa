@@ -324,16 +324,11 @@ onUnmounted(() => {
                   </select>
                 </td>
 
-                <!-- 状态：标签 + 切换按钮 -->
+                <!-- 状态：标签 -->
                 <td>
                   <span class="status" :class="u.isActive ? 'on' : 'off'">
                     {{ u.isActive ? '启用' : '停用' }}
                   </span>
-                  <button
-                    class="link-btn"
-                    :disabled="rowBusy === u.id"
-                    @click="toggleActive(u)"
-                  >{{ u.isActive ? '停用' : '启用' }}</button>
                 </td>
 
                 <td class="muted">{{ u.createdAt ? new Date(u.createdAt).toLocaleString() : '—' }}</td>
@@ -341,6 +336,12 @@ onUnmounted(() => {
                 <!-- 操作列 -->
                 <td class="col-ops">
                   <button class="link-btn" :disabled="rowBusy === u.id" @click="startPwd(u)">重置密码</button>
+                  <button
+                    class="link-btn"
+                    :disabled="rowBusy === u.id || auth.user?.id === u.id"
+                    :title="auth.user?.id === u.id ? '不能停用自己' : ''"
+                    @click="toggleActive(u)"
+                  >{{ u.isActive ? '停用' : '启用' }}</button>
                   <button
                     class="link-btn danger"
                     :disabled="rowBusy === u.id || auth.user?.id === u.id"
