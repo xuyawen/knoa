@@ -1,6 +1,10 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+const certsDir = resolve(__dirname, '../backend/certs')
 
 export default defineConfig({
   plugins: [vue()],
@@ -10,7 +14,11 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 5174,
+    https: {
+      key: readFileSync(resolve(certsDir, 'key.pem')),
+      cert: readFileSync(resolve(certsDir, 'cert.pem')),
+    },
     proxy: {
       '/api': {
         target: 'https://localhost:8000',

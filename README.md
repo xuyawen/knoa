@@ -15,8 +15,8 @@
 ```
 ┌─────────────┐     /api (SSE)      ┌──────────────────────────────┐
 │  Vue 3 前端 │ ───────────────────▶│  FastAPI 后端                │
-│  (5173)     │◀───────────────────│  ├─ /api/ask   流式问答       │
-└─────────────┘     SSE 事件流       │  ├─ /api/knowledge-bases 库/文档│
+│  HTTPS:5174 │◀───────────────────│  HTTPS:8000                  │
+└─────────────┘     SSE 事件流       │  ├─ /api/ask   流式问答       │
        │                              │  ├─ /api/sources 溯源详情     │
        │ Pinia 状态                  │  ├─ /api/sessions 多会话历史  │
        ▼                              │  ├─ /api/feedback 反馈        │
@@ -32,7 +32,7 @@
 后端 RAG 管线（`app/core/rag/`）：
 
 - `chunker.py` —— 文档按固定窗口切分（默认 500 字 / 重叠 50）
-- `embeddings.py` —— 调用 Embedding API 生成向量（默认 1024 维）
+- `embeddings.py` —— 调用 Embedding API 生成向量（默认 1536 维，以 `.env` 中 `EMBEDDING_DIM` 为准）
 - `ingestor.py` —— 入库：写 `document` + `doc_chunk`（带向量）
 - `retriever.py` —— 混合检索（BM25 + 向量），RRF 融合，取 top-k
 - `agent.py` —— Agentic 决策：LLM 判断 `retrieve` / `supplement_search` / `direct_answer`；打招呼与闲聊跳过检索
@@ -111,11 +111,16 @@ uv sync                 # 或：uv pip install -e .
 # 准备环境变量
 cp .env.example .env   # 然后填入 LLM / Embedding 的 API Key
 
-# 启动（用项目 venv 的 python，确保 uvicorn 可用）
-.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+# 1. 生成本地自签证书（已生成则可跳过，证书文件在 backend/certs/，不进 git）
+openssl req -x509 -newkey rsa:2048 -keyout backend/certs/key.pem \
+  -out backend/certs/cert.pem -days 365 -nodes -subj "/CN=localhost"
+
+# 2. 启动（用项目 venv 的 python，确保 uvicorn 可用）
+.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+  --ssl-keyfile ../certs/key.pem --ssl-certfile ../certs/cert.pem
 ```
 
-> 启动后访问 `http://localhost:8000/api/health` 验证（`{"status":"ok"}`）。
+> 启动后访问 `https://localhost:8000/api/health` 验证（浏览器会提示自签证书风险，点"继续访问"即可；`curl -k https://localhost:8000/api/health`）。
 > 注意：uvicorn 无 `--reload`，改了 `.py` 需手动重启后端进程。
 
 ### 2. 前端
@@ -123,11 +128,15 @@ cp .env.example .env   # 然后填入 LLM / Embedding 的 API Key
 ```bash
 cd frontend
 npm install
-npm run dev            # 默认 http://localhost:5173
+npm run dev            # 默认 https://localhost:5174
 ```
 
-`vite.config.ts` 已将 `/api` 代理到 `http://localhost:8000`（并关闭了 SSE 响应的压缩以避免缓冲）。
-若 5173 被占用，Vite 会自动顺延端口（如 5174），以终端输出为准。
+浏览器打开 `https://localhost:5174`，首次会提示自签证书风险，点击"继续访问"。
+`vite.config.ts` 已将 `/api` 代理到 `https://localhost:8000`（并关闭了 SSE 响应的压缩以避免缓冲）。
+若 5174 被占用，Vite 会自动顺延端口（如 5175），以终端输出为准。
+
+> 安全说明：前后端均启用 HTTPS/TLS，登录密码在传输过程中由 TLS 1.3 AES-GCM 加密。
+> 浏览器 DevTools 的 **Payload 面板显示的是 TLS 解密后的明文**，这是调试视图，不代表网络线上可被截获。
 
 ## 配置
 
