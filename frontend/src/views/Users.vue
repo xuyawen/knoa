@@ -219,6 +219,7 @@ async function confirmDel() {
   try {
     await deleteUser(delTarget.value.id)
     users.value = users.value.filter((x) => x.id !== delTarget.value!.id)
+    delSubmitting.value = false
     closeDel()
     successMsg.value = `用户「${name}」已删除`
     scheduleClear()
