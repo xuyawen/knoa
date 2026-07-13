@@ -47,6 +47,18 @@ const submitting = ref(false)
 const formError = ref('')
 const showCreate = ref(false)   // 新建用户弹窗开关
 
+// 成功提示（轻量 toast）
+const successMsg = ref('')
+let successTimer: ReturnType<typeof setTimeout> | undefined
+function scheduleClear() {
+  if (successTimer) clearTimeout(successTimer)
+  successTimer = setTimeout(() => { successMsg.value = '' }, 3000)
+}
+function dismissSuccess() {
+  successMsg.value = ''
+  if (successTimer) clearTimeout(successTimer)
+}
+
 // 弹窗状态
 const showPwd = ref(false)                       // 重置密码弹窗
 const pwdTarget = ref<UserOut | null>(null)      // 正在重置密码的用户
@@ -108,7 +120,9 @@ async function onSubmit() {
   try {
     const u = await createUser({ ...form.value })
     users.value = [...users.value, u]
+    successMsg.value = `用户「${u.username}」创建成功`
     closeCreate()
+    scheduleClear()
   } catch (e) {
     formError.value = e instanceof Error ? e.message : '创建失败'
   } finally {
@@ -203,7 +217,10 @@ onMounted(() => {
   load()
   window.addEventListener('keydown', onKey)
 })
-onUnmounted(() => window.removeEventListener('keydown', onKey))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey)
+  if (successTimer) clearTimeout(successTimer)
+})
 </script>
 
 <template>
@@ -212,6 +229,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
     <div class="main">
       <TopBar title="用户管理" subtitle="管理系统用户与角色" />
       <div class="body">
+        <transition name="toast">
+          <div v-if="successMsg" class="toast" role="status" @click="dismissSuccess">
+            {{ successMsg }}
+          </div>
+        </transition>
         <!-- 操作栏：搜索 + 新建 -->
         <div class="toolbar">
           <form class="search-form" @submit.prevent>
@@ -588,6 +610,25 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .err { color: var(--danger); font-size: 13px; margin: 0; }
 .row-err { margin: 8px 0 0; }
 .empty { color: var(--text-secondary); font-size: 13px; margin: 10px 0 0; }
+
+/* 成功提示 toast */
+.toast {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #22c55e;
+  font-size: 14px;
+  cursor: pointer;
+  animation: m-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.toast-enter-active,
+.toast-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.toast-enter-from,
+.toast-leave-to { opacity: 0; transform: translateY(-6px); }
 
 /* 新建用户弹窗 */
 .modal-overlay {
