@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     RAG_CHUNK_OVERLAP: int = 50
     RRF_K: int = 60
     # Elasticsearch (Phase 2 混合检索；venv 装不了官方客户端，走 httpx 直连 REST)
+    # 总开关：必须显式设 ES_ENABLED=True 才启用；ES 未就绪时保持 False，
+    # 系统自动回退 pgvector，绝不因 ES 不可用而崩。
+    ES_ENABLED: bool = False
     ES_URL: str = "http://localhost:9200"
     ES_USERNAME: str = ""            # 留空 = 不启用 Basic Auth
     ES_PASSWORD: str = ""

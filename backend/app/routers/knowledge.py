@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rag.embeddings import EmbeddingModel
+from app.core.rag.es_client import ESClient
 from app.core.rag.ingestor import DocumentIngester
 from app.core.security import (
     get_current_user,
@@ -159,7 +160,7 @@ async def upload_document(
             detail=f"不支持的文件格式 .{ext or '未知'}，当前仅支持 .md / .txt（PDF 解析将在后续阶段支持）",
         )
 
-    ingester = DocumentIngester(embedder)
+    ingester = DocumentIngester(embedder, es=ESClient())
     doc = await ingester.ingest_text(
         kb_id, _extract_title(payload.content, filename), payload.content, db, filename
     )

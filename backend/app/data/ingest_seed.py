@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.core.rag.embeddings import EmbeddingModel
+from app.core.rag.es_client import ESClient
 from app.core.rag.ingestor import DocumentIngester
 from app.database import AsyncSessionLocal, init_db
 
@@ -15,7 +16,10 @@ KB_DIRS = ["compliance", "ads", "logistics", "selection", "service"]
 async def main():
     await init_db()
     embedder = EmbeddingModel(settings.EMBEDDING_MODEL)
-    ingester = DocumentIngester(embedder, settings.RAG_CHUNK_SIZE, settings.RAG_CHUNK_OVERLAP)
+    # 双写：若 ES_ENABLED=True 则摄入同时写入 ES 索引（幂等覆盖）
+    ingester = DocumentIngester(
+        embedder, settings.RAG_CHUNK_SIZE, settings.RAG_CHUNK_OVERLAP, es=ESClient()
+    )
 
     async with AsyncSessionLocal() as db:
         # 清空旧数据 (幂等)

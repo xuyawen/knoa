@@ -7,6 +7,8 @@ from sse_starlette.sse import EventSourceResponse
 from app.core.llm.openai_compat import OpenAICompatProvider
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.pipeline import RAGPipeline
+from app.core.rag.es_client import ESClient
+from app.core.rag.es_retriever import ESRetriever
 from app.core.rag.retriever import HybridRetriever
 from app.core.security import get_current_user, get_kb_permission_level
 from app.core.store.redis_store import RedisStore
@@ -33,7 +35,13 @@ async def ask(
         if level is None:
             raise HTTPException(status_code=403, detail="无权访问该知识库")
 
-    retriever = HybridRetriever(embedder, db, settings.RRF_K)
+    # 检索器选择：ES 可用且目标库已建索引 → ES 混合检索；
+    # 否则回退 pgvector HybridRetriever（ES 未启用 / 索引不存在 / 网络异常都安全降级）
+    es = ESClient()
+    if es.enabled and req.knowledge_base and await es.index_exists(req.knowledge_base):
+        retriever = ESRetriever(embedder, es, settings.RRF_K)
+    else:
+        retriever = HybridRetriever(embedder, db, settings.RRF_K)
     pipeline = RAGPipeline(retriever, llm, redis, db)
 
     async def event_generator():
