@@ -443,6 +443,10 @@ class AgenticRAGAgent:
         query = st.route_result.arguments.get("query", st.question)
         retrieved = await self.retriever.retrieve(query, st.kb_id, top_k=5)
         if retrieved:
+            # 连续编号，接在已有来源（图/联网预检索）之后，
+            # 避免与图谱预检索已占用的 1..N 撞号导致引用错位
+            for i, r in enumerate(retrieved, len(st.all_sources) + 1):
+                r["id"] = i
             sources = self._format_sources(retrieved)
             st.all_sources.extend(sources)
             yield {"event": "sources", "data": sources}
@@ -459,6 +463,9 @@ class AgenticRAGAgent:
         gap = st.route_result.arguments.get("gap_description", "")
         retrieved = await self.retriever.retrieve(refined_query, st.kb_id, top_k=5)
         if retrieved:
+            # 同 _n_retrieve：连续编号，避免与图谱预检索的 1..N 撞号
+            for i, r in enumerate(retrieved, len(st.all_sources) + 1):
+                r["id"] = i
             sources = self._format_sources(retrieved)
             st.all_sources.extend(sources)
             yield {"event": "sources", "data": sources}
@@ -471,7 +478,9 @@ class AgenticRAGAgent:
         st.next = "_n_route"
 
     async def _n_web_search(self, st: "_AgentState") -> AsyncIterator[dict]:
-        query = st.route_result.arguments.get("query", st.question)
+        # 兼容两条入口：agent 循环内（route_result 已设置，取 arguments.query）
+        # 与启发式直搜（_should_web_search 直接进本节点，route_result 为 None，退用原问题）
+        query = st.route_result.arguments.get("query", st.question) if st.route_result else st.question
         searcher = WebSearcher()
         try:
             web = await searcher.search(query, max_results=5)
