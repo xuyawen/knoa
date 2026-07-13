@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
 
-const collapsed = ref(false)
+const { collapsed } = useSidebarCollapsed()
 
 function onCollapse() {
   collapsed.value = true

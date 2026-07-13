@@ -8,11 +8,11 @@ import SourcePanel from '@/components/SourcePanel.vue'
 import MobileWorkbench from '@/views/MobileWorkbench.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useChatStore } from '@/stores/chat'
+import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
 
 const knowledge = useKnowledgeStore()
 const chat = useChatStore()
-
-const collapsed = ref(false)
+const { collapsed } = useSidebarCollapsed()
 const isMobile = ref(false)
 let mq: MediaQueryList | undefined
 

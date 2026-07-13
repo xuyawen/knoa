@@ -6,10 +6,10 @@ import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
 import { getDocuments, uploadDocument } from '@/api'
 import type { DocumentItem } from '@/types/api'
+import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
 
 const route = useRoute()
-
-const collapsed = ref(false)
+const { collapsed } = useSidebarCollapsed()
 
 function onCollapse() {
   collapsed.value = true

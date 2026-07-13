@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
 import { useChatStore } from '@/stores/chat'
+import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
 
 const router = useRouter()
 const route = useRoute()
 const chat = useChatStore()
-const collapsed = ref(false)
+const { collapsed } = useSidebarCollapsed()
 
 function onCollapse() {
   collapsed.value = true

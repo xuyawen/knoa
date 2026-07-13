@@ -3,18 +3,19 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
+import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
 import { createUser, deleteUser, getUserList, updateUser } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import type { UserOut } from '@/types/api'
 
 const auth = useAuthStore()
+const { collapsed } = useSidebarCollapsed()
+function onCollapse() { collapsed.value = true }
+function onExpand() { collapsed.value = false }
+
 const users = ref<UserOut[]>([])
 const loading = ref(false)
 const error = ref('')
-
-const collapsed = ref(false)
-function onCollapse() { collapsed.value = true }
-function onExpand() { collapsed.value = false }
 
 // 搜索条件
 const keyword = ref('')
