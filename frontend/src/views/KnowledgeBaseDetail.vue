@@ -11,6 +11,14 @@ const route = useRoute()
 
 const collapsed = ref(false)
 
+function onCollapse() {
+  collapsed.value = true
+}
+
+function onExpand() {
+  collapsed.value = false
+}
+
 /* 硬数据 —— 详情页头部信息（详情接口留后续对接） */
 const kbMap: Record<string, {
   name: string
@@ -94,7 +102,7 @@ watch(() => route.params.id, () => loadDocuments())
 
 <template>
   <div class="kb-detail-page">
-    <AppSidebar :collapsed="collapsed" @collapse="collapsed = !collapsed" />
+    <AppSidebar :collapsed="collapsed" @collapse="onCollapse" @expand="onExpand" />
     <div class="main">
       <TopBar :title="kb.name" />
       <div class="body">

@@ -11,6 +11,14 @@ const route = useRoute()
 const chat = useChatStore()
 const collapsed = ref(false)
 
+function onCollapse() {
+  collapsed.value = true
+}
+
+function onExpand() {
+  collapsed.value = false
+}
+
 function fmtTime(iso: string): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -36,7 +44,7 @@ onMounted(() => chat.loadSessions())
 
 <template>
   <div class="history-page">
-    <AppSidebar :collapsed="collapsed" @collapse="collapsed = !collapsed" />
+    <AppSidebar :collapsed="collapsed" @collapse="onCollapse" @expand="onExpand" />
     <div class="main">
       <TopBar title="问答记录">
         <button class="new-btn" @click="onNew">

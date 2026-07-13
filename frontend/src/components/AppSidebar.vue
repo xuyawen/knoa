@@ -24,6 +24,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'collapse'): void
+  (e: 'expand'): void
   (e: 'close'): void
 }>()
 
@@ -49,8 +50,8 @@ onMounted(() => {
           <span class="brand-sub">跨境运营知识库</span>
         </div>
       </router-link>
-      <button class="collapse" @click="emit('collapse')" :title="collapsed ? '展开' : '收起'">
-        <Icon name="chevron-left" :size="18" />
+      <button class="collapse" :title="collapsed ? '展开' : '收起'" @click="collapsed ? emit('expand') : emit('collapse')">
+        <Icon name="chevron-right" :size="18" />
       </button>
     </div>
 

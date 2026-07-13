@@ -16,6 +16,14 @@ const collapsed = ref(false)
 const isMobile = ref(false)
 let mq: MediaQueryList | undefined
 
+function onCollapse() {
+  collapsed.value = true
+}
+
+function onExpand() {
+  collapsed.value = false
+}
+
 function syncMobile() {
   isMobile.value = window.matchMedia('(max-width: 900px)').matches
 }
@@ -49,10 +57,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   <MobileWorkbench v-if="isMobile" />
 
   <div v-else class="workbench">
-    <AppSidebar
-      :collapsed="collapsed"
-      @collapse="collapsed = !collapsed"
-    />
+    <AppSidebar :collapsed="collapsed" @collapse="onCollapse" @expand="onExpand" />
     <div class="main">
       <TopBar :title="knowledge.activeBase ? knowledge.bases.find(b => b.id === knowledge.activeBase)?.name || '全部知识' : '全部知识'" @ask="onAsk" />
       <div class="body">

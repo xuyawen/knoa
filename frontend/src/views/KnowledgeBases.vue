@@ -7,6 +7,14 @@ import { useKnowledgeStore } from '@/stores/knowledge'
 
 const collapsed = ref(false)
 
+function onCollapse() {
+  collapsed.value = true
+}
+
+function onExpand() {
+  collapsed.value = false
+}
+
 // 接真实 KB 列表（含实时"待复核"角标），来自 /api/knowledge-bases
 const knowledgeStore = useKnowledgeStore()
 const knowledgeBases = computed(() => knowledgeStore.bases)
@@ -16,7 +24,7 @@ onMounted(() => knowledgeStore.load())
 
 <template>
   <div class="kb-page">
-    <AppSidebar :collapsed="collapsed" @collapse="collapsed = !collapsed" />
+    <AppSidebar :collapsed="collapsed" @collapse="onCollapse" @expand="onExpand" />
     <div class="main">
       <TopBar title="知识库" />
       <div class="body">
