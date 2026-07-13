@@ -45,6 +45,22 @@ async def get_knowledge_bases(
     result = await db.execute(select(KnowledgeBase).order_by(KnowledgeBase.created_at))
     kbs = result.scalars().all()
 
+    # 一次聚合查询替代「每库 3 次查询」的 N+1 模式：
+    # 按 kb_id 汇总 文档数 / 最新更新时间 / 待复核数。
+    stats_rows = (
+        await db.execute(
+            select(
+                Document.kb_id,
+                func.count(Document.id).label("doc_count"),
+                func.max(Document.updated_at).label("latest"),
+                func.count(Document.id)
+                .filter(Document.status == "待复核")
+                .label("pending"),
+            ).group_by(Document.kb_id)
+        )
+    ).all()
+    stats_map = {row.kb_id: row for row in stats_rows}
+
     kb_list = []
     health_list = []
     for kb in kbs:
@@ -52,18 +68,10 @@ async def get_knowledge_bases(
         if await get_kb_permission_level(db, kb.id, user) is None:
             continue
 
-        doc_count = await db.scalar(
-            select(func.count(Document.id)).where(Document.kb_id == kb.id)
-        )
-        latest = await db.scalar(
-            select(func.max(Document.updated_at)).where(Document.kb_id == kb.id)
-        )
-        # 实时统计该库下"待复核"文档数（不再读写死的 pending_count 列）
-        pending_count = await db.scalar(
-            select(func.count(Document.id)).where(
-                Document.kb_id == kb.id, Document.status == "待复核"
-            )
-        )
+        stat = stats_map.get(kb.id)
+        doc_count = stat.doc_count if stat else 0
+        latest = stat.latest if stat else None
+        pending_count = stat.pending if stat else 0
 
         badge = None
         badge_type = None

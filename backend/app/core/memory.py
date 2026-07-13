@@ -53,6 +53,10 @@ def _coerce_list(obj) -> list:
         for k in ("memories", "memory", "items", "results"):
             if isinstance(obj.get(k), list):
                 return obj[k]
+        # LLM 偶尔会返回单条记忆对象 {...} 而非数组 [...]，
+        # 只要含 content / type 字段就当作单条记忆收下，避免整轮记忆丢失。
+        if "content" in obj or "type" in obj:
+            return [obj]
     return []
 
 

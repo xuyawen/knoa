@@ -386,12 +386,10 @@ class AgenticRAGAgent:
                                 final_answer_text = await self.llm.chat(quick_msgs)
                             except Exception:
                                 final_answer_text = "好的，收到！"
-                        if final_answer_text and not any(
-                            d.get("event") == "delta" for d in []  # 已在上面逐 token yield 了则跳过
-                        ):
-                            # 只有非流式路径（candidate / chat）才需要一次性 yield
-                            if not all_sources or candidate:
-                                yield {"event": "delta", "data": {"content": final_answer_text}}
+                        # 非流式路径（candidate 直接给内容 / 纯通用回答）才需一次性 yield；
+                        # 流式路径（已逐 token 输出）由上方 `elif all_sources` 分支处理，不再重复。
+                        if final_answer_text and (not all_sources or candidate):
+                            yield {"event": "delta", "data": {"content": final_answer_text}}
                         break
 
                     elif result.name == "retrieve":

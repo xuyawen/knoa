@@ -2,7 +2,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
@@ -10,7 +10,7 @@ from app.core.security import (
     get_current_user,
     require_roles,
 )
-from app.db import User
+from app.db import ChatSession, KBPermission, Memory, User
 from app.deps import get_db
 from app.models.auth import (
     LoginIn,
@@ -131,5 +131,11 @@ async def delete_user(
         )
         if not other_admins:
             raise HTTPException(status_code=400, detail="不能删除最后一个管理员")
+    # 级联清理：kb_permission.user_id / memory.user_id 都是指向 app_user 的外键，
+    # 不先删这些子记录，PostgreSQL 会直接拒绝删除用户（外键约束 → 500）。
+    # ChatSession.user_id 是无外键约束的普通字符串列，这里一并清理孤儿会话。
+    await db.execute(delete(KBPermission).where(KBPermission.user_id == u.id))
+    await db.execute(delete(Memory).where(Memory.user_id == u.id))
+    await db.execute(delete(ChatSession).where(ChatSession.user_id == str(u.id)))
     await db.delete(u)
     await db.commit()

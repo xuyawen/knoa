@@ -89,6 +89,11 @@ class DocumentIngester:
         source_path: str = "upload",
     ) -> Document:
         """单篇文本摄入：建 Document + 切分 + 向量化 + 写 DocChunk。"""
+        # 双写：确保该 KB 的 ES 索引存在（幂等；不可用时返回 False，静默跳过）。
+        # 必须与 ingest_dir 一致——否则用户上传文档时若该 KB 从未被 seed 灌过，
+        # ES 索引不存在，文档永远进不了 ES，导致该 KB 走不了 ES 混合检索。
+        if self._es is not None:
+            await self._es.ensure_index(kb_id)
         doc = Document(
             kb_id=kb_id,
             title=title,
