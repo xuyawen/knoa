@@ -27,6 +27,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import time
 import uuid
@@ -35,12 +37,17 @@ from collections.abc import AsyncIterator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.llm.base import ToolCallResult
+from app.core.memory import MemoryStore
 from app.core.rag.retriever import HybridRetriever
 from app.core.rag.web_search import WebSearcher
 from app.core.store.redis_store import RedisStore
+from app.database import AsyncSessionLocal
 from app.db import ChatMessage, ChatSession
 from app.models.knowledge import SourceItemOut
+
+logger = logging.getLogger(__name__)
 
 try:
     from langsmith import traceable
@@ -209,11 +216,16 @@ class AgenticRAGAgent:
         llm,
         redis: RedisStore,
         db: AsyncSession,
+        user_id: str | None = None,
+        memory: "MemoryStore | None" = None,
     ):
         self.retriever = retriever
         self.llm = llm
         self.redis = redis
         self.db = db
+        self.user_id = user_id
+        self.memory = memory
+        self._memories: list[str] = []  # 本轮召回的该用户长期记忆
 
     @traceable(name="agentic_rag_stream", tags=["agent", "rag"])
     async def stream_answer(
@@ -236,6 +248,16 @@ class AgenticRAGAgent:
                 except Exception:
                     pass
 
+            # ── Mem0 长期记忆：召回该用户的相关记忆，注入后续所有 prompt ──
+            if self.memory and self.user_id and settings.MEMORY_ENABLED:
+                try:
+                    self._memories = await self.memory.retrieve(
+                        self.user_id, question, self.db, settings.MEMORY_TOP_K
+                    )
+                except Exception as e:
+                    logger.warning("memory retrieve failed (skip inject): %s", e)
+                    self._memories = []
+
             all_sources: list[dict] = []
             final_answer_text: str = ""
 
@@ -250,8 +272,8 @@ class AgenticRAGAgent:
                     {"role": "system", "content": (
                         "你是「知海 Knoa」，一个跨境电商运营知识助手。"
                         "用户问了一个知识库无法覆盖的常识/实时类问题（如天气、时间、股价等），"
-                        "请友好简洁地回答。如果确实不知道，就直说。不要自我介绍或罗列功能。"
-                    )},
+                    "请友好简洁地回答。如果确实不知道，就直说。不要自我介绍或罗列功能。"
+                        ) + self._memory_section()},
                     {"role": "user", "content": question},
                 ]
                 full_answer = ""
@@ -289,7 +311,7 @@ class AgenticRAGAgent:
             # Agent Loop 路径
             else:
                 messages = [
-                    {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+                    {"role": "system", "content": AGENT_SYSTEM_PROMPT + self._memory_section()},
                     {"role": "user", "content": question},
                 ]
                 step = 0
@@ -357,7 +379,7 @@ class AgenticRAGAgent:
                                 {"role": "system", "content": (
                                     "你是「知海 Knoa」，一个跨境电商运营知识助手。"
                                     "请简洁友好地回答用户的问题。不要自我介绍或罗列功能。"
-                                )},
+                                ) + self._memory_section()},
                                 {"role": "user", "content": question},
                             ]
                             try:
@@ -459,6 +481,13 @@ class AgenticRAGAgent:
             self.db.add(assistant_msg)
             await self.db.commit()
 
+            # ── Mem0：后台抽取/保存长期记忆（不阻塞回答已返回的 SSE 流） ──
+            if self.memory and self.user_id:
+                try:
+                    asyncio.create_task(self._save_memory(question, final_answer_text))
+                except Exception:
+                    pass
+
             yield {
                 "event": "done",
                 "data": {"messageId": str(assistant_msg.id), "citations": citations, "sessionId": str(session.id)},
@@ -524,13 +553,41 @@ class AgenticRAGAgent:
             "（如汇率、价格、日期、政策要点），请直接从片段中提取并呈现给用户，"
             "并标注对应编号；不要说「无法获取/无法访问数据」，因为数据已在上文给出。\n"
             "确实没有任何来源覆盖该问题时，再如实说明。\n\n"
-            f"来源资料：\n{context}"
+            f"来源资料：\n{context}" + self._memory_section()
         )
         return [{"role": "system", "content": system}, {"role": "user", "content": question}]
 
     @staticmethod
     def _extract_citations(text: str) -> list[int]:
         return sorted(set(int(m) for m in re.findall(r"\[(\d+)\]", text)))
+
+    def _memory_section(self) -> str:
+        """把召回的用户记忆格式化成可注入 system prompt 的文本块（无记忆则返回空串）。"""
+        if not self._memories:
+            return ""
+        lines = ["\n\n## 用户长期记忆（来自历史对话，不与该用户显式意愿冲突时请优先遵循）"]
+        for m in self._memories:
+            lines.append(f"- {m}")
+        return "\n".join(lines)
+
+    async def _save_memory(self, question: str, answer: str) -> None:
+        """问答结束后，后台抽取并保存长期记忆（不阻塞已返回的 SSE 流）。
+
+        自己开一个独立 db session，与请求主 session 解耦，
+        这样即便生成器已 yield done 并随请求关闭主 session，记忆落库仍可进行。
+        """
+        if not (self.memory and self.user_id):
+            return
+        # 打招呼 / 闲聊无需记忆，省一次 LLM 调用
+        if _should_skip_retrieval(question):
+            return
+        try:
+            async with AsyncSessionLocal() as s:
+                memories = await self.memory.extract(self.llm, question, answer)
+                if memories:
+                    await self.memory.save(self.user_id, memories, s)
+        except Exception as e:
+            logger.warning("memory save failed (skipped): %s", e)
 
     async def _get_or_create_session(self, session_id: str | None, question: str) -> ChatSession:
         if session_id:

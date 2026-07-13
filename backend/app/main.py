@@ -14,6 +14,7 @@ from app.routers import (
     feedback,
     health,
     knowledge,
+    memory,
     sessions,
     sources,
     trending,
@@ -62,3 +63,4 @@ app.include_router(ask.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
 app.include_router(sources.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
+app.include_router(memory.router, prefix="/api")

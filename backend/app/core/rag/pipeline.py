@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.llm.base import LLMProvider
 from app.core.rag.agent import AgenticRAGAgent
+from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.retriever import HybridRetriever
 from app.core.store.redis_store import RedisStore
 from app.db import ChatSession
@@ -33,9 +34,18 @@ class RAGPipeline:
         llm: LLMProvider,
         redis: RedisStore,
         db: AsyncSession,
+        user_id: str | None = None,
+        embedder: "EmbeddingModel | None" = None,
         max_steps: int = 3,
     ):
-        self._agent = AgenticRAGAgent(retriever, llm, redis, db)
+        memory = None
+        # 仅当开关开启 + 知道是谁 + 有向量器时才启用 Mem0；否则整个记忆链路静默跳过
+        if settings.MEMORY_ENABLED and user_id and embedder:
+            from app.core.memory import MemoryStore
+            memory = MemoryStore(embedder)
+        self._agent = AgenticRAGAgent(
+            retriever, llm, redis, db, user_id=user_id, memory=memory
+        )
         self._agent.MAX_STEPS = max_steps
 
     async def stream_answer(

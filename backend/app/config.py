@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # 总开关：必须显式设 ES_ENABLED=True 才启用；ES 未就绪时保持 False，
     # 系统自动回退 pgvector，绝不因 ES 不可用而崩。
     ES_ENABLED: bool = False
+    # 长期记忆（Phase 2 T4 Mem0 轻量自研版；复用 pgvector(JSONB)+numpy 余弦）
+    MEMORY_ENABLED: bool = True        # 总开关：false 则完全跳过记忆抽取/召回/注入
+    MEMORY_TOP_K: int = 5               # 每轮问答注入 prompt 的相关记忆条数
+    MEMORY_SIM_THRESHOLD: float = 0.92  # 新记忆与旧记忆余弦相似度超此值则更新而非新增（去重/冲突消解）
     ES_URL: str = "http://localhost:9200"
     ES_USERNAME: str = ""            # 留空 = 不启用 Basic Auth
     ES_PASSWORD: str = ""

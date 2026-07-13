@@ -42,7 +42,11 @@ async def ask(
         retriever = ESRetriever(embedder, es, settings.RRF_K)
     else:
         retriever = HybridRetriever(embedder, db, settings.RRF_K)
-    pipeline = RAGPipeline(retriever, llm, redis, db)
+    pipeline = RAGPipeline(
+        retriever, llm, redis, db,
+        user_id=str(user.id),
+        embedder=embedder,
+    )
 
     async def event_generator():
         async for event in pipeline.stream_answer(

@@ -28,3 +28,6 @@ __pycache__/
 backend/app/data/markdown/
 # SSL certs (self-signed, regenerated per machine; private key NEVER in git)
 backend/certs/
+
+# personal AI study notes (user-only, not part of the project)
+AI学习笔记_核心功能.md
