@@ -5,10 +5,10 @@
 ## 技术栈
 
 - **前端**：Vue 3 + Vite + TypeScript + vue-router + Pinia
-- **后端**：FastAPI + SQLAlchemy(async) + pgvector + Redis
+- **后端**：FastAPI + SQLAlchemy(async) + Redis（向量存储用 JSONB + numpy 余弦，不引 pgvector / langchain）
 - **检索**：混合检索（BM25 关键词 + 向量稠密检索），RRF 融合重排
 - **生成**：OpenAI 兼容接口的大模型（LLM、Embedding 均通过 `.env` 配置，可切换 DeepSeek / OpenAI / 通义 / 自建等）
-- **基础设施**：PostgreSQL 16（含 pgvector 扩展）+ Redis 7，均跑在 Docker 里
+- **基础设施**：PostgreSQL 16 + Redis 7，均跑在 Docker 里（向量存于 JSONB，不依赖 pgvector 扩展）
 
 ## 系统架构
 
@@ -42,10 +42,11 @@
 
 ```
 knoa/
+├── docker-compose.yml          # 全栈编排：Postgres + Redis + backend + frontend（Phase 4）
 ├── docs/design-spec.md        # 设计规格（配色 / 字体 / 布局 / 接口）
 ├── handoff/                   # 设计稿导出与解析脚本
 ├── backend/                   # FastAPI 后端
-│   ├── docker-compose.yml     # Postgres(5433) + Redis(6380)
+│   ├── Dockerfile             # 后端镜像（python:3.12-slim）
 │   ├── pyproject.toml        # 依赖锁定（uv.lock）
 │   ├── app/
 │   │   ├── main.py            # 应用入口，挂载所有 /api 路由
@@ -89,14 +90,28 @@ knoa/
 
 ## 环境依赖
 
-需要本地跑两个中间件，已在 `backend/docker-compose.yml` 配好：
+需要本地跑两个中间件，已在根目录 `docker-compose.yml`（仅 infra）配好：
 
 ```bash
-cd backend
-docker compose up -d     # 启动 Postgres(5433) 与 Redis(6380)
+# 仅起 Postgres(5433) 与 Redis(6380)，便于本机直接跑 uvicorn 开发
+docker compose up -d postgres redis
 ```
 
-依赖版本：PostgreSQL 16（开启 `pgvector`）、Redis 7。
+依赖版本：PostgreSQL 16、Redis 7。（向量存于 JSONB，不依赖 pgvector 扩展。）
+
+### 全栈 Docker 部署（Phase 4）
+
+```bash
+# 构建并启动全部服务（postgres + redis + backend + frontend）
+docker compose up --build
+
+# 访问前端：http://localhost:8080  （/api 已由 nginx 反代到 backend:8000）
+# 后端健康检查：http://localhost:8080/api/health
+```
+
+- 首次启动 backend 会自动执行 `alembic upgrade head` 建表（见 `backend/app/database.py`）。
+- 上传文件持久化在 `knoa_uploads` 卷；Postgres / Redis 数据分别在 `knoa_pgdata` / `knoa_redisdata` 卷。
+- 生产 TLS 建议在宿主机用 nginx / caddy 反代终止，容器内部走明文 HTTP。
 
 ## 快速开始
 
@@ -217,4 +232,4 @@ cd backend
 
 - **Phase 2**：ES 混合检索增强、RBAC 权限、Mem0 长期记忆
 - **Phase 3**：Neo4j 知识图谱、LangGraph Agent、MinIO 文件存储与解析管线（PDF/DOCX）
-- **Phase 4**：Alembic 迁移、Docker 化部署、CI/CD
+- **Phase 4**：Alembic 迁移（✅）、Docker 化部署（✅）、CI/CD（进行中）

@@ -1,10 +1,17 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const certsDir = resolve(__dirname, '../backend/certs')
+const keyPath = resolve(certsDir, 'key.pem')
+const certPath = resolve(certsDir, 'cert.pem')
+// dev server 才需要 HTTPS；证书不存在时（如 Docker 构建环境）跳过，不影响 vite build
+const https =
+  existsSync(keyPath) && existsSync(certPath)
+    ? { key: readFileSync(keyPath), cert: readFileSync(certPath) }
+    : undefined
 
 export default defineConfig({
   plugins: [vue()],
@@ -15,10 +22,7 @@ export default defineConfig({
   },
   server: {
     port: 5174,
-    https: {
-      key: readFileSync(resolve(certsDir, 'key.pem')),
-      cert: readFileSync(resolve(certsDir, 'cert.pem')),
-    },
+    ...(https ? { https } : {}),
     proxy: {
       '/api': {
         target: 'https://localhost:8000',

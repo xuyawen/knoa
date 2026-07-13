@@ -1,0 +1,92 @@
+# Knoa 全栈容器编排（Phase 4）
+#
+# 用法：
+#   全栈启动（含构建）：  docker compose up --build
+#   仅起基础设施（postgres + redis，便于本机直接跑 uvicorn 开发）：
+#                          docker compose up postgres redis
+#
+# 说明：
+#   - postgres / redis 对外端口沿用本地开发习惯 5433 / 6380（与 backend/.env 对应），
+#     容器内部仍用 5432 / 6379，backend / frontend 服务通过服务名互访。
+#   - backend 通过 env_file 读取宿主 backend/.env（绝不进镜像），
+#     并用 environment 覆盖 DATABASE_URL / REDIS_URL 的主机名为服务名。
+#   - 生产 TLS 请在宿主机用 nginx / caddy 等反代终止，本编排内部走明文 HTTP。
+#   - 首次启动 backend 会执行 `alembic upgrade head` 建表（见 app/database.py）。
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: knoa-postgres
+    environment:
+      POSTGRES_USER: knoa
+      POSTGRES_PASSWORD: knoa
+      POSTGRES_DB: knoa
+    ports:
+      - "5433:5432"
+    volumes:
+      - knoa_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knoa"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: knoa-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - knoa_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: knoa-backend
+    env_file:
+      - ./backend/.env
+    environment:
+      # 容器内通过服务名访问，覆盖 .env 里的 localhost:5433
+      DATABASE_URL: postgresql+asyncpg://knoa:knoa@postgres:5432/knoa
+      REDIS_URL: redis://redis:6379/0
+      SSL_ENABLED: "False"
+      CORS_ORIGINS: "http://localhost:8080"
+      APP_ENV: "production"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - knoa_uploads:/app/app/data/uploads
+    expose:
+      - "8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: knoa-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  knoa_pgdata:
+  knoa_redisdata:
+  knoa_uploads:
