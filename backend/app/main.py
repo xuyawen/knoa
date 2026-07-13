@@ -23,6 +23,9 @@ from app.routers import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ponytail: embedding API 客户端即时创建, 无需预加载
+    # 确保所有模型表已创建（幂等，已存在的表不受影响）
+    from app.database import init_db
+    await init_db()
     # Phase 2: 首次启动且无任何用户时，自动创建初始管理员（幂等）
     async with AsyncSessionLocal() as session:
         exists = await session.scalar(select(User).limit(1))
