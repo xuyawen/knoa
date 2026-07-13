@@ -47,11 +47,16 @@ const submitting = ref(false)
 const formError = ref('')
 const showCreate = ref(false)   // 新建用户弹窗开关
 
-// 行内编辑状态
-const pwdEditing = ref<string | null>(null)   // 正在重置密码的用户 id
+// 弹窗状态
+const showPwd = ref(false)                       // 重置密码弹窗
+const pwdTarget = ref<UserOut | null>(null)      // 正在重置密码的用户
 const pwdValue = ref('')
+const pwdSubmitting = ref(false)
 const pwdError = ref('')
-const delConfirm = ref<string | null>(null)    // 正在确认删除的用户 id
+const showDel = ref(false)                       // 删除确认弹窗
+const delTarget = ref<UserOut | null>(null)      // 正在删除的用户
+const delSubmitting = ref(false)
+const delError = ref('')
 const rowBusy = ref<string | null>(null)       // 正在请求的行，禁用该行操作
 const rowError = ref('')                        // 行级错误提示
 
@@ -88,7 +93,11 @@ function closeCreate() {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape' && showCreate.value) closeCreate()
+  if (e.key !== 'Escape') return
+  if (pwdSubmitting.value || delSubmitting.value || submitting.value) return
+  if (showPwd.value) { closePwd(); return }
+  if (showDel.value) { closeDel(); return }
+  if (showCreate.value) closeCreate()
 }
 
 async function onSubmit() {
@@ -133,43 +142,60 @@ async function toggleActive(u: UserOut) {
 }
 
 function startPwd(u: UserOut) {
-  pwdEditing.value = u.id
+  pwdTarget.value = u
+  pwdValue.value = ''
+  pwdError.value = ''
+  showPwd.value = true
+}
+
+function closePwd() {
+  if (pwdSubmitting.value) return
+  showPwd.value = false
+  pwdTarget.value = null
   pwdValue.value = ''
   pwdError.value = ''
 }
 
-async function confirmPwd(u: UserOut) {
+async function confirmPwd() {
+  if (!pwdTarget.value) return
   pwdError.value = ''
   if (pwdValue.value.length < 6) { pwdError.value = '新密码至少 6 个字符'; return }
-  rowBusy.value = u.id
+  pwdSubmitting.value = true
   try {
-    await updateUser(u.id, { password: pwdValue.value })
-    pwdEditing.value = null
-    pwdValue.value = ''
+    await updateUser(pwdTarget.value.id, { password: pwdValue.value })
+    closePwd()
   } catch (e) {
     pwdError.value = e instanceof Error ? e.message : '重置密码失败'
   } finally {
-    rowBusy.value = null
+    pwdSubmitting.value = false
   }
 }
 
-function cancelPwd() {
-  pwdEditing.value = null
-  pwdValue.value = ''
-  pwdError.value = ''
+function startDel(u: UserOut) {
+  delTarget.value = u
+  delError.value = ''
+  showDel.value = true
 }
 
-async function confirmDel(u: UserOut) {
-  rowBusy.value = u.id
-  rowError.value = ''
+function closeDel() {
+  if (delSubmitting.value) return
+  showDel.value = false
+  delTarget.value = null
+  delError.value = ''
+}
+
+async function confirmDel() {
+  if (!delTarget.value) return
+  delSubmitting.value = true
+  delError.value = ''
   try {
-    await deleteUser(u.id)
-    users.value = users.value.filter((x) => x.id !== u.id)
-    delConfirm.value = null
+    await deleteUser(delTarget.value.id)
+    users.value = users.value.filter((x) => x.id !== delTarget.value!.id)
+    closeDel()
   } catch (e) {
-    rowError.value = e instanceof Error ? e.message : '删除失败'
+    delError.value = e instanceof Error ? e.message : '删除失败'
   } finally {
-    rowBusy.value = null
+    delSubmitting.value = false
   }
 }
 
@@ -264,36 +290,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 
                 <!-- 操作列 -->
                 <td class="col-ops">
-                  <!-- 重置密码：行内展开 -->
-                  <template v-if="pwdEditing === u.id">
-                    <input
-                      v-model="pwdValue"
-                      class="pwd-input"
-                      type="password"
-                      placeholder="新密码（≥6）"
-                      @keyup.enter="confirmPwd(u)"
-                    />
-                    <button class="mini primary" :disabled="rowBusy === u.id" @click="confirmPwd(u)">确认</button>
-                    <button class="mini" @click="cancelPwd">取消</button>
-                  </template>
-
-                  <!-- 删除确认：行内展开 -->
-                  <template v-else-if="delConfirm === u.id">
-                    <span class="confirm-text">确认删除？</span>
-                    <button class="mini danger" :disabled="rowBusy === u.id" @click="confirmDel(u)">是</button>
-                    <button class="mini" @click="delConfirm = null">否</button>
-                  </template>
-
-                  <!-- 默认操作按钮 -->
-                  <template v-else>
-                    <button class="link-btn" :disabled="rowBusy === u.id" @click="startPwd(u)">重置密码</button>
-                    <button
-                      class="link-btn danger"
-                      :disabled="rowBusy === u.id || auth.user?.id === u.id"
-                      :title="auth.user?.id === u.id ? '不能删除自己' : ''"
-                      @click="delConfirm = u.id"
-                    >删除</button>
-                  </template>
+                  <button class="link-btn" :disabled="rowBusy === u.id" @click="startPwd(u)">重置密码</button>
+                  <button
+                    class="link-btn danger"
+                    :disabled="rowBusy === u.id || auth.user?.id === u.id"
+                    :title="auth.user?.id === u.id ? '不能删除自己' : ''"
+                    @click="startDel(u)"
+                  >删除</button>
                 </td>
               </tr>
             </tbody>
@@ -302,7 +305,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             {{ users.length ? '没有匹配的用户' : '暂无用户' }}
           </p>
           <p v-if="rowError" class="err row-err">{{ rowError }}</p>
-          <p v-if="pwdError" class="err row-err">{{ pwdError }}</p>
         </template>
       </div>
     </div>
@@ -342,6 +344,56 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             <button class="mini" type="button" :disabled="submitting" @click="closeCreate">取消</button>
             <button class="mini primary" type="button" :disabled="submitting" @click="onSubmit">
               {{ submitting ? '创建中…' : '保存' }}
+            </button>
+          </footer>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 重置密码弹窗 -->
+    <Teleport to="body">
+      <div v-if="showPwd" class="modal-overlay" @click.self="closePwd">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="重置密码">
+          <header class="m-head">
+            <h3>重置密码</h3>
+            <button class="m-close" type="button" title="关闭" @click="closePwd">×</button>
+          </header>
+          <form class="m-body" @submit.prevent="confirmPwd">
+            <p class="m-desc">为用户 <strong>{{ pwdTarget?.username }}</strong> 设置新密码</p>
+            <label class="m-field">
+              <span>新密码<span class="req">*</span></span>
+              <input v-model="pwdValue" type="password" placeholder="至少 6 个字符" />
+            </label>
+            <p v-if="pwdError" class="err">{{ pwdError }}</p>
+          </form>
+          <footer class="m-foot">
+            <button class="mini" type="button" :disabled="pwdSubmitting" @click="closePwd">取消</button>
+            <button class="mini primary" type="button" :disabled="pwdSubmitting" @click="confirmPwd">
+              {{ pwdSubmitting ? '提交中…' : '确认' }}
+            </button>
+          </footer>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 删除确认弹窗 -->
+    <Teleport to="body">
+      <div v-if="showDel" class="modal-overlay" @click.self="closeDel">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="删除用户">
+          <header class="m-head">
+            <h3>删除用户</h3>
+            <button class="m-close" type="button" title="关闭" @click="closeDel">×</button>
+          </header>
+          <div class="m-body">
+            <p class="m-warn">
+              此操作不可恢复，将永久删除用户 <strong>{{ delTarget?.username }}</strong> 及其所有权限记录。
+            </p>
+            <p v-if="delError" class="err">{{ delError }}</p>
+          </div>
+          <footer class="m-foot">
+            <button class="mini" type="button" :disabled="delSubmitting" @click="closeDel">取消</button>
+            <button class="mini danger" type="button" :disabled="delSubmitting" @click="confirmDel">
+              {{ delSubmitting ? '删除中…' : '确认删除' }}
             </button>
           </footer>
         </div>
@@ -519,18 +571,19 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .mini.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
 .mini:disabled { opacity: 0.6; cursor: default; }
 
-.pwd-input {
-  height: 30px;
-  width: 130px;
-  padding: 0 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg-subtle);
+.m-desc { font-size: 14px; color: var(--text-secondary); margin: 0; }
+.m-desc strong { color: var(--text-primary); }
+.m-warn {
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0;
   color: var(--text-primary);
-  font-size: 13px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
 }
-.pwd-input:focus { outline: none; border-color: var(--brand); }
-.confirm-text { font-size: 13px; color: var(--danger); margin-right: 4px; }
+.m-warn strong { color: var(--danger); }
 
 .err { color: var(--danger); font-size: 13px; margin: 0; }
 .row-err { margin: 8px 0 0; }
