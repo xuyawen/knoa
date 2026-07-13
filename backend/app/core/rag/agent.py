@@ -14,11 +14,19 @@
   - retrieve：首次检索知识库
   - supplement_search：补充检索（用精炼后的查询词）
   - direct_answer：不检索，直接回答（LLM 在 JSON 里用 action 字段表达）
+  - web_search：联网搜索实时/外部信息
 
 性能优化：
   - 快速预分类：天气/时间/实时数据/纯数学等明显超出知识库范围的提问，
     直接走 direct_answer，跳过昂贵的 LLM tool_call 决策（省 15~40s/次）。
   - 心跳 ping：在每次 LLM 调用前推送 ping 事件，防止前端因长时间无数据而超时。
+
+结构（Phase3 T2，LangGraph 风格，纯 stdlib 自实现）：
+  - 节点 = 函数（_n_route / _n_retrieve / _n_supplement / _n_web_search / _n_generate / _n_finish / _n_start_skip）
+  - 边 = 节点执行结束时写回的「下一节点名」（st.next）
+  - 状态 = 共享的 _AgentState 对象（question / messages / all_sources / step ...）
+  - 调度 = _run_agent_loop 的 while 循环按 st.next 派发；不依赖 langgraph 库。
+  本质就是状态机：route 决策 → 检索类节点 ⇄ 回到 route「反思」→ 够了就 generate/finish 终态。
 
 对外接口：
   async for event in agent.stream(question, kb_id, session_id):
@@ -205,6 +213,28 @@ def _should_web_search(question: str) -> bool:
     return any(p.search(q) for p in _WEB_SEARCH_PATTERNS)
 
 
+class _AgentState:
+    """LangGraph 风格的共享状态：节点读写它，边（下一节点名）决定流转。
+
+    ponytail: 一个普通类承载全部循环可变状态，不引第三方状态库；
+    节点函数按 st.next 名字派发，等价于「条件边」。
+    """
+
+    def __init__(self, question: str, kb_id: str | None):
+        self.question = question
+        self.kb_id = kb_id
+        self.messages: list[dict] = []      # route 用到的 agent 对话上下文
+        self.all_sources: list[dict] = []   # 已召回的全部来源（KB/图/联网），连续编号
+        self.step = 0                         # 已执行的 route 步数（上限 MAX_STEPS）
+        self.action = ""                      # 最近一次 route 决策的动作名
+        self.route_result: ToolCallResult | None = None
+        self.candidate = ""                   # direct_answer 直接给的内容
+        self.final_answer_text = ""
+        self.next = "__end__"                # 下一节点名；"__end__" 终止
+        # web_search 后是否回到 route 再决策：agent 循环内=True，启发式直搜=False
+        self.web_loop = True
+
+
 class AgenticRAGAgent:
     """Agentic RAG 代理 — 用 LLM 驱动的决策闭环替代固定检索流程。"""
 
@@ -281,210 +311,25 @@ class AgenticRAGAgent:
                 except Exception as e:
                     logger.warning("graph retrieve failed (skip inject): %s", e)
 
-            # ── 快速预分类路径 ──
+            # ── 构造共享状态 + 选择入口节点（LangGraph 的 start 边）──
+            st = _AgentState(question, kb_id)
+            st.all_sources = all_sources
+            st.messages = [
+                {"role": "system", "content": AGENT_SYSTEM_PROMPT + self._memory_section()},
+                {"role": "user", "content": question},
+            ]
             if _should_skip_retrieval(question):
-                yield {
-                    "event": "thinking",
-                    "data": {"step": 0, "action": "direct_answer",
-                             "detail": "识别为常识/实时问题，跳过检索直接回答", "raw_reasoning": ""},
-                }
-                quick_messages = [
-                    {"role": "system", "content": (
-                        "你是「知海 Knoa」，一个跨境电商运营知识助手。"
-                        "用户问了一个知识库无法覆盖的常识/实时类问题（如天气、时间、股价等），"
-                    "请友好简洁地回答。如果确实不知道，就直说。不要自我介绍或罗列功能。"
-                        ) + self._memory_section()},
-                    {"role": "user", "content": question},
-                ]
-                full_answer = ""
-                async for delta in self.llm.stream_chat(quick_messages):
-                    full_answer += delta
-                    yield {"event": "delta", "data": {"content": delta}}
-                final_answer_text = full_answer
-
-            # 联网搜索快速路径
+                st.next = "_n_start_skip"          # 问候/常识 → 直接友好回答
             elif _should_web_search(question):
-                yield {
-                    "event": "thinking",
-                    "data": {"step": 0, "action": "web_search",
-                             "detail": "识别为实时/易变信息，联网搜索", "raw_reasoning": ""},
-                }
-                searcher = WebSearcher()
-                try:
-                    web = await searcher.search(question, max_results=5)
-                finally:
-                    await searcher.aclose()
-                if web:
-                    # 重新连续编号，接在 all_sources 之后，避免与知识库来源（1..N）撞号
-                    for i, w in enumerate(web, len(all_sources) + 1):
-                        w["id"] = i
-                        w["chunk_id"] = f"web:{i}"
-                    all_sources.extend(web)
-                    yield {"event": "sources", "data": self._format_sources(web)}
-                final_messages = self._build_final_prompt(question, all_sources, None)
-                full_answer = ""
-                async for delta in self.llm.stream_chat(final_messages):
-                    full_answer += delta
-                    yield {"event": "delta", "data": {"content": delta}}
-                final_answer_text = full_answer
-
-            # Agent Loop 路径
+                st.web_loop = False
+                st.next = "_n_web_search"          # 实时信息 → 搜一次即生成
             else:
-                messages = [
-                    {"role": "system", "content": AGENT_SYSTEM_PROMPT + self._memory_section()},
-                    {"role": "user", "content": question},
-                ]
-                step = 0
+                st.next = "_n_route"               # 业务问题 → agent 决策循环
 
-                while step < self.MAX_STEPS:
-                    step += 1
-                    yield {"event": "ping", "data": {"ts": time.time(), "step": step}}
-
-                    result: ToolCallResult = await self.llm.tool_call(
-                        messages, tools=TOOLS_SCHEMA, temperature=0.2
-                    )
-
-                    # 动作名归一化
-                    name = result.name
-                    if name == "web_search":
-                        pass  # 已是正确动作，跳过归一化
-                    elif name not in ("retrieve", "supplement_search", "direct_answer"):
-                        if "query" in result.arguments:
-                            name = "retrieve"
-                        elif "refined_query" in result.arguments:
-                            name = "supplement_search"
-                        elif "content" in result.arguments:
-                            name = "direct_answer"
-                        else:
-                            name = "direct_answer"
-                        result = ToolCallResult(
-                            name=name,
-                            arguments=result.arguments,
-                            raw_text=result.raw_text,
-                        )
-
-                    action_desc = self._describe_action(result)
-                    # ponytail: direct_answer 但已有检索结果时，实为「基于检索生成」，
-                    # 在前端就标成 generate，避免误导用户以为「没检索就回答」。
-                    display_action = result.name
-                    display_detail = action_desc
-                    if result.name == "direct_answer" and all_sources:
-                        display_action = "generate"
-                        display_detail = f"检索结果已充足（{len(all_sources)} 条），生成回答"
-
-                    yield {
-                        "event": "thinking",
-                        "data": {"step": step, "action": display_action,
-                                 "detail": display_detail,
-                                 "raw_reasoning": (result.raw_text or "")[:500]},
-                    }
-
-                    if result.name == "direct_answer":
-                        candidate = result.arguments.get("content", "").strip()
-                        if candidate:
-                            final_answer_text = candidate
-                        elif all_sources:
-                            # 已有检索结果但 LLM 选了 direct_answer（无 content），
-                            # 强制基于已有上下文流式生成，避免丢失已召回的 sources。
-                            # 展示已在上方统一标为 generate，此处不再重复 yield thinking。
-                            final_messages = self._build_final_prompt(question, all_sources, messages)
-                            full_answer = ""
-                            async for delta in self.llm.stream_chat(final_messages):
-                                full_answer += delta
-                                yield {"event": "delta", "data": {"content": delta}}
-                            final_answer_text = full_answer
-                        else:
-                            # 无任何检索结果时才走纯通用回答
-                            quick_msgs = [
-                                {"role": "system", "content": (
-                                    "你是「知海 Knoa」，一个跨境电商运营知识助手。"
-                                    "请简洁友好地回答用户的问题。不要自我介绍或罗列功能。"
-                                ) + self._memory_section()},
-                                {"role": "user", "content": question},
-                            ]
-                            try:
-                                final_answer_text = await self.llm.chat(quick_msgs)
-                            except Exception:
-                                final_answer_text = "好的，收到！"
-                        # 非流式路径（candidate 直接给内容 / 纯通用回答）才需一次性 yield；
-                        # 流式路径（已逐 token 输出）由上方 `elif all_sources` 分支处理，不再重复。
-                        if final_answer_text and (not all_sources or candidate):
-                            yield {"event": "delta", "data": {"content": final_answer_text}}
-                        break
-
-                    elif result.name == "retrieve":
-                        query = result.arguments.get("query", question)
-                        retrieved = await self.retriever.retrieve(query, kb_id, top_k=5)
-                        if retrieved:
-                            sources = self._format_sources(retrieved)
-                            all_sources.extend(sources)
-                            yield {"event": "sources", "data": sources}
-                            context_text = self._sources_to_context(retrieved)
-                            messages.append({"role": "assistant", "content": f"[已调用检索 retrieve，针对「{query}」检索到 {len(retrieved)} 条相关文档]"})
-                            messages.append({"role": "user", "content": f"检索结果：\n{context_text}\n\n基于以上信息，请直接给出最终回答。如果信息明显不足，才调用 supplement_search（大多数情况下直接回答即可）。"})
-                            continue
-                        else:
-                            messages.append({"role": "assistant", "content": "[已调用 retrieve 工具，但未找到相关文档]"})
-                            messages.append({"role": "user", "content": "检索未找到相关结果。请基于通用知识回答或尝试 supplement_search。"})
-                            continue
-
-                    elif result.name == "supplement_search":
-                        refined_query = result.arguments.get("refined_query", question)
-                        gap = result.arguments.get("gap_description", "")
-                        retrieved = await self.retriever.retrieve(refined_query, kb_id, top_k=5)
-                        if retrieved:
-                            sources = self._format_sources(retrieved)
-                            all_sources.extend(sources)
-                            yield {"event": "sources", "data": sources}
-                            context_text = self._sources_to_context(retrieved)
-                            messages.append({"role": "assistant", "content": f"[已调用补充检索 supplement_search，针对「{gap}」检索到 {len(retrieved)} 条]"})
-                            messages.append({"role": "user", "content": f"补充检索结果：\n{context_text}\n\n结合之前所有信息，请直接给出最终回答。"})
-                            continue
-                        else:
-                            messages.append({"role": "assistant", "content": "[补充检索也未找到新结果]"})
-                            messages.append({"role": "user", "content": "补充检索也没结果。请基于已有信息尽量回答。"})
-                            continue
-                    elif result.name == "web_search":
-                        query = result.arguments.get("query", question)
-                        searcher = WebSearcher()
-                        try:
-                            web = await searcher.search(query, max_results=5)
-                        finally:
-                            await searcher.aclose()
-                        if web:
-                            for i, w in enumerate(web, len(all_sources) + 1):
-                                w["id"] = i
-                                w["chunk_id"] = f"web:{i}"
-                            all_sources.extend(web)
-                            yield {"event": "sources", "data": self._format_sources(web)}
-                            context_text = self._sources_to_context(web)
-                            messages.append({"role": "assistant", "content": f"[已调用联网搜索 web_search，针对「{query}」检索到 {len(web)} 条网络结果]"})
-                            messages.append({"role": "user", "content": f"联网搜索结果：\n{context_text}\n\n结合以上信息（含知识库与联网结果），请直接给出最终回答。"})
-                            continue
-                        else:
-                            messages.append({"role": "assistant", "content": "[联网搜索未找到相关结果]"})
-                            messages.append({"role": "user", "content": "联网搜索无结果。请基于已有信息尽量回答。"})
-                            continue
-                    else:
-                        final_answer_text = f"抱歉，系统遇到了未知状态 ({result.name})。请重试。"
-                        break
-
-                # ── 循环结束后，若尚未得到答案则流式生成 ──
-                if not final_answer_text:
-                    if all_sources:
-                        # 有检索结果但循环耗尽（MAX_STEPS）仍未给答案，基于上下文生成
-                        yield {
-                            "event": "thinking",
-                            "data": {"step": step, "action": "generate",
-                                     "detail": f"达到最大步数，基于 {len(all_sources)} 条结果生成回答",
-                                     "raw_reasoning": ""},
-                        }
-                    final_messages = self._build_final_prompt(question, all_sources, messages)
-                    full_answer = ""
-                    async for delta in self.llm.stream_chat(final_messages):
-                        full_answer += delta
-                        yield {"event": "delta", "data": {"content": delta}}
-                    final_answer_text = full_answer
+            # ── 跑图：按 st.next 派发节点，直到 __end__ ──
+            async for ev in self._run_agent_loop(st):
+                yield ev
+            final_answer_text = st.final_answer_text
 
             # ---- 持久化 + done ----
             if not final_answer_text.strip():
@@ -494,7 +339,7 @@ class AgenticRAGAgent:
             citations = self._extract_citations(final_answer_text)
             assistant_msg = ChatMessage(
                 session_id=session.id, role="assistant",
-                content=final_answer_text, citations=citations, sources=all_sources,
+                content=final_answer_text, citations=citations, sources=st.all_sources,
             )
             self.db.add(assistant_msg)
             await self.db.commit()
@@ -513,6 +358,197 @@ class AgenticRAGAgent:
 
         except Exception as e:
             yield {"event": "error", "data": {"message": str(e)}}
+
+    # ------------------------------------------------------------------
+    # LangGraph 风格图：节点 = 函数，边 = 返回的下一节点名，状态 = _AgentState
+    # ------------------------------------------------------------------
+
+    async def _run_agent_loop(self, st: "_AgentState") -> AsyncIterator[dict]:
+        """按 st.next 派发节点的调度器（等价于 LangGraph 的编译后 graph.invoke）。"""
+        while st.next != "__end__":
+            node = getattr(self, st.next)
+            async for ev in node(st):
+                yield ev
+
+    async def _n_route(self, st: "_AgentState") -> AsyncIterator[dict]:
+        """决策节点：调 LLM 判断动作，并把「反思」结果（route）作为边回到检索或走向终态。"""
+        st.step += 1
+        yield {"event": "ping", "data": {"ts": time.time(), "step": st.step}}
+
+        result: ToolCallResult = await self.llm.tool_call(
+            st.messages, tools=TOOLS_SCHEMA, temperature=0.2
+        )
+
+        # 动作名归一化
+        name = result.name
+        if name == "web_search":
+            pass  # 已是正确动作，跳过归一化
+        elif name not in ("retrieve", "supplement_search", "direct_answer"):
+            if "query" in result.arguments:
+                name = "retrieve"
+            elif "refined_query" in result.arguments:
+                name = "supplement_search"
+            elif "content" in result.arguments:
+                name = "direct_answer"
+            else:
+                name = "direct_answer"
+            result = ToolCallResult(
+                name=name,
+                arguments=result.arguments,
+                raw_text=result.raw_text,
+            )
+
+        st.route_result = result
+        st.action = name
+
+        action_desc = self._describe_action(result)
+        # ponytail: direct_answer 但已有检索结果时，实为「基于检索生成」，
+        # 在前端就标成 generate，避免误导用户以为「没检索就回答」。
+        display_action = name
+        display_detail = action_desc
+        if name == "direct_answer" and st.all_sources:
+            display_action = "generate"
+            display_detail = f"检索结果已充足（{len(st.all_sources)} 条），生成回答"
+
+        yield {
+            "event": "thinking",
+            "data": {"step": st.step, "action": display_action,
+                     "detail": display_detail,
+                     "raw_reasoning": (result.raw_text or "")[:500]},
+        }
+
+        if name == "direct_answer":
+            st.candidate = result.arguments.get("content", "").strip()
+            st.next = "_n_finish"
+        elif name == "retrieve":
+            st.next = "_n_retrieve"
+        elif name == "supplement_search":
+            st.next = "_n_supplement"
+        elif name == "web_search":
+            st.next = "_n_web_search"
+        else:
+            st.next = "_n_generate"
+
+        # 步数上限：达到 MAX_STEPS 仍选了检索类动作 → 强制生成，保证终止
+        if st.step >= self.MAX_STEPS and st.next in ("_n_retrieve", "_n_supplement", "_n_web_search"):
+            yield {
+                "event": "thinking",
+                "data": {"step": st.step, "action": "generate",
+                         "detail": f"达到最大步数，基于 {len(st.all_sources)} 条结果生成回答",
+                         "raw_reasoning": ""},
+            }
+            st.next = "_n_generate"
+
+    async def _n_retrieve(self, st: "_AgentState") -> AsyncIterator[dict]:
+        query = st.route_result.arguments.get("query", st.question)
+        retrieved = await self.retriever.retrieve(query, st.kb_id, top_k=5)
+        if retrieved:
+            sources = self._format_sources(retrieved)
+            st.all_sources.extend(sources)
+            yield {"event": "sources", "data": sources}
+            context_text = self._sources_to_context(retrieved)
+            st.messages.append({"role": "assistant", "content": f"[已调用检索 retrieve，针对「{query}」检索到 {len(retrieved)} 条相关文档]"})
+            st.messages.append({"role": "user", "content": f"检索结果：\n{context_text}\n\n基于以上信息，请直接给出最终回答。如果信息明显不足，才调用 supplement_search（大多数情况下直接回答即可）。"})
+        else:
+            st.messages.append({"role": "assistant", "content": "[已调用 retrieve 工具，但未找到相关文档]"})
+            st.messages.append({"role": "user", "content": "检索未找到相关结果。请基于通用知识回答或尝试 supplement_search。"})
+        st.next = "_n_route"  # 反思：回到 route 再评估是否足够
+
+    async def _n_supplement(self, st: "_AgentState") -> AsyncIterator[dict]:
+        refined_query = st.route_result.arguments.get("refined_query", st.question)
+        gap = st.route_result.arguments.get("gap_description", "")
+        retrieved = await self.retriever.retrieve(refined_query, st.kb_id, top_k=5)
+        if retrieved:
+            sources = self._format_sources(retrieved)
+            st.all_sources.extend(sources)
+            yield {"event": "sources", "data": sources}
+            context_text = self._sources_to_context(retrieved)
+            st.messages.append({"role": "assistant", "content": f"[已调用补充检索 supplement_search，针对「{gap}」检索到 {len(retrieved)} 条]"})
+            st.messages.append({"role": "user", "content": f"补充检索结果：\n{context_text}\n\n结合之前所有信息，请直接给出最终回答。"})
+        else:
+            st.messages.append({"role": "assistant", "content": "[补充检索也未找到新结果]"})
+            st.messages.append({"role": "user", "content": "补充检索也没结果。请基于已有信息尽量回答。"})
+        st.next = "_n_route"
+
+    async def _n_web_search(self, st: "_AgentState") -> AsyncIterator[dict]:
+        query = st.route_result.arguments.get("query", st.question)
+        searcher = WebSearcher()
+        try:
+            web = await searcher.search(query, max_results=5)
+        finally:
+            await searcher.aclose()
+        if web:
+            # 重新连续编号，接在 all_sources 之后，避免与知识库来源（1..N）撞号
+            for i, w in enumerate(web, len(st.all_sources) + 1):
+                w["id"] = i
+                w["chunk_id"] = f"web:{i}"
+            st.all_sources.extend(web)
+            yield {"event": "sources", "data": self._format_sources(web)}
+            context_text = self._sources_to_context(web)
+            st.messages.append({"role": "assistant", "content": f"[已调用联网搜索 web_search，针对「{query}」检索到 {len(web)} 条网络结果]"})
+            st.messages.append({"role": "user", "content": f"联网搜索结果：\n{context_text}\n\n结合以上信息（含知识库与联网结果），请直接给出最终回答。"})
+        else:
+            st.messages.append({"role": "assistant", "content": "[联网搜索未找到相关结果]"})
+            st.messages.append({"role": "user", "content": "联网搜索无结果。请基于已有信息尽量回答。"})
+        # 启发式直搜路径（web_loop=False）搜完即生成；agent 循环内则回到 route 再决策
+        st.next = "_n_route" if st.web_loop else "_n_generate"
+
+    async def _n_generate(self, st: "_AgentState") -> AsyncIterator[dict]:
+        """终态节点：基于全部来源流式生成最终回答。"""
+        final_messages = self._build_final_prompt(st.question, st.all_sources, None)
+        full_answer = ""
+        async for delta in self.llm.stream_chat(final_messages):
+            full_answer += delta
+            yield {"event": "delta", "data": {"content": delta}}
+        st.final_answer_text = full_answer
+        st.next = "__end__"
+
+    async def _n_finish(self, st: "_AgentState") -> AsyncIterator[dict]:
+        """终态节点：direct_answer 的收尾（候选内容 / 改走生成 / 纯通用回答）。"""
+        if st.candidate:
+            st.final_answer_text = st.candidate
+            yield {"event": "delta", "data": {"content": st.candidate}}
+        elif st.all_sources:
+            # 有检索结果但 LLM 选了 direct_answer（无内容）→ 改走生成，避免丢来源
+            st.next = "_n_generate"
+            return
+        else:
+            # 无任何检索结果时才走纯通用回答
+            quick_msgs = [
+                {"role": "system", "content": (
+                    "你是「知海 Knoa」，一个跨境电商运营知识助手。"
+                    "请简洁友好地回答用户的问题。不要自我介绍或罗列功能。"
+                ) + self._memory_section()},
+                {"role": "user", "content": st.question},
+            ]
+            try:
+                st.final_answer_text = await self.llm.chat(quick_msgs)
+            except Exception:
+                st.final_answer_text = "好的，收到！"
+            yield {"event": "delta", "data": {"content": st.final_answer_text}}
+        st.next = "__end__"
+
+    async def _n_start_skip(self, st: "_AgentState") -> AsyncIterator[dict]:
+        """入口节点：问候/常识类问题，跳过检索直接友好回答。"""
+        yield {
+            "event": "thinking",
+            "data": {"step": 0, "action": "direct_answer",
+                     "detail": "识别为常识/实时问题，跳过检索直接回答", "raw_reasoning": ""},
+        }
+        quick_messages = [
+            {"role": "system", "content": (
+                "你是「知海 Knoa」，一个跨境电商运营知识助手。"
+                "用户问了一个知识库无法覆盖的常识/实时类问题（如天气、时间、股价等），"
+                "请友好简洁地回答。如果确实不知道，就直说。不要自我介绍或罗列功能。"
+            ) + self._memory_section()},
+            {"role": "user", "content": st.question},
+        ]
+        full_answer = ""
+        async for delta in self.llm.stream_chat(quick_messages):
+            full_answer += delta
+            yield {"event": "delta", "data": {"content": delta}}
+        st.final_answer_text = full_answer
+        st.next = "__end__"
 
     # ------------------------------------------------------------------
     # Internal helpers
