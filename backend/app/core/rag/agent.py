@@ -302,10 +302,12 @@ class AgenticRAGAgent:
                         question, kb_id, self.db, settings.GRAPH_TOP_K
                     )
                     if self._graph_chunks:
-                        # 接在知识库来源之后连续编号，避免与 [1..N] 撞号
+                        # 顺序编号只给角标 [N] 用；chunk_id 必须保留 graph.py
+                        # 返回的真实 DocChunk UUID，前端点「查看溯源」才能查到原文。
+                        # 之前误写成 graph:{i} 合成 id，使 /api/sources 的 UUID 校验
+                        # 失败（400），图谱溯源抽屉打不开 —— 这是 T1 的遗留 bug。
                         for i, g in enumerate(self._graph_chunks, len(all_sources) + 1):
                             g["id"] = i
-                            g["chunk_id"] = f"graph:{i}"
                         all_sources.extend(self._graph_chunks)
                         yield {"event": "sources", "data": self._format_sources(self._graph_chunks)}
                 except Exception as e:

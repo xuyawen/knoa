@@ -106,6 +106,12 @@ defineProps<{ name: string; size?: number }>()
     <template v-else-if="name === 'external'">
       <path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1h5" />
     </template>
+    <template v-else-if="name === 'graph'">
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="18" cy="7.5" r="2.5" />
+      <circle cx="12" cy="18" r="2.5" />
+      <path d="M8 7.2l8 0M7.5 8.2l3.3 7.8M16.5 9.7l-3.3 6.8" />
+    </template>
     <template v-else-if="name === 'alert-circle'">
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v5M12 16h.01" />

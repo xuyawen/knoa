@@ -11,8 +11,11 @@ const emit = defineEmits<{
 function isWeb(): boolean {
   return props.source.sourceType === 'web'
 }
+function isGraph(): boolean {
+  return props.source.sourceType === 'graph'
+}
 
-// 知识库来源：点击定位（右栏高亮）；联网来源：直接打开原文外链
+// 知识库/图谱来源：点击定位（右栏高亮）；联网来源：直接打开原文外链
 function onCardClick() {
   if (isWeb() && props.source.url) {
     window.open(props.source.url, '_blank')
@@ -25,17 +28,18 @@ function onFootClick() {
   if (isWeb() && props.source.url) {
     window.open(props.source.url, '_blank')
   } else {
+    // 知识库 / 图谱来源：chunkId 都是真实 DocChunk UUID，直接查原文
     emit('open', props.source.chunkId)
   }
 }
 </script>
 
 <template>
-  <button class="card" :class="{ web: isWeb() }" @click="onCardClick">
+  <button class="card" :class="{ web: isWeb(), graph: isGraph() }" @click="onCardClick">
     <div class="head">
-      <span class="tag" :class="isWeb() ? 'web' : 'kb'">
-        <Icon :name="isWeb() ? 'external' : 'library'" :size="12" />
-        {{ isWeb() ? '联网' : source.kb }}
+      <span class="tag" :class="isWeb() ? 'web' : (isGraph() ? 'graph' : 'kb')">
+        <Icon :name="isWeb() ? 'external' : (isGraph() ? 'graph' : 'library')" :size="12" />
+        {{ isWeb() ? '联网' : (isGraph() ? '图谱' : source.kb) }}
       </span>
       <span v-if="!isWeb()" class="conf" :class="{ low: source.confidence < 0.9 }">
         {{ Math.round(source.confidence * 100) }}%
@@ -93,6 +97,19 @@ function onFootClick() {
 }
 .card.web:hover {
   border-color: var(--warning, #f59e0b);
+}
+/* 图谱来源：紫色系，与知识库(蓝)/联网(橙)区分 */
+.tag.graph {
+  color: #8b5cf6;
+  background: color-mix(in srgb, #8b5cf6 12%, transparent);
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+}
+.card.graph {
+  border-color: color-mix(in srgb, #8b5cf6 35%, var(--border));
+}
+.card.graph:hover {
+  border-color: #8b5cf6;
 }
 .conf {
   font-size: 12px;
