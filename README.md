@@ -38,6 +38,8 @@
 - `agent.py` —— Agentic 决策：LLM 判断 `retrieve` / `supplement_search` / `direct_answer`；打招呼与闲聊跳过检索
 - `pipeline.py` —— 问答主流程：检索 → 流式生成 → 注入引用 → 心跳/超时保护
 
+> 详细文档见 [`docs/architecture.md`](./docs/architecture.md)（架构图 + 技术决策）、[`docs/api.md`](./docs/api.md)（API 参考）、[`docs/runbook.md`](./docs/runbook.md)（运维手册）；部署细节见 `deploy/nginx/README.md`。
+
 ## 目录结构
 
 ```
@@ -102,16 +104,20 @@ docker compose up -d postgres redis
 ### 全栈 Docker 部署（Phase 4）
 
 ```bash
-# 构建并启动全部服务（postgres + redis + backend + frontend）
-docker compose up --build
+# 生产（推荐）：edge 反代 TLS 终止 + 每日 PG 备份；
+#   postgres/redis/backend/frontend 仅容器网络内，只有 edge 暴露 80/443
+docker compose up -d --build
+# 访问：https://localhost （edge 把 /api/ 反代到 backend:8000，/ 反代到 frontend:80）
+# 健康检查：curl -kI https://localhost/api/health
 
-# 访问前端：http://localhost:8080  （/api 已由 nginx 反代到 backend:8000）
-# 后端健康检查：http://localhost:8080/api/health
+# 本地开发：恢复宿主机端口（5433/6380/8080）并关闭 edge/backup
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-- 首次启动 backend 会自动执行 `alembic upgrade head` 建表（见 `backend/app/database.py`）。
-- 上传文件持久化在 `knoa_uploads` 卷；Postgres / Redis 数据分别在 `knoa_pgdata` / `knoa_redisdata` 卷。
-- 生产 TLS 建议在宿主机用 nginx / caddy 反代终止，容器内部走明文 HTTP。
+- 仅 `edge` 对外暴露 80/443；postgres/redis/backend/frontend 不发布宿主机端口（见 `docker-compose.yml` 注释）。
+- 首次启动 backend 自动执行 `init_db()`（`create_all` 兜底）+ Alembic 迁移建表；**改了 ORM 模型要 `alembic revision --autogenerate`**（见 `docs/runbook.md`）。
+- 上传文件持久化在 `knoa_uploads` 卷；Postgres / Redis 数据分别在 `knoa_pgdata` / `knoa_redisdata` 卷；备份在 `knoa_backups` 卷。
+- 生产 TLS 由 `edge`（nginx:alpine）终止，证书放宿主机 `deploy/nginx/certs/`，详见 `deploy/nginx/README.md`。
 
 ## 快速开始
 
@@ -217,19 +223,32 @@ cd backend
 
 ## 进度
 
-- [x] 设计规格文档（design-spec.md）
+**Phase 1 — 核心问答（✅ 完成）**
 - [x] 前端骨架 + 亮/暗/系统主题切换
 - [x] 桌面主工作台 + 移动端工作台
-- [x] 后端 RAG 管线（混合检索 + Agentic 决策 + SSE 流式问答）
+- [x] 后端 RAG 管线（混合检索 BM25+向量 + RRF + Agentic 决策 + SSE 流式问答）
 - [x] 知识库浏览 + 文档上传（JSON 文本方式，避开 multipart 依赖）
 - [x] 答案溯源详情接口与前端抽屉
 - [x] 多会话历史（列表 / 新建 / 切换 / 持久化）
 - [x] 反馈闭环（点赞 / 点踩 / 复制）
-- [x] 种子语料入库（5 库 / 63 篇真实文档 / 419 切片）
+- [x] 种子语料入库（5 库 / 63 篇真实文档）
 - [x] 高频问题统计（闲聊过滤）
 
-## 后续路线（Phase 2–4）
+**Phase 2 — 企业级增强（✅ 完成）**
+- [x] RBAC 鉴权（admin/editor/viewer + 库级权限，手写 JWT，无 PyJWT 依赖）
+- [x] ES 混合检索（kNN + BM25 + RRF，IK 中文分词；不可达自动回退 pgvector）
+- [x] Mem0 长期记忆（自研轻量版，JSONB+numpy 余弦，零新依赖）
 
-- **Phase 2**：ES 混合检索增强、RBAC 权限、Mem0 长期记忆
-- **Phase 3**：Neo4j 知识图谱、LangGraph Agent、MinIO 文件存储与解析管线（PDF/DOCX）
-- **Phase 4**：Alembic 迁移（✅）、Docker 化部署（✅）、CI/CD（进行中）
+**Phase 3 — AI 能力扩展（✅ 完成）**
+- [x] 知识图谱 Graph RAG（Postgres 存图，摄入抽实体/关系，检索向量+1跳）
+- [x] LangGraph 风格 Agent（纯 stdlib 节点图状态机，行为不变）
+- [x] 文档解析管线 + 对象存储（md/txt/docx/pdf；local + S3 SigV4 零 SDK）
+
+**Phase 4 — 工程化（✅ 完成）**
+- [x] Alembic 迁移脚手架 + 初始迁移
+- [x] Docker 容器化 + compose 编排
+- [x] CI/CD（前端类型检查+构建 / 后端编译+迁移契约 / pytest 7 passed）
+- [x] 生产部署加固（edge TLS 反代 + PG 每日备份 + compose prod profile）
+- [x] 架构与运维文档（docs/architecture.md · api.md · runbook.md）
+
+> 详细文档见 [`docs/architecture.md`](./docs/architecture.md)（架构图）、[`docs/api.md`](./docs/api.md)（API 参考）、[`docs/runbook.md`](./docs/runbook.md)（运维手册）；部署细节见 `deploy/nginx/README.md`。
