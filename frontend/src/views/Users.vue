@@ -252,14 +252,16 @@ onUnmounted(() => {
         <Teleport to="body">
           <transition name="toast">
             <div v-if="successMsg" class="toast" role="status" @click="dismissSuccess">
-              {{ successMsg }}
+              <Icon name="check" :size="16" class="toast-icon" />
+              <span>{{ successMsg }}</span>
             </div>
           </transition>
         </Teleport>
         <Teleport to="body">
           <transition name="toast">
             <div v-if="errorMsg" class="toast err-toast" role="alert" @click="dismissError">
-              {{ errorMsg }}
+              <Icon name="alert-circle" :size="16" class="toast-icon" />
+              <span>{{ errorMsg }}</span>
             </div>
           </transition>
         </Teleport>
@@ -649,28 +651,30 @@ onUnmounted(() => {
   z-index: 90;
   display: inline-flex;
   align-items: center;
-  padding: 12px 20px;
+  gap: 8px;
+  padding: 11px 18px;
   border-radius: var(--radius-md);
-  background: rgba(34, 197, 94, 0.16);
-  border: 1px solid rgba(34, 197, 94, 0.45);
-  color: #22c55e;
+  background: #16a34a;
+  border: 1px solid #15803d;
+  color: #ffffff;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  box-shadow: var(--shadow-float);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
   animation: toast-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
+.toast .toast-icon { flex: none; opacity: 0.95; }
 .toast-enter-active,
-.toast-leave-active { transition: opacity 0.2s ease; }
+.toast-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .toast-enter-from,
-.toast-leave-to { opacity: 0; }
-@keyframes toast-in { from { opacity: 0; } to { opacity: 1; } }
+.toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+@keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(-8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 
-/* 失败提示 toast：同款悬浮，红色 */
+/* 失败提示 toast：同款悬浮，红色实心 */
 .toast.err-toast {
-  background: rgba(239, 68, 68, 0.16);
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  color: #ef4444;
+  background: #dc2626;
+  border: 1px solid #b91c1c;
+  color: #ffffff;
 }
 
 /* 新建用户弹窗 */
