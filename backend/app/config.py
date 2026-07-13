@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "admin123"
     ADMIN_DISPLAY_NAME: str = "系统管理员"
+    # HTTPS (TLS) — 自签证书用于本地开发；生产由 nginx 做 TLS 终止
+    SSL_CERT_FILE: str = "certs/cert.pem"
+    SSL_KEY_FILE: str = "certs/key.pem"
+    SSL_ENABLED: bool = True           # 本地开发启用 HTTPS，生产可由 nginx 反代后关
     # App
     APP_ENV: str = "development"
     CORS_ORIGINS: str = "http://localhost:5173"

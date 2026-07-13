@@ -13,8 +13,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'https://localhost:8000',
         changeOrigin: true,
+        secure: false,  // accept self-signed cert for local dev
         // SSE streaming: disable compression so http-proxy forwards chunks immediately
         configure: (proxy: any) => {
           proxy.on('proxyRes', (proxyRes: any) => {
