@@ -117,6 +117,13 @@ export interface UserCreate {
   role?: string       // 默认 viewer
 }
 
+export interface UserUpdate {
+  displayName?: string | null
+  role?: string
+  isActive?: boolean
+  password?: string
+}
+
 export type SSEEvent =
   | { event: 'thinking'; data: ThinkingStep }
   | { event: 'sources'; data: SourceItem[] }

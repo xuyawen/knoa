@@ -1,4 +1,4 @@
-import type { TokenOut, UserCreate, UserOut } from '@/types/api'
+import type { TokenOut, UserCreate, UserOut, UserUpdate } from '@/types/api'
 import { authHeaders } from './http'
 
 export async function login(username: string, password: string): Promise<TokenOut> {
@@ -39,4 +39,30 @@ export async function createUser(payload: UserCreate): Promise<UserOut> {
     throw new Error(err.detail || `HTTP ${resp.status}`)
   }
   return resp.json()
+}
+
+/** 更新用户（改角色 / 停用启用 / 重置密码，仅 admin）。 */
+export async function updateUser(id: string, payload: UserUpdate): Promise<UserOut> {
+  const resp = await fetch(`/api/auth/users/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+/** 删除用户（仅 admin；后端禁止删自己 / 删最后一个 admin）。 */
+export async function deleteUser(id: string): Promise<void> {
+  const resp = await fetch(`/api/auth/users/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+  if (!resp.ok && resp.status !== 204) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
 }

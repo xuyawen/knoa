@@ -2,7 +2,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
@@ -88,6 +88,17 @@ async def update_user(
     u = await db.scalar(select(User).where(User.id == user_id))
     if u is None:
         raise HTTPException(status_code=404, detail="用户不存在")
+    # 保护最后一个 admin：降级或停用当前 admin 时，必须仍有其他启用 admin
+    demoting = payload.role is not None and payload.role != "admin"
+    disabling = payload.is_active is False
+    if u.role == "admin" and (demoting or disabling):
+        other_active_admins = await db.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(User.role == "admin", User.is_active.is_(True), User.id != u.id)
+        )
+        if not other_active_admins:
+            raise HTTPException(status_code=400, detail="不能降级或停用最后一个管理员")
     if payload.display_name is not None:
         u.display_name = payload.display_name
     if payload.role is not None:
@@ -99,3 +110,26 @@ async def update_user(
     await db.commit()
     await db.refresh(u)
     return _to_out(u)
+
+
+@router.delete("/auth/users/{user_id}", status_code=204)
+async def delete_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(require_roles("admin")),
+):
+    if str(current.id) == user_id:
+        raise HTTPException(status_code=400, detail="不能删除自己")
+    u = await db.scalar(select(User).where(User.id == user_id))
+    if u is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if u.role == "admin":
+        other_admins = await db.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(User.role == "admin", User.id != u.id)
+        )
+        if not other_admins:
+            raise HTTPException(status_code=400, detail="不能删除最后一个管理员")
+    await db.delete(u)
+    await db.commit()
