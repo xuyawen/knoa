@@ -1,0 +1,30 @@
+# Knoa 开发覆盖（配合 docker-compose.yml 使用）
+#
+# 用法：  docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# 作用：
+#   - 恢复 postgres/redis/frontend 的宿主机端口，便于本机直接访问 / 调试。
+#   - 把 edge / backup 挪到 prod profile，而本命令不传 --profile prod，
+#     故生产专用的 TLS 反代 / 备份服务不会启动（开发用 vite 或 frontend:8080 直连）。
+#
+# 注意：开发时前端建议仍用 vite dev server（npm run dev，端口 5174），
+# 它的 vite proxy 已配好 /api -> backend:8000 的 HTTPS 自签信任。
+
+services:
+  postgres:
+    ports:
+      - "5433:5432"
+
+  redis:
+    ports:
+      - "6380:6379"
+
+  frontend:
+    ports:
+      - "8080:80"
+
+  edge:
+    profiles: ["prod"]
+
+  backup:
+    profiles: ["prod"]

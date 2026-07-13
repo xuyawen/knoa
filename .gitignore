@@ -30,6 +30,12 @@ backend/app/data/markdown/
 backend/app/data/uploads/
 # SSL certs (self-signed, regenerated per machine; private key NEVER in git)
 backend/certs/
+deploy/nginx/certs/
+deploy/nginx/certbot/
+
+# runtime backups (pg_dump output; regenerated, never track)
+deploy/backup/*.sql.gz
+deploy/backup/*.sql
 
 # personal AI study notes (user-only, not part of the project)
 AI学习笔记_核心功能.md
