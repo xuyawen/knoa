@@ -1,3 +1,4 @@
+import base64
 import uuid
 from datetime import datetime
 
@@ -9,6 +10,8 @@ from app.core.graph import GraphStore
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.es_client import ESClient
 from app.core.rag.ingestor import DocumentIngester
+from app.core.rag.parsers import UnsupportedFormatError, parse_document
+from app.core.storage import get_object_store
 from app.core.security import (
     get_current_user,
     get_kb_permission_level,
@@ -134,7 +137,7 @@ async def list_documents(
         DocumentOut(
             id=str(d.id),
             title=d.title,
-            type="MD" if d.source_path.endswith((".md", ".markdown")) else "TXT",
+            type=_doc_type(d.source_path),
             size_kb=round(len(d.content_md.encode("utf-8", errors="ignore")) / 1024, 2),
             status=d.status,
             updated_at=d.updated_at.isoformat() if d.updated_at else "",
@@ -151,38 +154,70 @@ async def upload_document(
     embedder: EmbeddingModel = Depends(get_embedder),
     _: User = Depends(require_kb_access("edit")),
 ):
-    """上传单篇文档（.md / .txt）。前端用 FileReader 读文本后以 JSON 提交，避免 multipart 依赖。"""
+    """上传单篇文档（.md / .txt / .docx / .pdf）。
+
+    Phase 3 T3 文档解析管线：先按原始字节存入对象存储（溯源/重解析），
+    再按扩展名解析为纯文本，最后交给 ingestor 切分+向量化+进图。
+    前端把文件读成 base64（content_b64）提交；文本文件仍兼容旧的 content 字段。
+    """
     kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
 
     filename = payload.filename or "untitled"
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
-    if ext in ("md", "markdown"):
-        ftype = "MD"
-    elif ext == "txt":
-        ftype = "TXT"
+    # 1) 还原原始字节：优先二进制（base64），其次文本路径（向后兼容）
+    if payload.content_b64:
+        try:
+            raw = base64.b64decode(payload.content_b64, validate=True)
+        except Exception:
+            raise HTTPException(status_code=422, detail="content_b64 不是合法 base64")
+    elif payload.content is not None:
+        raw = payload.content.encode("utf-8")
     else:
-        raise HTTPException(
-            status_code=415,
-            detail=f"不支持的文件格式 .{ext or '未知'}，当前仅支持 .md / .txt（PDF 解析将在后续阶段支持）",
-        )
+        raise HTTPException(status_code=422, detail="content 与 content_b64 至少提供其一")
 
-    # 知识图谱（Phase 3 T1）：上传文档时也抽实体进图，与 seed 摄入一致
+    # 2) 原始文件落对象存储（key 含 uuid 防重名；source_path 记录其位置用于溯源）
+    store = get_object_store()
+    object_key = f"uploads/{kb_id}/{uuid.uuid4().hex}_{filename}"
+    await store.put(object_key, raw)
+
+    # 3) 按扩展名解析为文本；解析失败则清理已存的原始文件并回 415
+    try:
+        parsed = parse_document(filename, raw)
+    except UnsupportedFormatError as e:
+        await store.delete(object_key)
+        raise HTTPException(status_code=415, detail=str(e))
+
+    # 4) 摄入：切分 + 向量化 + ES 双写 + 知识图谱抽取（与 seed 摄入一致）
     ingester = DocumentIngester(embedder, es=ESClient(), graph=GraphStore(get_llm(), embedder))
     doc = await ingester.ingest_text(
-        kb_id, _extract_title(payload.content, filename), payload.content, db, filename
+        kb_id, _extract_title(parsed.text, filename), parsed.text, db, object_key
     )
 
     return DocumentOut(
         id=str(doc.id),
         title=doc.title,
-        type=ftype,
-        size_kb=round(len(payload.content.encode("utf-8", errors="ignore")) / 1024, 2),
+        type=_doc_type(filename),
+        size_kb=round(len(raw) / 1024, 2),
         status=doc.status,
         updated_at=doc.updated_at.isoformat() if doc.updated_at else "",
     )
+
+
+_TYPE_MAP = {
+    "md": "MD",
+    "markdown": "MD",
+    "txt": "TXT",
+    "docx": "DOCX",
+    "pdf": "PDF",
+}
+
+
+def _doc_type(source_path: str) -> str:
+    """按文件名/存储 key 的扩展名推断文档类型（覆盖 md/txt/docx/pdf）。"""
+    ext = source_path.rsplit(".", 1)[-1].lower() if "." in source_path else "txt"
+    return _TYPE_MAP.get(ext, "TXT")
 
 
 def _extract_title(content: str, fallback: str) -> str:

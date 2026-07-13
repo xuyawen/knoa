@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     SSL_CERT_FILE: str = "certs/cert.pem"
     SSL_KEY_FILE: str = "certs/key.pem"
     SSL_ENABLED: bool = True           # 本地开发启用 HTTPS，生产可由 nginx 反代后关
+    # 对象存储（Phase 3 T3 文档解析管线）
+    # local = 落本地磁盘（沙箱/开发默认，零依赖）；s3 = MinIO/S3 兼容（httpx + 手写 SigV4）
+    OBJECT_STORE: str = "local"
+    OBJECT_STORE_LOCAL_DIR: str = "app/data/uploads"  # 相对项目根 backend/ 解析
+    # MinIO / S3（OBJECT_STORE=s3 时生效；httpx 直连 + SigV4，无需官方 SDK）
+    MINIO_ENDPOINT: str = "localhost:9000"
+    MINIO_ACCESS_KEY: str = ""
+    MINIO_SECRET_KEY: str = ""
+    MINIO_BUCKET: str = "knoa"
+    MINIO_REGION: str = "us-east-1"
+    MINIO_USE_SSL: bool = False
     # App
     APP_ENV: str = "development"
     CORS_ORIGINS: str = "http://localhost:5173"

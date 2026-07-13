@@ -55,7 +55,7 @@ class KnowledgeBasesResponse(CamelModel):
 class DocumentOut(CamelModel):
     id: str
     title: str
-    type: str          # 'MD' | 'TXT'
+    type: str          # 'MD' | 'TXT' | 'DOCX' | 'PDF'
     size_kb: float
     status: str         # '已审核' | '待复核'
     updated_at: str
@@ -63,7 +63,8 @@ class DocumentOut(CamelModel):
 
 class DocumentUploadIn(CamelModel):
     filename: str
-    content: str
+    content: str | None = None       # 文本路径（md/txt 直传文本，向后兼容）
+    content_b64: str | None = None    # 二进制路径（docx/pdf 传 base64 原始字节）
 
 
 class KBCreateIn(CamelModel):

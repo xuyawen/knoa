@@ -82,14 +82,22 @@ async function onFilePicked(e: Event) {
   const file = input.files?.[0]
   input.value = '' // 允许重复选同一文件
   if (!file) return
-  if (!/\.(md|markdown|txt)$/i.test(file.name)) {
-    uploadError.value = `仅支持 .md / .txt，当前文件：${file.name}`
+  if (!/\.(md|markdown|txt|docx|pdf)$/i.test(file.name)) {
+    uploadError.value = `仅支持 .md / .txt / .docx / .pdf，当前文件：${file.name}`
     return
   }
   uploadError.value = null
   try {
-    const content = await file.text()
-    await uploadDocument(kbId.value, file.name, content)
+    // 把文件读成 base64 原始字节；二进制格式（docx/pdf）只能走 base64
+    const buf = await file.arrayBuffer()
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    const chunk = 0x8000
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk) as unknown as number[])
+    }
+    const b64 = btoa(binary)
+    await uploadDocument(kbId.value, file.name, b64)
     await loadDocuments()
   } catch (e) {
     uploadError.value = e instanceof Error ? e.message : String(e)
@@ -162,7 +170,7 @@ watch(() => route.params.id, () => loadDocuments())
         <input
           ref="fileInput"
           type="file"
-          accept=".md,.markdown,.txt"
+          accept=".md,.markdown,.txt,.docx,.pdf"
           class="hidden-file"
           @change="onFilePicked"
         />

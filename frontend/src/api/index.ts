@@ -28,16 +28,17 @@ export async function getDocuments(kbId: string): Promise<DocumentItem[]> {
   return resp.json()
 }
 
-/** 上传单篇文档（.md / .txt）。前端用 FileReader 读文本后提交。 */
+/** 上传单篇文档（.md / .txt / .docx / .pdf）。
+ *  前端把文件读成 base64 原始字节（contentB64）提交，后端按扩展名解析。 */
 export async function uploadDocument(
   kbId: string,
   filename: string,
-  content: string,
+  contentB64: string,
 ): Promise<DocumentItem> {
   const resp = await fetch(`/api/knowledge-bases/${kbId}/documents`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ filename, content }),
+    body: JSON.stringify({ filename, contentB64 }),
   })
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))

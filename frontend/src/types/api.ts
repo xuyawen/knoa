@@ -21,7 +21,7 @@ export interface TrendingItem {
 export interface DocumentItem {
   id: string
   title: string
-  type: string      // 'MD' | 'TXT'
+  type: string      // 'MD' | 'TXT' | 'DOCX' | 'PDF'
   sizeKb: number
   status: string     // '已审核' | '待复核'
   updatedAt: string

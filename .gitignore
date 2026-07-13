@@ -26,6 +26,8 @@ __pycache__/
 # KB seed markdown — NOT authoritative, DB (pgvector) is the source of truth.
 # These files live on disk locally for re-ingest only; never track in git.
 backend/app/data/markdown/
+# uploaded raw files (docx/pdf/md) stored by the parsing pipeline; regenerated on upload
+backend/app/data/uploads/
 # SSL certs (self-signed, regenerated per machine; private key NEVER in git)
 backend/certs/
 
