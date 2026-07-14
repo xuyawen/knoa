@@ -55,6 +55,8 @@ onMounted(() => {
       </button>
     </div>
 
+    <!-- 可滚动导航区 -->
+    <div class="nav-scroll">
     <!-- 工作区入口（智能问答 / 文档管理 / 问答记录） -->
     <nav class="nav">
       <div class="nav-label">工作区</div>
@@ -99,8 +101,9 @@ onMounted(() => {
         <span>暂无知识库</span>
       </div>
     </nav>
+    </div>
 
-    <!-- 底部用户卡 -->
+    <!-- 底部用户卡（固定不随滚动） -->
     <div class="user-card">
       <div class="avatar">{{ (auth.user?.displayName || auth.user?.username || '?').charAt(0) }}</div>
       <div class="user-info">
@@ -126,8 +129,15 @@ onMounted(() => {
   border-right: 1px solid var(--border);
   padding: 16px 16px 12px;
   gap: 4px;
-  overflow-y: auto;
   transition: width 0.22s ease, transform 0.22s ease;
+}
+/* 中间导航区可滚动，用户卡固定底部 */
+.nav-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
 }
 .collapsed {
   width: 76px;
