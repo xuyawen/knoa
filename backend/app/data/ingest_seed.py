@@ -11,8 +11,18 @@ from app.core.rag.ingestor import DocumentIngester
 from app.database import AsyncSessionLocal, init_db
 from app.core.graph import GraphStore
 from app.deps import get_llm
+from app.db import KnowledgeBase
 
 KB_DIRS = ["compliance", "ads", "logistics", "selection", "service"]
+
+# 每个 seed 域的展示元信息（id 与目录名一致, icon 与前端 Icon.vue 对齐）
+KB_META = {
+    "compliance": {"name": "合规政策", "icon": "compliance", "description": "亚马逊账户健康、封号申诉、知识产权保护等合规指南"},
+    "ads":        {"name": "广告运营", "icon": "ads",        "description": "亚马逊 PPC / SB / SD 广告策略与投放技巧"},
+    "logistics":  {"name": "物流仓储", "icon": "logistics",  "description": "FBA 头程、海外仓、包装与运输方案"},
+    "selection":  {"name": "选品策略", "icon": "selection",  "description": "市场调研、竞品分析、蓝海选品方法论"},
+    "service":    {"name": "客户服务", "icon": "service",    "description": "售后处理、退换货、Review 管理与客服话术"},
+}
 
 
 async def main():
@@ -32,7 +42,22 @@ async def main():
         # 清空旧图谱：seed 是「重建全集」路径，避免实体/边重复堆积与孤儿节点
         await db.execute(text("DELETE FROM kg_edge"))
         await db.execute(text("DELETE FROM kg_node"))
+        # 清空旧的 KB 记录（seed 是全量重建）
+        await db.execute(text("DELETE FROM kb_permission"))
+        await db.execute(text("DELETE FROM knowledge_base"))
         await db.commit()
+
+        # 创建 5 个知识库记录（FK 前置：document.kb_id 引用 knowledge_base.id）
+        for kb_id, meta in KB_META.items():
+            kb = KnowledgeBase(
+                id=kb_id,
+                name=meta["name"],
+                icon=meta["icon"],
+                description=meta["description"],
+            )
+            db.add(kb)
+        await db.commit()
+        print(f"Created {len(KB_META)} knowledge bases.")
 
         base = Path(__file__).parent / "markdown"
         total = 0
