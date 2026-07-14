@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useAuthStore } from '@/stores/auth'
@@ -29,12 +29,6 @@ const emit = defineEmits<{
 }>()
 
 const bases = computed(() => knowledge.bases)
-
-// 知识库列表可折叠，默认展开；收起后侧栏变短、用户卡上移
-const kbOpen = ref(true)
-function toggleKb() {
-  kbOpen.value = !kbOpen.value
-}
 
 // 确保在任何页面刷新都能加载知识库列表
 onMounted(() => {
@@ -86,12 +80,9 @@ onMounted(() => {
       </router-link>
     </nav>
 
-    <!-- 知识库导航（标题可折叠，列表滚动） -->
-    <button v-show="!collapsed" class="nav-label nav-label-fixed" @click="toggleKb">
-      <span>知识库</span>
-      <Icon name="chevron-down" :size="14" class="nav-caret" :class="{ closed: !kbOpen }" />
-    </button>
-    <div v-show="kbOpen || collapsed" class="nav-scroll">
+    <!-- 知识库导航（标题固定，列表滚动） -->
+    <div v-show="!collapsed" class="nav-label nav-label-fixed">知识库</div>
+    <div class="nav-scroll">
     <nav class="nav">
       <router-link
         v-for="kb in bases"
@@ -277,13 +268,6 @@ onMounted(() => {
 }
 .nav-label-fixed:hover {
   color: var(--text-primary);
-}
-.nav-caret {
-  transition: transform 0.2s ease;
-  flex-shrink: 0;
-}
-.nav-caret.closed {
-  transform: rotate(-90deg);
 }
 .nav-item {
   display: flex;
