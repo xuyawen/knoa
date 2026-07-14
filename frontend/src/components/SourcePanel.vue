@@ -35,7 +35,7 @@ const emit = defineEmits<{
     <div class="section">
       <button class="section-head" @click="srcOpen = !srcOpen">
         <span class="section-title">答案溯源</span>
-        <span v-if="!srcOpen" class="section-summary">
+        <span class="section-summary">
           {{ chat.sources.length ? chat.sources.length + ' 个来源' : '暂无来源' }}
         </span>
         <Icon name="chevron-down" :size="14" class="section-caret" :class="{ closed: !srcOpen }" />
@@ -61,7 +61,7 @@ const emit = defineEmits<{
     <div class="section">
       <button class="section-head" @click="healthOpen = !healthOpen">
         <span class="section-title">知识库健康度</span>
-        <span v-if="!healthOpen" class="section-summary">
+        <span class="section-summary">
           {{ knowledge.health.length }} 个知识库 · 平均 {{ avgHealth }}%
         </span>
         <Icon name="chevron-down" :size="14" class="section-caret" :class="{ closed: !healthOpen }" />
@@ -83,7 +83,7 @@ const emit = defineEmits<{
     <div class="section">
       <button class="section-head" @click="trendOpen = !trendOpen">
         <span class="section-title">今日高频</span>
-        <span v-if="!trendOpen" class="section-summary">
+        <span class="section-summary">
           {{ knowledge.trending.length }} 个热门问题
         </span>
         <Icon name="chevron-down" :size="14" class="section-caret" :class="{ closed: !trendOpen }" />
