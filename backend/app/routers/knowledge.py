@@ -13,6 +13,7 @@ from app.core.rag.es_client import ESClient
 from app.core.rag.ingestor import DocumentIngester
 from app.core.rag.parsers import UnsupportedFormatError, parse_document
 from app.core.storage import get_object_store
+from app.config import settings
 from app.core.security import (
     get_current_user,
     get_kb_permission_level,
@@ -273,7 +274,14 @@ async def approve_document(
     await db.flush()
 
     # 触发摄入：与 seed / upload 共用同一套 chunk/embed/ES/图谱逻辑
-    ingester = DocumentIngester(embedder, es=ESClient(), graph=GraphStore(llm, embedder))
+    ingester = DocumentIngester(
+        embedder,
+        settings.RAG_CHUNK_SIZE,
+        settings.RAG_CHUNK_OVERLAP,
+        settings.RAG_CHUNK_MIN_CHARS,
+        es=ESClient(),
+        graph=GraphStore(llm, embedder),
+    )
     await ingester.ingest_existing(doc, db)
     await db.refresh(doc)
     return _doc_out(doc)

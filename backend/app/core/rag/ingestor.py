@@ -16,11 +16,12 @@ class DocumentIngester:
         embedder: EmbeddingModel,
         chunk_size: int = 500,
         overlap: int = 50,
+        min_chunk_chars: int = 10,
         es: ESClient | None = None,
         graph: GraphStore | None = None,
     ):
         self.embedder = embedder
-        self.chunker = MarkdownChunker(chunk_size, overlap)
+        self.chunker = MarkdownChunker(chunk_size, overlap, min_chunk_chars)
         # ES 客户端（可选）：传入则摄入时双写到 ES 索引，否则只写 pgvector
         self._es = es
         # 知识图谱（可选）：传入则摄入时抽取实体/关系写入图（Phase 3 T1）

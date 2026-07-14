@@ -32,7 +32,8 @@ async def main():
     graph = GraphStore(get_llm(), embedder)
     # 双写：若 ES_ENABLED=True 则摄入同时写入 ES 索引（幂等覆盖）
     ingester = DocumentIngester(
-        embedder, settings.RAG_CHUNK_SIZE, settings.RAG_CHUNK_OVERLAP, es=ESClient(), graph=graph
+        embedder, settings.RAG_CHUNK_SIZE, settings.RAG_CHUNK_OVERLAP,
+        settings.RAG_CHUNK_MIN_CHARS, es=ESClient(), graph=graph
     )
 
     async with AsyncSessionLocal() as db:

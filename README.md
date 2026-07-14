@@ -169,7 +169,7 @@ npm run dev            # 默认 https://localhost:5174
 | `REDIS_URL` | Redis 连接串，默认 `redis://localhost:6380/0` |
 | `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | 大模型（OpenAI 兼容接口） |
 | `EMBEDDING_BASE_URL` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL` / `EMBEDDING_DIM` | 向量模型（OpenAI 兼容接口，可与 LLM 不同厂商） |
-| `RAG_TOP_K` / `RAG_CHUNK_SIZE` / `RAG_CHUNK_OVERLAP` / `RRF_K` | 检索与切分参数 |
+| `RAG_TOP_K` / `RAG_CHUNK_SIZE` / `RAG_CHUNK_OVERLAP` / `RAG_CHUNK_MIN_CHARS` / `RRF_K` | 检索与切分参数（`RAG_CHUNK_MIN_CHARS` 为短文本噪声地板，低于此且无实质字符的内容视为噪声丢弃，但整篇有内容时保底至少 1 块） |
 | `CORS_ORIGINS` | 允许的前端来源 |
 | `LANGSMITH_TRACING` | 可选，开启 LLM 调用追踪 |
 

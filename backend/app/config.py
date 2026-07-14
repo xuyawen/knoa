@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     RAG_TOP_K: int = 5
     RAG_CHUNK_SIZE: int = 500
     RAG_CHUNK_OVERLAP: int = 50
+    # 噪声地板：低于该字符数且不含实质字符(CJK/字母/数字)的碎片视为噪声丢弃；
+    # 但整篇都有实质内容时仍保底至少 1 个 chunk（短 FAQ / 零散笔记可检索）。
+    RAG_CHUNK_MIN_CHARS: int = 10
     RRF_K: int = 60
     # Elasticsearch (Phase 2 混合检索；venv 装不了官方客户端，走 httpx 直连 REST)
     # 总开关：必须显式设 ES_ENABLED=True 才启用；ES 未就绪时保持 False，
