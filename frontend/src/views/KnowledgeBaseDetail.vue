@@ -141,6 +141,9 @@ const currentDoc = ref<DocumentItem | null>(null)
 const reviewResult = ref<AIReview | null>(null)
 const loadingReview = ref(false)
 
+/* 文档正文折叠 */
+const showFullContent = ref(false)
+
 async function openReview(doc: DocumentItem) {
   loadingReview.value = true
   reviewResult.value = null
