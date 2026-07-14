@@ -94,6 +94,10 @@ onMounted(() => {
         <span v-show="!collapsed" class="nav-name">{{ kb.name }}</span>
         <span v-if="kb.badge && !collapsed" class="nav-badge" :class="kb.badgeType">{{ kb.badge }}</span>
       </router-link>
+      <div v-if="bases.length === 0 && !collapsed" class="nav-empty">
+        <Icon name="inbox" :size="15" />
+        <span>暂无知识库</span>
+      </div>
     </nav>
 
     <!-- 底部用户卡 -->
@@ -281,6 +285,21 @@ onMounted(() => {
 .nav-badge.danger {
   background: var(--danger-soft);
   color: var(--danger);
+}
+.nav-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 4px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  border-radius: var(--radius-md);
+}
+.nav-empty svg {
+  flex-shrink: 0;
+  opacity: 0.6;
 }
 .nav-item.active .nav-badge.danger {
   background: rgba(255, 255, 255, 0.22);
