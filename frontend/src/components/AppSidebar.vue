@@ -80,10 +80,10 @@ onMounted(() => {
       </router-link>
     </nav>
 
-    <!-- 知识库导航（独立滚动区域） -->
+    <!-- 知识库导航（标题固定，列表滚动） -->
+    <div v-show="!collapsed" class="nav-label nav-label-fixed">知识库</div>
     <div class="nav-scroll">
     <nav class="nav">
-      <div v-show="!collapsed" class="nav-label">知识库</div>
       <router-link
         v-for="kb in bases"
         :key="kb.id"
@@ -248,6 +248,11 @@ onMounted(() => {
   color: var(--text-secondary);
   padding: 6px 12px 4px;
   letter-spacing: 0.04em;
+}
+/* 知识库标签固定在滚动区上方，不随列表滚动 */
+.nav-label-fixed {
+  margin-top: 8px;
+  flex-shrink: 0;
 }
 .nav-item {
   display: flex;
