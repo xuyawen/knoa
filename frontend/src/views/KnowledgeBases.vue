@@ -477,7 +477,10 @@ function goDetail(id: string) {
 }
 .kb-meta {
   font-size: 12px;
-  color: var(--text-placeholder);
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
   white-space: nowrap;
   flex-shrink: 0;
 }
