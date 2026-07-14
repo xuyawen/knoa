@@ -163,6 +163,7 @@ const emit = defineEmits<{
 }
 .divider {
   height: 1px;
+  flex-shrink: 0;
   background: var(--border);
   margin: 4px 0;
 }
