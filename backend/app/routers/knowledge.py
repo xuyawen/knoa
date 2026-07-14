@@ -37,15 +37,6 @@ from app.models.knowledge import (
 
 router = APIRouter()
 
-# ponytail: Phase 1 覆盖率用固定映射, 真实系统按检索命中/文档时效计算
-COVERAGE_MAP = {
-    "compliance": 0.82,
-    "ads": 0.76,
-    "logistics": 0.69,
-    "selection": 0.61,
-    "service": 0.55,
-}
-
 
 @router.get("/knowledge-bases", response_model=KnowledgeBasesResponse)
 async def get_knowledge_bases(
@@ -69,6 +60,9 @@ async def get_knowledge_bases(
                 func.count(Document.id)
                 .filter(Document.status == "待复核")
                 .label("pending"),
+                func.count(Document.id)
+                .filter(Document.status == "已审核")
+                .label("approved"),
             ).group_by(Document.kb_id)
         )
     ).all()
@@ -85,6 +79,10 @@ async def get_knowledge_bases(
         doc_count = stat.doc_count if stat else 0
         latest = stat.latest if stat else None
         pending_count = stat.pending if stat else 0
+        approved_count = stat.approved if stat else 0
+
+        # 覆盖率 = 已审核文档占比（0 篇时为 0，不显示假数字）
+        coverage = round(approved_count / doc_count, 2) if doc_count > 0 else 0.0
 
         badge = None
         badge_type = None
@@ -106,7 +104,7 @@ async def get_knowledge_bases(
                 kb=kb.name,
                 doc_count=doc_count or 0,
                 updated_at=latest.isoformat() if latest else "",
-                coverage=COVERAGE_MAP.get(kb.id, 0.5),
+                coverage=coverage,
             )
         )
 
