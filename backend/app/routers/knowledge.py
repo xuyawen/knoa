@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.graph import GraphStore
+from app.core.llm.openai_compat import OpenAICompatProvider
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.es_client import ESClient
 from app.core.rag.ingestor import DocumentIngester
@@ -158,6 +159,7 @@ async def upload_document(
     payload: DocumentUploadIn,
     db: AsyncSession = Depends(get_db),
     embedder: EmbeddingModel = Depends(get_embedder),
+    llm: OpenAICompatProvider = Depends(get_llm),
     _: User = Depends(require_kb_access("edit")),
 ):
     """上传单篇文档（.md / .txt / .docx / .pdf）。
@@ -196,7 +198,7 @@ async def upload_document(
         raise HTTPException(status_code=415, detail=str(e))
 
     # 4) 摄入：切分 + 向量化 + ES 双写 + 知识图谱抽取（与 seed 摄入一致）
-    ingester = DocumentIngester(embedder, es=ESClient(), graph=GraphStore(get_llm(), embedder))
+    ingester = DocumentIngester(embedder, es=ESClient(), graph=GraphStore(llm, embedder))
     doc = await ingester.ingest_text(
         kb_id, _extract_title(parsed.text, filename), parsed.text, db, object_key
     )
