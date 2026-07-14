@@ -19,7 +19,7 @@ const trendOpen = ref(false)
 const avgHealth = computed(() => {
   const list = knowledge.health
   if (!list.length) return 0
-  const sum = list.reduce((a, h) => a + (h.health_score || 0), 0)
+  const sum = list.reduce((a, h) => a + (h.healthScore || 0), 0)
   return Math.round((sum / list.length) * 100)
 })
 
