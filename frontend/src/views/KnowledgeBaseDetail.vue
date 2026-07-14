@@ -386,7 +386,7 @@ watch(() => route.params.id, () => {
         <template v-else>
           <div class="content-wrapper">
             <pre class="detail-content content-preview">{{ detailDoc.contentMd }}</pre>
-            <button class="expand-btn" @click="showFullContent = true">展开完整内容</button>
+            <button class="expand-btn" @click="showFullContent = true"><Icon name="chevron-up" :size="12" /> 展开完整内容</button>
           </div>
         </template>
 
@@ -757,7 +757,7 @@ watch(() => route.params.id, () => {
   overflow-y: auto;
 }
 
-/* 折叠态 */
+/* 折叠态：底部渐变遮罩提示还有更多内容 */
 .detail-content.content-preview {
   display: -webkit-box;
   -webkit-line-clamp: 8;
@@ -770,30 +770,48 @@ watch(() => route.params.id, () => {
   border-bottom-right-radius: 0;
 }
 
-/* 展开完整内容按钮 —— 定位在右下角 */
+/* 折叠态外层包裹渐变遮罩 */
+.content-wrapper::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--bg-subtle) 0%, transparent 100%);
+  opacity: 1;
+  transition: opacity 0.2s ease;
+  border-bottom-left-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
+}
+
+/* 渐变遮罩下的展开按钮 */
 .expand-btn {
   position: absolute;
-  bottom: 8px;
+  bottom: 10px;
   right: 12px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 12px;
+  padding: 6px 14px;
   font-size: 12px;
   font-weight: 500;
   color: var(--brand);
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  border-top: none;
-  border-right: none;
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: all 0.2s ease;
   z-index: 2;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 .expand-btn:hover {
-  background: var(--brand-soft);
+  background: var(--brand);
+  color: #fff;
   border-color: var(--brand);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 /* ── AI 审核建议面板 ── */
