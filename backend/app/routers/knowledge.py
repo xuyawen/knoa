@@ -28,6 +28,9 @@ from app.models.knowledge import (
     DocumentUploadIn,
     HealthItemOut,
     KBCreateIn,
+    KBUpdateIn,
+    KBReorderIn,
+    KBBatchDeleteIn,
     KnowledgeBaseOut,
     KnowledgeBasesResponse,
 )
@@ -49,7 +52,10 @@ async def get_knowledge_bases(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(KnowledgeBase).order_by(KnowledgeBase.created_at))
+    # 按 order 列排序（拖拽持久化），同序再按创建时间稳定
+    result = await db.execute(
+        select(KnowledgeBase).order_by(KnowledgeBase.order, KnowledgeBase.created_at)
+    )
     kbs = result.scalars().all()
 
     # 一次聚合查询替代「每库 3 次查询」的 N+1 模式：
@@ -90,6 +96,9 @@ async def get_knowledge_bases(
             KnowledgeBaseOut(
                 id=kb.id, name=kb.name, icon=kb.icon,
                 badge=badge, badge_type=badge_type,
+                document_count=doc_count or 0,
+                pending_count=pending_count or 0,
+                description=kb.description,
             )
         )
         health_list.append(
@@ -369,3 +378,113 @@ def _extract_title(content: str, fallback: str) -> str:
         if line.startswith("# "):
             return line[2:].strip()
     return fallback
+
+
+async def _delete_kb_cascade(db: AsyncSession, kb_id: str) -> None:
+    """级联删除知识库：先清其下所有文档（chunk/ES/图谱/对象存储），
+    再清库级权限与库本身。
+
+    顺序关键：先取 chunk_id → 删图节点 → 删 DocChunk（FK 必须在删
+    Document 前清）→ 删 ES → 删对象存储 → 删 Document → 删权限 → 删库。
+    ES / 图谱连接失败时静默跳过，不阻断删除——生产环境 ES 偶发
+    抖动不应导致删库失败，测试环境无 ES 也能跑通。
+    """
+    docs = (await db.execute(select(Document).where(Document.kb_id == kb_id))).scalars().all()
+    store = get_object_store()
+    for doc in docs:
+        chunk_ids = (
+            await db.execute(select(DocChunk.id).where(DocChunk.document_id == doc.id))
+        ).scalars().all()
+        # 删图谱节点（按 chunk_id 归属），连接失败静默跳过
+        try:
+            await GraphStore().delete_by_doc(db, kb_id, chunk_ids)
+        except Exception:
+            pass
+        # 删 DocChunk（FK 必须在删 Document 前清，否则违反外键）
+        await db.execute(delete(DocChunk).where(DocChunk.document_id == doc.id))
+        # 删 ES 索引，连接失败静默跳过
+        try:
+            await ESClient().delete_by_doc(kb_id, str(doc.id))
+        except Exception:
+            pass
+        # 删对象存储原始文件，缺失不阻断删除
+        try:
+            await store.delete(doc.source_path)
+        except Exception:
+            pass
+        await db.delete(doc)
+    # 清库级权限
+    await db.execute(delete(KBPermission).where(KBPermission.kb_id == kb_id))
+    # 删库本身
+    await db.execute(delete(KnowledgeBase).where(KnowledgeBase.id == kb_id))
+    await db.commit()
+
+
+@router.put("/knowledge-bases/{kb_id}", response_model=KnowledgeBaseOut)
+async def update_knowledge_base(
+    kb_id: str,
+    payload: KBUpdateIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_kb_access("admin")),
+):
+    """编辑知识库：更新名称 / 图标 / 描述（库 admin 级或全局 admin 可执行）。"""
+    kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
+    if not kb:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    if payload.name is not None:
+        kb.name = payload.name
+    if payload.icon is not None:
+        kb.icon = payload.icon
+    if payload.description is not None:
+        kb.description = payload.description
+    await db.commit()
+    await db.refresh(kb)
+    return KnowledgeBaseOut(
+        id=kb.id, name=kb.name, icon=kb.icon, description=kb.description
+    )
+
+
+@router.delete("/knowledge-bases/{kb_id}", status_code=204)
+async def delete_knowledge_base(
+    kb_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_kb_access("admin")),
+):
+    """删除知识库：级联清理其下文档 / chunk / ES / 图谱 / 对象存储 / 库级权限。"""
+    kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
+    if not kb:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    await _delete_kb_cascade(db, kb_id)
+
+
+@router.post("/knowledge-bases/reorder")
+async def reorder_knowledge_bases(
+    payload: KBReorderIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("admin")),
+):
+    """拖拽排序：前端传回当前列表的完整 id 顺序，后端按数组下标赋 order。
+
+    全局排序操作无单一 kb_id，故用 require_roles 限制为全局 admin。
+    """
+    kbs = (
+        await db.execute(select(KnowledgeBase).where(KnowledgeBase.id.in_(payload.ordered_ids)))
+    ).scalars().all()
+    pos = {kid: i for i, kid in enumerate(payload.ordered_ids)}
+    for kb in kbs:
+        kb.order = pos.get(kb.id, kb.order)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/knowledge-bases/batch-delete", status_code=204)
+async def batch_delete_knowledge_bases(
+    payload: KBBatchDeleteIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("admin")),
+):
+    """批量删除知识库：对每个 id 走与单删相同的级联清理。"""
+    for kb_id in payload.ids:
+        kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
+        if kb:
+            await _delete_kb_cascade(db, kb_id)

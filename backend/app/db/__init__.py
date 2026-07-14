@@ -17,6 +17,8 @@ class KnowledgeBase(Base):
     name: Mapped[str] = mapped_column(String(100))
     icon: Mapped[str] = mapped_column(String(50))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # order 是 SQL 保留字；name="order" + quote=True 编译为带引号的 "order"
+    order: Mapped[int] = mapped_column(Integer, name="order", default=0, server_default="0", nullable=False, quote=True)
     pending_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     documents: Mapped[list["Document"]] = relationship(back_populates="kb")

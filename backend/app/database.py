@@ -59,6 +59,12 @@ async def _migrate_columns(conn) -> None:
         await conn.execute(
             text(f"ALTER TABLE document ADD COLUMN IF NOT EXISTS {name} {typ}")
         )
+    # knowledge_base 排序字段（前端拖拽排序用）；order 是保留字，列名需引号
+    kb_cols = [('"order"', "INTEGER NOT NULL DEFAULT 0")]
+    for name, typ in kb_cols:
+        await conn.execute(
+            text(f"ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS {name} {typ}")
+        )
 
 
 async def init_db():

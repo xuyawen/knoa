@@ -7,6 +7,8 @@ import type {
   SourceDetail,
   ChatSession,
   SessionDetail,
+  KBUpdate,
+  KnowledgeBase,
 } from '@/types/api'
 import { authHeaders } from './http'
 
@@ -154,6 +156,61 @@ export async function submitFeedback(messageId: string, rating: 'up' | 'down') {
   })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
+}
+
+/** 编辑知识库：只传需改字段（name / icon / description）。 */
+export async function updateKnowledgeBase(
+  id: string,
+  payload: KBUpdate,
+): Promise<KnowledgeBase> {
+  const resp = await fetch(`/api/knowledge-bases/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+/** 删除单个知识库（级联清理其下文档 / 向量 / 图谱）。 */
+export async function deleteKnowledgeBase(id: string): Promise<void> {
+  const resp = await fetch(`/api/knowledge-bases/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+}
+
+/** 拖拽排序：传回当前完整 id 顺序，后端按下标赋 order。 */
+export async function reorderKnowledgeBases(orderedIds: string[]): Promise<void> {
+  const resp = await fetch('/api/knowledge-bases/reorder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ orderedIds }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+}
+
+/** 批量删除知识库。 */
+export async function batchDeleteKnowledgeBases(ids: string[]): Promise<void> {
+  const resp = await fetch('/api/knowledge-bases/batch-delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ ids }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
 }
 
 /** 取消对某条回答的反馈。 */

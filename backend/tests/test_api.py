@@ -17,7 +17,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 
-from app.db import DocChunk, Document
+from app.db import DocChunk, Document, KnowledgeBase
 from app.main import app
 
 
@@ -205,3 +205,97 @@ async def test_short_document_still_ingested(client, db_session):
         assert n1 >= 1, "短文档被噪声阈值丢弃, 审核后搜不到"
     finally:
         await client.delete(f"/api/knowledge-bases/{kb_id}", headers=h)
+
+
+async def test_kb_update_and_delete_cascade(client, db_session):
+    """编辑知识库 + 删除级联清理验收：
+
+    - PUT 改名后列表能查到新名
+    - 上传并审核 → 产生 DocChunk（document_count 返回 >=1）
+    - DELETE 级联清掉库下 Document 与 DocChunk（含向量/图谱/对象存储）
+    """
+    token = await _token(client)
+    h = {"Authorization": f"Bearer {token}"}
+    kb_id = (await client.post("/api/knowledge-bases", json={"name": "删库测试"}, headers=h)).json()["id"]
+
+    # 1) PUT 改名
+    r = await client.put(
+        f"/api/knowledge-bases/{kb_id}", json={"name": "改名后"}, headers=h
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "改名后"
+    lst = (await client.get("/api/knowledge-bases", headers=h)).json()
+    assert any(x["id"] == kb_id and x["name"] == "改名后" for x in lst["knowledgeBases"])
+
+    # 2) 上传并审核 → 产生 chunk，且列表 documentCount >= 1
+    up = await client.post(
+        f"/api/knowledge-bases/{kb_id}/documents",
+        json={
+            "filename": "c.md",
+            "content": "# C\n我们需要一段足够长的文本来触发分块逻辑，确保删除级联时文档与向量都被正确清理。",
+        },
+        headers=h,
+    )
+    doc_id = up.json()["id"]
+    await client.post(f"/api/knowledge-bases/{kb_id}/documents/{doc_id}/approve", headers=h)
+    n_before = (
+        await db_session.execute(
+            select(func.count()).select_from(DocChunk).where(DocChunk.kb_id == kb_id)
+        )
+    ).scalar()
+    assert n_before > 0
+    lst2 = (await client.get("/api/knowledge-bases", headers=h)).json()
+    kb_info = next(x for x in lst2["knowledgeBases"] if x["id"] == kb_id)
+    assert kb_info["documentCount"] >= 1
+
+    # 3) DELETE 级联
+    d = await client.delete(f"/api/knowledge-bases/{kb_id}", headers=h)
+    assert d.status_code == 204, d.text
+    gone = await db_session.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
+    assert gone is None
+    n_after = (
+        await db_session.execute(
+            select(func.count()).select_from(DocChunk).where(DocChunk.kb_id == kb_id)
+        )
+    ).scalar()
+    assert n_after == 0
+    doc_gone = await db_session.scalar(select(Document).where(Document.kb_id == kb_id))
+    assert doc_gone is None
+
+
+async def test_kb_reorder(client):
+    """拖拽排序：传回 id 顺序，后端按数组下标赋 order，列表随之重排。"""
+    token = await _token(client)
+    h = {"Authorization": f"Bearer {token}"}
+    ids = [
+        (await client.post("/api/knowledge-bases", json={"name": f"R{n}"}, headers=h)).json()["id"]
+        for n in ("1", "2", "3")
+    ]
+    try:
+        rev = ids[::-1]
+        r = await client.post(
+            "/api/knowledge-bases/reorder", json={"orderedIds": rev}, headers=h
+        )
+        assert r.status_code == 200, r.text
+        lst = (await client.get("/api/knowledge-bases", headers=h)).json()["knowledgeBases"]
+        got = [x["id"] for x in lst if x["id"] in ids]
+        assert got == rev, f"order mismatch: {got} vs {rev}"
+    finally:
+        for i in ids:
+            await client.delete(f"/api/knowledge-bases/{i}", headers=h)
+
+
+async def test_kb_batch_delete(client):
+    """批量删除知识库：一次请求清掉多个库。"""
+    token = await _token(client)
+    h = {"Authorization": f"Bearer {token}"}
+    ids = [
+        (await client.post("/api/knowledge-bases", json={"name": f"B{n}"}, headers=h)).json()["id"]
+        for n in range(2)
+    ]
+    r = await client.post(
+        "/api/knowledge-bases/batch-delete", json={"ids": ids}, headers=h
+    )
+    assert r.status_code == 204, r.text
+    lst = (await client.get("/api/knowledge-bases", headers=h)).json()["knowledgeBases"]
+    assert all(i not in [x["id"] for x in lst] for i in ids)

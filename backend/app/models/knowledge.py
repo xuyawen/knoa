@@ -14,6 +14,9 @@ class KnowledgeBaseOut(CamelModel):
     icon: str
     badge: str | None = None
     badge_type: str | None = None
+    document_count: int = 0
+    pending_count: int = 0
+    description: str | None = None
 
 
 class HealthItemOut(CamelModel):
@@ -86,3 +89,20 @@ class KBCreateIn(CamelModel):
     name: str
     icon: str | None = None
     description: str | None = None
+
+
+class KBUpdateIn(CamelModel):
+    """编辑知识库：只更新调用方提供的字段（其余保持不变）。"""
+    name: str | None = None
+    icon: str | None = None
+    description: str | None = None
+
+
+class KBReorderIn(CamelModel):
+    """拖拽排序：前端把当前列表的完整 id 顺序传回，后端按数组下标赋 order。"""
+    ordered_ids: list[str]
+
+
+class KBBatchDeleteIn(CamelModel):
+    """批量删除知识库：ids 为待删库 id 列表。"""
+    ids: list[str]

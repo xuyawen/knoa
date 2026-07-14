@@ -4,12 +4,29 @@ export interface KnowledgeBase {
   icon: string
   badge: string | null
   badgeType: 'danger' | 'info' | null
+  documentCount: number
+  pendingCount: number
+  description: string | null
 }
 
 export interface KBCreate {
   name: string
   icon?: string | null
   description?: string | null
+}
+
+export interface KBUpdate {
+  name?: string | null
+  icon?: string | null
+  description?: string | null
+}
+
+export interface KBReorder {
+  orderedIds: string[]
+}
+
+export interface KBBatchDelete {
+  ids: string[]
 }
 
 export interface HealthItem {
