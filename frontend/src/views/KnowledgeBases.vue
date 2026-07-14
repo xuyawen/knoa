@@ -236,9 +236,11 @@ function goDetail(id: string) {
               @change="onCheck(kb.id, $event)"
             />
             <span class="kb-icon" @click="goDetail(kb.id)"><Icon :name="kb.icon" :size="20" /></span>
-            <span class="kb-name" @click="goDetail(kb.id)">{{ kb.name }}</span>
-            <span class="kb-meta">{{ kb.documentCount }} 篇文档</span>
-            <span v-if="kb.pendingCount > 0" class="kb-badge danger">{{ kb.pendingCount }} 待复核</span>
+            <div class="kb-info">
+              <span class="kb-name" @click="goDetail(kb.id)">{{ kb.name }}</span>
+              <span class="kb-meta">{{ kb.documentCount }} 篇文档</span>
+              <span v-if="kb.pendingCount > 0" class="kb-badge danger">{{ kb.pendingCount }} 待复核</span>
+            </div>
             <span class="kb-actions">
               <button class="icon-btn" title="编辑" @click.stop="openEdit(kb)"><Icon name="edit" :size="16" /></button>
               <button class="icon-btn danger" title="删除" @click.stop="askDeleteOne(kb)"><Icon name="trash" :size="16" /></button>
@@ -458,10 +460,20 @@ function goDetail(id: string) {
   flex-shrink: 0;
   cursor: pointer;
 }
+.kb-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
 .kb-name {
   font-weight: 500;
-  flex: 1;
   cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
 }
 .kb-meta {
   font-size: 12px;
