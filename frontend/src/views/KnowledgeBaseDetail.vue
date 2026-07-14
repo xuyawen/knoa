@@ -83,6 +83,7 @@ const kb = computed(() => {
 /* 真实文档列表（接 /api/knowledge-bases/:id/documents） */
 const documents = ref<DocumentItem[]>([])
 const loadingDocs = ref(false)
+const isUploading = ref(false)
 const uploadError = ref<string | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -98,8 +99,13 @@ async function loadDocuments() {
   }
 }
 
-function triggerUpload() {
-  fileInput.value?.click()
+async function triggerUpload() {
+  isUploading.value = true
+  try {
+    fileInput.value?.click()
+  } finally {
+    setTimeout(() => { isUploading.value = false }, 100) // 点一下立刻恢复，避免文件选择器关闭后长时间 disabled
+  }
 }
 
 async function onFilePicked(e: Event) {
@@ -109,6 +115,7 @@ async function onFilePicked(e: Event) {
   if (!file) return
   if (!/\.(md|markdown|txt|docx|pdf)$/i.test(file.name)) {
     uploadError.value = `仅支持 .md / .txt / .docx / .pdf，当前文件：${file.name}`
+    isUploading.value = false
     return
   }
   uploadError.value = null
@@ -127,6 +134,8 @@ async function onFilePicked(e: Event) {
     await loadDocuments()
   } catch (e) {
     uploadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    isUploading.value = false
   }
 }
 
@@ -228,8 +237,15 @@ onMounted(() => {
   mq.addEventListener('change', syncMobile)
   loadDocuments()
 })
-onUnmounted(() => mq?.removeEventListener('change', syncMobile))
-watch(() => route.params.id, () => loadDocuments())
+onUnmounted(() => {
+  syncMobile()
+  loadDocuments()
+  mq?.removeEventListener('change', syncMobile)
+})
+watch(() => route.params.id, () => {
+  syncMobile()
+  loadDocuments()
+})
 </script>
 
 <template>
@@ -268,9 +284,9 @@ watch(() => route.params.id, () => loadDocuments())
 
         <!-- 操作栏 -->
         <div class="toolbar">
-          <button class="btn-primary" @click="triggerUpload" :disabled="loadingDocs">
+          <button class="btn-primary" @click="triggerUpload" :disabled="isUploading">
             <Icon name="plus" :size="16" />
-            {{ loadingDocs ? '上传中...' : '上传文档' }}
+            {{ isUploading ? '上传中...' : '上传文档' }}
           </button>
           <div class="toolbar-right">
             <input type="text" placeholder="搜索文档..." class="search-input" />
@@ -364,16 +380,14 @@ watch(() => route.params.id, () => loadDocuments())
         <div v-if="loadingDetail" class="detail-loading">加载中...</div>
 
         <!-- 文档正文：可折叠预览 -->
-        <template v-else-if="detailDoc">
-          <button class="content-toggle" :class="{ expanded: showFullContent }" @click="showFullContent = !showFullContent">
-            <span>{{ showFullContent ? '收起' : '展开文档正文' }}</span>
-            <Icon name="chevron-down" :size="14" class="toggle-arrow" />
-          </button>
-          <pre v-if="showFullContent" class="detail-content">{{ detailDoc.contentMd }}</pre>
-          <template v-else>
+        <div v-if="showFullContent" class="content-wrapper">
+          <pre class="detail-content">{{ detailDoc.contentMd }}</pre>
+        </div>
+        <template v-else>
+          <div class="content-wrapper">
             <pre class="detail-content content-preview">{{ detailDoc.contentMd }}</pre>
-            <span class="expand-hint" @click="showFullContent = true">点击展开完整内容…</span>
-          </template>
+            <button class="expand-btn" @click="showFullContent = true">展开完整内容</button>
+          </div>
         </template>
 
         <!-- AI 审核建议面板 -->
@@ -723,6 +737,65 @@ watch(() => route.params.id, () => loadDocuments())
   transform: none !important;
 }
 
+/* ── 文档正文折叠容器 ── */
+.content-wrapper {
+  position: relative;
+}
+
+.detail-content {
+  margin: 0;
+  padding: 12px 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 56vh;
+  overflow-y: auto;
+}
+
+/* 折叠态 */
+.detail-content.content-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 8;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: none;
+  margin-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* 展开完整内容按钮 —— 定位在右下角 */
+.expand-btn {
+  position: absolute;
+  bottom: 8px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--brand);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  border-top: none;
+  border-right: none;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  z-index: 2;
+}
+.expand-btn:hover {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+}
+
 /* ── AI 审核建议面板 ── */
 .ai-review-panel {
   margin-top: 12px;
@@ -967,92 +1040,7 @@ watch(() => route.params.id, () => loadDocuments())
   transform: none !important;
 }
 
-/* 内容区：标题 + 文档内容 + AI 面板 共占滚动区 */
-.modal-body-scroll {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.detail-loading {
-  padding: 24px 0;
-  text-align: center;
-  color: var(--text-placeholder);
-  font-size: 13px;
-}
-.detail-content {
-  margin: 0;
-  padding: 12px 16px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 56vh;
-  overflow-y: auto;
-}
-
-/* ── 可折叠的文档预览 ── */
-.content-toggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--brand);
-  font-weight: 500;
-  padding: 4px 0;
-  user-select: none;
-  transition: opacity 0.15s ease;
-  border: none;
-  background: none;
-  margin: 0;
-}
-.content-toggle:hover {
-  opacity: 0.75;
-}
-.content-toggle .toggle-arrow {
-  transition: transform 0.2s ease;
-}
-.content-toggle.expanded .toggle-arrow {
-  transform: rotate(180deg);
-}
-
-/* 初始折叠态：只显示前 N 行，末尾省略号 */
-.content-preview {
-  display: -webkit-box;
-  -webkit-line-clamp: 8;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-height: none;
-  margin-bottom: 0;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.content-preview.expanded {
-  -webkit-line-clamp: unset;
-  margin-bottom: 12px;
-  border-bottom-left-radius: var(--radius-md);
-  border-bottom-right-radius: var(--radius-md);
-}
-
-.expand-hint {
-  display: block;
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 6px 0 0;
-  transition: color 0.15s ease;
-}
-.expand-hint:hover {
-  color: var(--brand);
-}
+/* ── 文档正文折叠容器 ── */
 
 /* 移动端顶栏 */
 .m-top {
