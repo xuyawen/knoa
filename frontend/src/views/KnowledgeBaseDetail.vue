@@ -766,8 +766,14 @@ watch(() => route.params.id, () => {
   text-overflow: ellipsis;
   max-height: none;
   margin-bottom: 0;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
+}
+
+/* 折叠态外层包裹渐变遮罩（带圆角） */
+.content-wrapper {
+  position: relative;
+  border-bottom-left-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
+  overflow: hidden;
 }
 
 /* 折叠态外层包裹渐变遮罩 */
@@ -782,11 +788,14 @@ watch(() => route.params.id, () => {
   background: linear-gradient(to top, var(--bg-subtle) 0%, transparent 100%);
   opacity: 1;
   transition: opacity 0.2s ease;
-  border-bottom-left-radius: var(--radius-md);
-  border-bottom-right-radius: var(--radius-md);
 }
 
-/* 展开后隐藏渐变遮罩 */
+/* 展开后：恢复正常布局，隐藏渐变遮罩 */
+.content-wrapper--full {
+  border-bottom-left-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
+  overflow: visible;
+}
 .content-wrapper--full::after {
   display: none;
 }
