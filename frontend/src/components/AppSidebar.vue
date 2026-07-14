@@ -55,9 +55,7 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- 可滚动导航区 -->
-    <div class="nav-scroll">
-    <!-- 工作区入口（智能问答 / 文档管理 / 问答记录） -->
+    <!-- 工作区入口（固定，不滚动） -->
     <nav class="nav">
       <div class="nav-label">工作区</div>
       <router-link
@@ -82,7 +80,8 @@ onMounted(() => {
       </router-link>
     </nav>
 
-    <!-- 知识库导航 -->
+    <!-- 知识库导航（独立滚动区域） -->
+    <div class="nav-scroll">
     <nav class="nav">
       <div v-show="!collapsed" class="nav-label">知识库</div>
       <router-link
@@ -103,7 +102,7 @@ onMounted(() => {
     </nav>
     </div>
 
-    <!-- 底部用户卡（固定不随滚动） -->
+    <!-- 底部用户卡 -->
     <div class="user-card">
       <div class="avatar">{{ (auth.user?.displayName || auth.user?.username || '?').charAt(0) }}</div>
       <div class="user-info">
