@@ -188,6 +188,7 @@ function closeDetail() {
   detailDoc.value = null
   currentDoc.value = null
   reviewResult.value = null
+  showFullContent.value = false
 }
 
 async function approve(doc: DocumentItem) {
