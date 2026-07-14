@@ -356,7 +356,19 @@ watch(() => route.params.id, () => loadDocuments())
         </div>
 
         <div v-if="loadingDetail" class="detail-loading">加载中...</div>
-        <pre v-else-if="detailDoc" class="detail-content">{{ detailDoc.contentMd }}</pre>
+
+        <!-- 文档正文：可折叠预览 -->
+        <template v-else-if="detailDoc">
+          <button class="content-toggle" :class="{ expanded: showFullContent }" @click="showFullContent = !showFullContent">
+            <span>{{ showFullContent ? '收起' : '展开文档正文' }}</span>
+            <Icon name="chevron-down" :size="14" class="toggle-arrow" />
+          </button>
+          <pre v-if="showFullContent" class="detail-content">{{ detailDoc.contentMd }}</pre>
+          <template v-else>
+            <pre class="detail-content content-preview">{{ detailDoc.contentMd }}</pre>
+            <span class="expand-hint" @click="showFullContent = true">点击展开完整内容…</span>
+          </template>
+        </template>
 
         <!-- AI 审核建议面板 -->
         <div v-if="reviewResult" class="ai-review-panel" :class="{ loading: loadingReview }">
@@ -712,6 +724,7 @@ watch(() => route.params.id, () => loadDocuments())
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  flex-shrink: 0;
 }
 .review-header {
   display: flex;
@@ -828,7 +841,7 @@ watch(() => route.params.id, () => loadDocuments())
   overflow-y: auto;
 }
 
-/* 详情弹窗 */
+/* ── 详情弹窗 ── */
 .modal-mask {
   position: fixed;
   inset: 0;
@@ -849,12 +862,14 @@ watch(() => route.params.id, () => loadDocuments())
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-float);
   padding: 22px 22px 18px;
+  gap: 0;
 }
 .modal-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-shrink: 0;
 }
 .modal-title {
   display: flex;
@@ -881,10 +896,80 @@ watch(() => route.params.id, () => loadDocuments())
   background: var(--bg-subtle);
 }
 .modal-meta {
-  margin: 8px 0 14px;
+  margin: 8px 0 10px;
   font-size: 12px;
   color: var(--text-placeholder);
+  flex-shrink: 0;
 }
+
+/* ── 审核操作按钮 ── */
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+  z-index: 1;
+}
+.btn-approve,
+.btn-reject,
+.btn-review {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  white-space: nowrap;
+}
+.btn-approve {
+  background: var(--success);
+  color: #fff;
+}
+.btn-approve:hover:not(:disabled) {
+  background: #059669;
+  transform: translateY(-1px);
+}
+.btn-reject {
+  background: var(--warning);
+  color: #fff;
+}
+.btn-reject:hover:not(:disabled) {
+  background: #D97706;
+  transform: translateY(-1px);
+}
+.btn-review {
+  background: var(--brand);
+  color: #fff;
+  margin-left: auto;
+}
+.btn-review:hover:not(:disabled) {
+  background: var(--brand-hover);
+  transform: translateY(-1px);
+}
+.btn-approve:disabled,
+.btn-reject:disabled,
+.btn-review:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* 内容区：标题 + 文档内容 + AI 面板 共占滚动区 */
+.modal-body-scroll {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .detail-loading {
   padding: 24px 0;
   text-align: center;
@@ -893,7 +978,7 @@ watch(() => route.params.id, () => loadDocuments())
 }
 .detail-content {
   margin: 0;
-  padding: 16px;
+  padding: 12px 16px;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -902,26 +987,52 @@ watch(() => route.params.id, () => loadDocuments())
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
-  overflow-y: auto;
   max-height: 56vh;
+  overflow-y: auto;
 }
 
-@media (max-width: 900px) {
-  .main {
-    padding-top: var(--mobile-topbar-h);
-  }
-  .body {
-    padding: 16px;
-  }
-  .toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .toolbar-right {
-    max-width: none;
-  }
-  .kb-header { padding: 16px; flex-direction: column; align-items: center; text-align: center; }
-  .doc-actions { display: none; }
+/* 可折叠的文档预览 */
+.content-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--brand);
+  font-weight: 500;
+  margin-bottom: 4px;
+  padding: 0;
+  user-select: none;
+  transition: opacity 0.15s ease;
+}
+.content-toggle:hover {
+  opacity: 0.75;
+}
+.content-toggle .toggle-arrow {
+  transition: transform 0.2s ease;
+}
+.content-toggle.expanded .toggle-arrow {
+  transform: rotate(180deg);
+}
+.content-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.content-preview.expanded {
+  -webkit-line-clamp: unset;
+  max-height: none;
+}
+.expand-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 0;
+}
+.expand-hint:hover {
+  color: var(--brand);
 }
 
 /* 移动端顶栏 */
