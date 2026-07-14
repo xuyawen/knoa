@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
@@ -10,6 +10,7 @@ import { useKnowledgeStore } from '@/stores/knowledge'
 import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
 
 const route = useRoute()
+const router = useRouter()
 const { collapsed } = useSidebarCollapsed()
 const knowledgeStore = useKnowledgeStore()
 
@@ -19,6 +20,14 @@ function onCollapse() {
 
 function onExpand() {
   collapsed.value = false
+}
+
+const isMobile = ref(false)
+const drawer = ref(false)
+let mq: MediaQueryList | undefined
+
+function syncMobile() {
+  isMobile.value = window.matchMedia('(max-width: 900px)').matches
 }
 
 /* 硬数据兜底 —— 详情页头部信息（store 无 description 字段时回退） */
@@ -171,15 +180,32 @@ async function remove(doc: DocumentItem) {
   }
 }
 
-onMounted(loadDocuments)
+onMounted(() => {
+  syncMobile()
+  mq = window.matchMedia('(max-width: 900px)')
+  mq.addEventListener('change', syncMobile)
+  loadDocuments()
+})
+onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 watch(() => route.params.id, () => loadDocuments())
 </script>
 
 <template>
   <div class="kb-detail-page">
-    <AppSidebar :collapsed="collapsed" @collapse="onCollapse" @expand="onExpand" />
+    <AppSidebar :collapsed="collapsed" :mobile-open="drawer" @collapse="onCollapse" @expand="onExpand" @close="drawer = false" />
+    <div v-if="isMobile && drawer" class="overlay" @click="drawer = false" />
+
+    <!-- 移动端顶栏 -->
+    <header v-if="isMobile" class="m-top">
+      <button class="m-menu" @click="drawer = true" title="菜单">
+        <Icon name="menu" :size="20" />
+      </button>
+      <span class="m-title">{{ kb.name }}</span>
+      <button class="m-back" @click="router.push('/knowledge-bases')">返回</button>
+    </header>
+
     <div class="main">
-      <TopBar :title="kb.name" />
+      <TopBar v-if="!isMobile" :title="kb.name" />
       <div class="body">
         <!-- 面包屑 -->
         <nav class="breadcrumb">
@@ -608,6 +634,9 @@ watch(() => route.params.id, () => loadDocuments())
 }
 
 @media (max-width: 900px) {
+  .main {
+    padding-top: var(--mobile-topbar-h);
+  }
   .body {
     padding: 16px;
   }
@@ -618,5 +647,41 @@ watch(() => route.params.id, () => loadDocuments())
   .toolbar-right {
     max-width: none;
   }
+  .kb-header { padding: 16px; flex-direction: column; align-items: center; text-align: center; }
+  .doc-actions { display: none; }
+}
+
+/* 移动端顶栏 */
+.m-top {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--mobile-topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 30;
+}
+.m-menu {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-pill);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-primary);
+}
+.m-title {
+  font-family: var(--font-display); font-size: 16px; font-weight: 600;
+}
+.m-back {
+  margin-left: auto;
+  font-size: 13px; color: var(--brand); font-weight: 500;
+  background: none; border: none;
+  cursor: pointer;
+}
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 35;
 }
 </style>

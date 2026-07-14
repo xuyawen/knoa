@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type { KnowledgeBase } from '@/types/api'
 import AppSidebar from '@/components/AppSidebar.vue'
@@ -25,6 +25,14 @@ function onExpand() {
   collapsed.value = false
 }
 
+const isMobile = ref(false)
+const drawer = ref(false)
+let mq: MediaQueryList | undefined
+
+function syncMobile() {
+  isMobile.value = window.matchMedia('(max-width: 900px)').matches
+}
+
 // 接真实 KB 列表（含实时文档数 / 待复核角标），来自 /api/knowledge-bases
 const knowledgeStore = useKnowledgeStore()
 // 本地副本：拖拽时乐观更新顺序；store reload 后回同步到服务端真实顺序
@@ -36,7 +44,13 @@ watch(
   },
   { immediate: true },
 )
-onMounted(() => knowledgeStore.load())
+onMounted(() => {
+  syncMobile()
+  mq = window.matchMedia('(max-width: 900px)')
+  mq.addEventListener('change', syncMobile)
+  knowledgeStore.load()
+})
+onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 
 // ── 多选 ──
 const selected = ref<Record<string, boolean>>({})
@@ -192,9 +206,20 @@ function goDetail(id: string) {
 
 <template>
   <div class="kb-page">
-    <AppSidebar :collapsed="collapsed" @collapse="onCollapse" @expand="onExpand" />
+    <AppSidebar :collapsed="collapsed" :mobile-open="drawer" @collapse="onCollapse" @expand="onExpand" @close="drawer = false" />
+    <div v-if="isMobile && drawer" class="overlay" @click="drawer = false" />
+
+    <!-- 移动端顶栏 -->
+    <header v-if="isMobile" class="m-top">
+      <button class="m-menu" @click="drawer = true" title="菜单">
+        <Icon name="menu" :size="20" />
+      </button>
+      <span class="m-title">文档管理</span>
+      <button class="m-back" @click="router.push('/')">返回</button>
+    </header>
+
     <div class="main">
-      <TopBar title="知识库" />
+      <TopBar v-if="!isMobile" title="知识库" />
       <div class="body">
         <!-- 操作栏 -->
         <div class="toolbar">
@@ -677,8 +702,51 @@ function goDetail(id: string) {
 }
 
 @media (max-width: 900px) {
+  .main {
+    padding-top: var(--mobile-topbar-h);
+  }
   .body {
     padding: 16px;
   }
+  .toolbar {
+    flex-wrap: wrap; gap: 8px;
+  }
+  .page-title { font-size: 17px; }
+  .kb-name { max-width: 180px; }
+  .kb-actions { display: none; }
+}
+
+/* 移动端顶栏 */
+.m-top {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--mobile-topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 30;
+}
+.m-menu {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-pill);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-primary);
+}
+.m-title {
+  font-family: var(--font-display); font-size: 16px; font-weight: 600;
+}
+.m-back {
+  margin-left: auto;
+  font-size: 13px; color: var(--brand); font-weight: 500;
+  background: none; border: none;
+  cursor: pointer;
+}
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 35;
 }
 </style>

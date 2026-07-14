@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
@@ -11,6 +11,14 @@ const router = useRouter()
 const route = useRoute()
 const chat = useChatStore()
 const { collapsed } = useSidebarCollapsed()
+
+const isMobile = ref(false)
+const drawer = ref(false)
+let mq: MediaQueryList | undefined
+
+function syncMobile() {
+  isMobile.value = window.matchMedia('(max-width: 900px)').matches
+}
 
 function onCollapse() {
   collapsed.value = true
@@ -32,26 +40,57 @@ function fmtTime(iso: string): string {
 
 async function onPick(id: string) {
   await chat.switchSession(id)
-  if (route.path !== '/') router.push('/')
+  if (isMobile.value) {
+    router.push('/')
+  } else if (route.path !== '/') {
+    router.push('/')
+  }
 }
 
 async function onNew() {
   await chat.startNewChat()
-  if (route.path !== '/') router.push('/')
+  if (isMobile.value) {
+    router.push('/')
+  } else if (route.path !== '/') {
+    router.push('/')
+  }
 }
 
-onMounted(() => chat.loadSessions())
+onMounted(() => {
+  syncMobile()
+  mq = window.matchMedia('(max-width: 900px)')
+  mq.addEventListener('change', syncMobile)
+  chat.loadSessions()
+})
+onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 </script>
 
 <template>
   <div class="history-page">
-    <AppSidebar :collapsed="collapsed" @collapse="onCollapse" @expand="onExpand" />
+    <AppSidebar :collapsed="collapsed" :mobile-open="drawer" @collapse="onCollapse" @expand="onExpand" @close="drawer = false" />
+    <div v-if="isMobile && drawer" class="overlay" @click="drawer = false" />
+
+    <!-- 移动端顶栏 -->
+    <header v-if="isMobile" class="m-top">
+      <button class="m-menu" @click="drawer = true" title="菜单">
+        <Icon name="menu" :size="20" />
+      </button>
+      <span class="m-title">问答记录</span>
+      <button class="m-back" @click="router.push('/')">返回</button>
+    </header>
+
     <div class="main">
-      <TopBar title="问答记录">
+      <TopBar v-if="!isMobile" title="问答记录">
         <button class="new-btn" @click="onNew">
           <Icon name="plus" :size="15" /> 新建对话
         </button>
       </TopBar>
+      <!-- 移动端新建按钮内嵌 -->
+      <div v-if="isMobile" class="m-action">
+        <button class="new-btn" @click="onNew">
+          <Icon name="plus" :size="15" /> 新建对话
+        </button>
+      </div>
       <div class="body">
         <div v-if="chat.loadingHistory" class="empty">加载中…</div>
         <div v-else-if="chat.sessions.length === 0" class="empty">还没有对话记录</div>
@@ -159,8 +198,48 @@ onMounted(() => chat.loadSessions())
 }
 
 @media (max-width: 900px) {
+  .main {
+    padding-top: var(--mobile-topbar-h);
+  }
   .body {
     padding: 16px;
   }
+}
+
+/* 移动端顶栏 */
+.m-top {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--mobile-topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 30;
+}
+.m-menu {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-pill);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-primary);
+}
+.m-title {
+  font-family: var(--font-display); font-size: 16px; font-weight: 600;
+}
+.m-back {
+  margin-left: auto;
+  font-size: 13px; color: var(--brand); font-weight: 500;
+  background: none; border: none;
+  cursor: pointer;
+}
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 35;
+}
+.m-action {
+  padding: calc(var(--mobile-topbar-h) + 8px) 16px 8px;
 }
 </style>

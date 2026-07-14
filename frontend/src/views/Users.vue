@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
@@ -10,8 +11,17 @@ import type { UserOut } from '@/types/api'
 
 const auth = useAuthStore()
 const { collapsed } = useSidebarCollapsed()
+const router = useRouter()
 function onCollapse() { collapsed.value = true }
 function onExpand() { collapsed.value = false }
+
+const isMobile = ref(false)
+const drawer = ref(false)
+let mq: MediaQueryList | undefined
+
+function syncMobile() {
+  isMobile.value = window.matchMedia('(max-width: 900px)').matches
+}
 
 const users = ref<UserOut[]>([])
 const loading = ref(false)
@@ -233,10 +243,14 @@ async function confirmDel() {
 }
 
 onMounted(() => {
+  syncMobile()
+  mq = window.matchMedia('(max-width: 900px)')
+  mq.addEventListener('change', syncMobile)
   load()
   window.addEventListener('keydown', onKey)
 })
 onUnmounted(() => {
+  mq?.removeEventListener('change', syncMobile)
   window.removeEventListener('keydown', onKey)
   if (successTimer) clearTimeout(successTimer)
   if (errorTimer) clearTimeout(errorTimer)
@@ -245,9 +259,20 @@ onUnmounted(() => {
 
 <template>
   <div class="page">
-    <AppSidebar :collapsed="collapsed" @collapse="onCollapse" @expand="onExpand" />
+    <AppSidebar :collapsed="collapsed" :mobile-open="drawer" @collapse="onCollapse" @expand="onExpand" @close="drawer = false" />
+    <div v-if="isMobile && drawer" class="overlay" @click="drawer = false" />
+
+    <!-- 移动端顶栏 -->
+    <header v-if="isMobile" class="m-top">
+      <button class="m-menu" @click="drawer = true" title="菜单">
+        <Icon name="menu" :size="20" />
+      </button>
+      <span class="m-title">用户管理</span>
+      <button class="m-back" @click="router.push('/')">返回</button>
+    </header>
+
     <div class="main">
-      <TopBar title="用户管理" subtitle="管理系统用户与角色" />
+      <TopBar v-if="!isMobile" title="用户管理" subtitle="管理系统用户与角色" />
       <div class="body">
         <Teleport to="body">
           <transition name="toast">
@@ -769,5 +794,57 @@ onUnmounted(() => {
 @keyframes m-pop {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 900px) {
+  .main {
+    padding-top: var(--mobile-topbar-h);
+  }
+  .body {
+    padding: 12px;
+  }
+  .toolbar {
+    flex-direction: column; align-items: stretch;
+  }
+  .search-form {
+    flex-wrap: wrap;
+  }
+  .sf-input { width: 100%; }
+  .tbl { font-size: 12px; }
+  .tbl th, .tbl td { padding: 7px 6px; }
+}
+
+/* 移动端顶栏 */
+.m-top {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--mobile-topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 30;
+}
+.m-menu {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-pill);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-primary);
+}
+.m-title {
+  font-family: var(--font-display); font-size: 16px; font-weight: 600;
+}
+.m-back {
+  margin-left: auto;
+  font-size: 13px; color: var(--brand); font-weight: 500;
+  background: none; border: none;
+  cursor: pointer;
+}
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 35;
 }
 </style>
