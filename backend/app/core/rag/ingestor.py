@@ -90,6 +90,39 @@ class DocumentIngester:
         await self._es.upsert_chunk(kb_id, es_id, body)
 
 
+    async def ingest_existing(self, doc: Document, db: AsyncSession) -> None:
+        """对已落库（含 content_md）的 Document 执行摄入：切分 + 向量化 + 写 DocChunk + ES + 图谱。
+
+        方案 A（延迟摄入）核心：上传时只建 Document(status=待复核) 不摄入，
+        审核通过后再调本方法把这篇文档真正切分进检索库。
+        与 ingest_dir 共享同一套 chunk/embed/ES/图谱逻辑，保证行为一致。
+        """
+        # 双写：确保该 KB 的 ES 索引存在（幂等；不可用时返回 False，静默跳过）。
+        if self._es is not None:
+            await self._es.ensure_index(doc.kb_id)
+        chunks = self.chunker.chunk(doc.content_md, doc.title)
+        texts = [c["content"] for c in chunks]
+        if texts:
+            embeddings = await self.embedder.embed(texts)
+            for chunk_data, embedding in zip(chunks, embeddings, strict=True):
+                db.add(
+                    DocChunk(
+                        document_id=doc.id,
+                        kb_id=doc.kb_id,
+                        chunk_index=chunk_data["index"],
+                        content=chunk_data["content"],
+                        embedding=embedding,
+                    )
+                )
+                await self._sync_es_chunk(doc.kb_id, doc, chunk_data, embedding)
+            await db.flush()
+
+            # 建图：抽实体进图谱（与 ingest_dir 一致）
+            if self._graph is not None:
+                chunk_infos = await self._chunk_infos(db, doc.id)
+                await self._graph.extract(doc.kb_id, doc.title, chunk_infos, db)
+        await db.commit()
+
     async def ingest_text(
         self,
         kb_id: str,
@@ -99,11 +132,6 @@ class DocumentIngester:
         source_path: str = "upload",
     ) -> Document:
         """单篇文本摄入：建 Document + 切分 + 向量化 + 写 DocChunk。"""
-        # 双写：确保该 KB 的 ES 索引存在（幂等；不可用时返回 False，静默跳过）。
-        # 必须与 ingest_dir 一致——否则用户上传文档时若该 KB 从未被 seed 灌过，
-        # ES 索引不存在，文档永远进不了 ES，导致该 KB 走不了 ES 混合检索。
-        if self._es is not None:
-            await self._es.ensure_index(kb_id)
         doc = Document(
             kb_id=kb_id,
             title=title,
@@ -113,29 +141,8 @@ class DocumentIngester:
         )
         db.add(doc)
         await db.flush()
-
-        chunks = self.chunker.chunk(content, title)
-        texts = [c["content"] for c in chunks]
-        if texts:
-            embeddings = await self.embedder.embed(texts)
-            for chunk_data, embedding in zip(chunks, embeddings, strict=True):
-                db.add(
-                    DocChunk(
-                        document_id=doc.id,
-                        kb_id=kb_id,
-                        chunk_index=chunk_data["index"],
-                        content=chunk_data["content"],
-                        embedding=embedding,
-                    )
-                )
-                await self._sync_es_chunk(kb_id, doc, chunk_data, embedding)
-            await db.flush()
-
-            # 建图（与 ingest_dir 一致）：上传文档也要抽实体进图谱
-            if self._graph is not None:
-                chunk_infos = await self._chunk_infos(db, doc.id)
-                await self._graph.extract(kb_id, doc.title, chunk_infos, db)
-        await db.commit()
+        # 复用 ingest_existing，保证 seed 与审核摄入走同一套逻辑
+        await self.ingest_existing(doc, db)
         return doc
 
     async def _chunk_infos(self, db: AsyncSession, doc_id: object) -> list[dict]:

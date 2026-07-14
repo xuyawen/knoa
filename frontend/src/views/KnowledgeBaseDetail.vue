@@ -4,12 +4,14 @@ import { useRoute } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
-import { getDocuments, uploadDocument } from '@/api'
-import type { DocumentItem } from '@/types/api'
+import { getDocuments, uploadDocument, getDocument, approveDocument, rejectDocument, deleteDocument } from '@/api'
+import type { DocumentItem, DocumentDetail } from '@/types/api'
+import { useKnowledgeStore } from '@/stores/knowledge'
 import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
 
 const route = useRoute()
 const { collapsed } = useSidebarCollapsed()
+const knowledgeStore = useKnowledgeStore()
 
 function onCollapse() {
   collapsed.value = true
@@ -19,7 +21,7 @@ function onExpand() {
   collapsed.value = false
 }
 
-/* 硬数据 —— 详情页头部信息（详情接口留后续对接） */
+/* 硬数据兜底 —— 详情页头部信息（store 无 description 字段时回退） */
 const kbMap: Record<string, {
   name: string
   icon: string
@@ -53,7 +55,16 @@ const kbMap: Record<string, {
 }
 
 const kbId = computed(() => route.params.id as string)
-const kb = computed(() => kbMap[kbId.value] || { name: '未知', icon: 'library', description: '' })
+// 头部信息：优先用 store 里真实的库名/图标，description 回退到 kbMap
+const kb = computed(() => {
+  const s = knowledgeStore.bases.find(b => b.id === kbId.value)
+  const base = kbMap[kbId.value] || { name: '未知', icon: 'library', description: '' }
+  return {
+    name: s?.name || base.name,
+    icon: s?.icon || base.icon,
+    description: base.description,
+  }
+})
 
 /* 真实文档列表（接 /api/knowledge-bases/:id/documents） */
 const documents = ref<DocumentItem[]>([])
@@ -97,10 +108,66 @@ async function onFilePicked(e: Event) {
       binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk) as unknown as number[])
     }
     const b64 = btoa(binary)
+    // 方案 A：上传只落库不摄入，状态=待复核，列表立即可见但检索不可见
     await uploadDocument(kbId.value, file.name, b64)
     await loadDocuments()
   } catch (e) {
     uploadError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+/* ── 文档操作：查看 / 审核通过 / 驳回 / 删除 ── */
+const detailDoc = ref<DocumentDetail | null>(null)
+const loadingDetail = ref(false)
+
+function statusClass(s: string): string {
+  if (s === '已审核') return ''
+  if (s === '待复核') return 'pending'
+  return 'rejected'
+}
+
+async function openDetail(doc: DocumentItem) {
+  loadingDetail.value = true
+  detailDoc.value = null
+  try {
+    detailDoc.value = await getDocument(kbId.value, doc.id)
+  } catch (e) {
+    console.error('加载详情失败', e)
+  } finally {
+    loadingDetail.value = false
+  }
+}
+
+function closeDetail() {
+  detailDoc.value = null
+}
+
+async function approve(doc: DocumentItem) {
+  try {
+    await approveDocument(kbId.value, doc.id)
+    await loadDocuments()
+  } catch (e) {
+    console.error('审核通过失败', e)
+  }
+}
+
+async function reject(doc: DocumentItem) {
+  try {
+    await rejectDocument(kbId.value, doc.id)
+    await loadDocuments()
+  } catch (e) {
+    console.error('驳回失败', e)
+  }
+}
+
+async function remove(doc: DocumentItem) {
+  if (!confirm(`确定删除「${doc.title}」？该操作会同时清理检索索引，不可恢复。`)) return
+  try {
+    await deleteDocument(kbId.value, doc.id)
+    await loadDocuments()
+    if (detailDoc.value?.id === doc.id) detailDoc.value = null
+  } catch (e) {
+    console.error('删除失败', e)
   }
 }
 
@@ -153,10 +220,28 @@ watch(() => route.params.id, () => loadDocuments())
               <span class="doc-title">{{ doc.title }}</span>
               <span class="doc-meta">{{ doc.type }} · {{ doc.sizeKb }} KB</span>
             </div>
-            <span class="doc-status" :class="doc.status === '待复核' ? 'pending' : ''">
+            <span class="doc-status" :class="statusClass(doc.status)">
               {{ doc.status }}
             </span>
+            <!-- 行内操作 -->
+            <div class="doc-actions">
+              <button class="act" title="查看" @click="openDetail(doc)">
+                <Icon name="search" :size="15" />
+              </button>
+              <template v-if="doc.status === '待复核'">
+                <button class="act approve" title="审核通过" @click="approve(doc)">
+                  <Icon name="check" :size="15" />
+                </button>
+                <button class="act reject" title="驳回" @click="reject(doc)">
+                  <Icon name="thumb-down" :size="15" />
+                </button>
+              </template>
+              <button class="act danger" title="删除" @click="remove(doc)">
+                <Icon name="trash" :size="15" />
+              </button>
+            </div>
           </div>
+
           <div v-if="!loadingDocs && documents.length === 0" class="empty-state">
             <Icon name="library" :size="36" />
             <p>暂无文档，点击上方按钮上传</p>
@@ -174,6 +259,27 @@ watch(() => route.params.id, () => loadDocuments())
           class="hidden-file"
           @change="onFilePicked"
         />
+      </div>
+    </div>
+
+    <!-- 文档详情弹窗（只读预览 content_md） -->
+    <div v-if="detailDoc" class="modal-mask" @click.self="closeDetail">
+      <div class="modal">
+        <div class="modal-head">
+          <div class="modal-title">
+            <span class="doc-title">{{ detailDoc.title }}</span>
+            <span class="doc-status" :class="statusClass(detailDoc.status)">{{ detailDoc.status }}</span>
+          </div>
+          <button class="modal-close" @click="closeDetail">
+            <Icon name="plus" :size="16" style="transform: rotate(45deg)" />
+          </button>
+        </div>
+        <div class="modal-meta">
+          {{ detailDoc.type }} · {{ detailDoc.fileSize ? Math.round(detailDoc.fileSize / 1024 * 10) / 10 + ' KB' : '—' }}
+          <template v-if="detailDoc.originalFilename"> · {{ detailDoc.originalFilename }}</template>
+        </div>
+        <div v-if="loadingDetail" class="detail-loading">加载中...</div>
+        <pre v-else class="detail-content">{{ detailDoc.contentMd }}</pre>
       </div>
     </div>
   </div>
@@ -371,6 +477,44 @@ watch(() => route.params.id, () => loadDocuments())
   background: var(--warning);
   color: #fff;
 }
+.doc-status.rejected {
+  background: var(--danger);
+  color: #fff;
+}
+/* 行内操作 */
+.doc-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.act {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.act:hover {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+.act.approve:hover {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.act.reject:hover {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.act.danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
 
 /* 空状态 */
 .empty-state {
@@ -383,6 +527,84 @@ watch(() => route.params.id, () => loadDocuments())
 }
 .empty-state p {
   font-size: 14px;
+}
+
+/* 详情弹窗 */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.modal {
+  width: 640px;
+  max-width: calc(100vw - 32px);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
+  padding: 22px 22px 18px;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.modal-title .doc-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+.modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+.modal-close:hover {
+  background: var(--bg-subtle);
+}
+.modal-meta {
+  margin: 8px 0 14px;
+  font-size: 12px;
+  color: var(--text-placeholder);
+}
+.detail-loading {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--text-placeholder);
+  font-size: 13px;
+}
+.detail-content {
+  margin: 0;
+  padding: 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  max-height: 56vh;
 }
 
 @media (max-width: 900px) {

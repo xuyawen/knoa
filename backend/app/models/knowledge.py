@@ -57,8 +57,23 @@ class DocumentOut(CamelModel):
     title: str
     type: str          # 'MD' | 'TXT' | 'DOCX' | 'PDF'
     size_kb: float
-    status: str         # '已审核' | '待复核'
+    status: str         # '已审核' | '待复核' | '已拒绝'
     updated_at: str
+    original_filename: str | None = None
+    file_size: int | None = None
+
+
+class DocumentDetailOut(CamelModel):
+    id: str
+    title: str
+    type: str          # 'MD' | 'TXT' | 'DOCX' | 'PDF'
+    status: str         # '已审核' | '待复核' | '已拒绝'
+    content_md: str    # 解析后的全文，详情/预览/审核查看用
+    original_filename: str | None = None
+    file_size: int | None = None
+    updated_at: str
+    reviewed_at: str | None = None
+    reviewed_by: str | None = None
 
 
 class DocumentUploadIn(CamelModel):

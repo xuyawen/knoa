@@ -3,6 +3,7 @@ import type {
   SSEEvent,
   TrendingItem,
   DocumentItem,
+  DocumentDetail,
   SourceDetail,
   ChatSession,
   SessionDetail,
@@ -12,6 +13,24 @@ import { authHeaders } from './http'
 export async function getKnowledgeBases(): Promise<KnowledgeBasesResponse> {
   const resp = await fetch('/api/knowledge-bases', { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 新建知识库（菜单级库：合规管理 / 广告运营 …）。 */
+export async function createKnowledgeBase(payload: {
+  name: string
+  icon?: string | null
+  description?: string | null
+}): Promise<{ id: string; name: string; icon: string }> {
+  const resp = await fetch('/api/knowledge-bases', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
   return resp.json()
 }
 
@@ -45,6 +64,53 @@ export async function uploadDocument(
     throw new Error(err.detail || `HTTP ${resp.status}`)
   }
   return resp.json()
+}
+
+/** 文档详情：返回解析后的全文（contentMd）。 */
+export async function getDocument(kbId: string, docId: string): Promise<DocumentDetail> {
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/documents/${docId}`, {
+    headers: authHeaders(),
+  })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 审核通过：触发摄入，文档进入检索库。 */
+export async function approveDocument(kbId: string, docId: string): Promise<DocumentItem> {
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/documents/${docId}/approve`, {
+    method: 'POST',
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+/** 审核驳回：状态改为已拒绝，不摄入。 */
+export async function rejectDocument(kbId: string, docId: string): Promise<DocumentItem> {
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/documents/${docId}/reject`, {
+    method: 'POST',
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+/** 删除文档：级联清理 chunk / ES / 图谱 / 对象存储。 */
+export async function deleteDocument(kbId: string, docId: string): Promise<void> {
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/documents/${docId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
 }
 
 /** 溯源详情：按 chunk 的 UUID 取原文。 */

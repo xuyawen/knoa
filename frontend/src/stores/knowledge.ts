@@ -26,11 +26,17 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     }
   }
 
+  // 显式重拉（新建知识库 / 切换后强制刷新，绕过 loaded 缓存）
+  async function reload() {
+    loaded.value = false
+    await load()
+  }
+
   function selectBase(id: string | null) {
     activeBase.value = id
   }
 
-  return { bases, health, trending, activeBase, loaded, load, selectBase }
+  return { bases, health, trending, activeBase, loaded, load, reload, selectBase }
 })
 
 if (import.meta.hot) {

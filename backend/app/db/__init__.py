@@ -30,8 +30,14 @@ class Document(Base):
     title: Mapped[str] = mapped_column(String(200))
     source_path: Mapped[str] = mapped_column(String(500))
     content_md: Mapped[str] = mapped_column(Text)
-    # 文档状态：'已审核'(已入库/可检索) | '待复核'(用户上传待人工复核)
+    # 文档状态：'已审核'(已入库/可检索) | '待复核'(用户上传待人工复核) | '已拒绝'(审核不通过)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="已审核", server_default="已审核")
+    # 原始文件信息（上传即存，方案 A 延迟摄入：未审核前只落原始字节+解析文本）
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 审核留痕：approve/reject 时写入（谁、何时）
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     kb: Mapped["KnowledgeBase"] = relationship(back_populates="documents")

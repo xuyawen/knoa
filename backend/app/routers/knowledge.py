@@ -1,9 +1,9 @@
 import base64
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.graph import GraphStore
@@ -22,6 +22,7 @@ from app.core.security import (
 from app.db import DocChunk, Document, KBPermission, KnowledgeBase, User
 from app.deps import get_db, get_embedder, get_llm
 from app.models.knowledge import (
+    DocumentDetailOut,
     DocumentOut,
     DocumentUploadIn,
     HealthItemOut,
@@ -140,17 +141,7 @@ async def list_documents(
         select(Document).where(Document.kb_id == kb_id).order_by(Document.created_at.desc())
     )
     docs = result.scalars().all()
-    return [
-        DocumentOut(
-            id=str(d.id),
-            title=d.title,
-            type=_doc_type(d.source_path),
-            size_kb=round(len(d.content_md.encode("utf-8", errors="ignore")) / 1024, 2),
-            status=d.status,
-            updated_at=d.updated_at.isoformat() if d.updated_at else "",
-        )
-        for d in docs
-    ]
+    return [_doc_out(d) for d in docs]
 
 
 @router.post("/knowledge-bases/{kb_id}/documents", response_model=DocumentOut, status_code=201)
@@ -158,14 +149,16 @@ async def upload_document(
     kb_id: str,
     payload: DocumentUploadIn,
     db: AsyncSession = Depends(get_db),
-    embedder: EmbeddingModel = Depends(get_embedder),
-    llm: OpenAICompatProvider = Depends(get_llm),
     _: User = Depends(require_kb_access("edit")),
 ):
-    """上传单篇文档（.md / .txt / .docx / .pdf）。
+    """上传单篇文档（.md / .txt / .docx / .pdf）—— 方案 A（延迟摄入）。
 
-    Phase 3 T3 文档解析管线：先按原始字节存入对象存储（溯源/重解析），
-    再按扩展名解析为纯文本，最后交给 ingestor 切分+向量化+进图。
+    只做三件事，不切分、不向量化、不进检索库：
+      1) 原始字节存入对象存储（key 含 uuid 防重名；source_path 记录位置用于溯源/重解析）
+      2) 按扩展名解析为纯文本，落 content_md（供审核后摄入复用，无需重新解析）
+      3) 建 Document(status=待复核)，写入 original_filename / file_size 留痕
+    这样未审核文档在检索侧天然不可见（retriever 只从 DocChunk 捞数据），
+    审核通过后再由 approve 接口触发 ingest_existing 真正摄入。
     前端把文件读成 base64（content_b64）提交；文本文件仍兼容旧的 content 字段。
     """
     kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
@@ -197,20 +190,154 @@ async def upload_document(
         await store.delete(object_key)
         raise HTTPException(status_code=415, detail=str(e))
 
-    # 4) 摄入：切分 + 向量化 + ES 双写 + 知识图谱抽取（与 seed 摄入一致）
-    ingester = DocumentIngester(embedder, es=ESClient(), graph=GraphStore(llm, embedder))
-    doc = await ingester.ingest_text(
-        kb_id, _extract_title(parsed.text, filename), parsed.text, db, object_key
+    # 4) 方案 A：只建 Document(status=待复核)，不摄入
+    title = _extract_title(parsed.text, filename)
+    doc = Document(
+        kb_id=kb_id,
+        title=title,
+        source_path=object_key,
+        content_md=parsed.text,
+        status="待复核",
+        original_filename=filename,
+        file_size=len(raw),
+    )
+    db.add(doc)
+    await db.commit()
+    await db.refresh(doc)
+
+    return _doc_out(doc)
+
+
+def _doc_out(d: Document) -> DocumentOut:
+    """统一把 Document 行序列化成 DocumentOut（列表/上传/审核后共用）。"""
+    return DocumentOut(
+        id=str(d.id),
+        title=d.title,
+        type=_doc_type(d.source_path),
+        size_kb=round((d.file_size or len(d.content_md.encode("utf-8", errors="ignore"))) / 1024, 2),
+        status=d.status,
+        updated_at=d.updated_at.isoformat() if d.updated_at else "",
+        original_filename=d.original_filename,
+        file_size=d.file_size,
     )
 
-    return DocumentOut(
+
+@router.get("/knowledge-bases/{kb_id}/documents/{doc_id}", response_model=DocumentDetailOut)
+async def get_document(
+    kb_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_kb_access("view")),
+):
+    """文档详情：返回解析后的 content_md（溯源/预览/审核查看用）。"""
+    doc = await db.scalar(select(Document).where(Document.id == doc_id, Document.kb_id == kb_id))
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return DocumentDetailOut(
         id=str(doc.id),
         title=doc.title,
-        type=_doc_type(filename),
-        size_kb=round(len(raw) / 1024, 2),
+        type=_doc_type(doc.source_path),
         status=doc.status,
+        content_md=doc.content_md,
+        original_filename=doc.original_filename,
+        file_size=doc.file_size,
         updated_at=doc.updated_at.isoformat() if doc.updated_at else "",
+        reviewed_at=doc.reviewed_at.isoformat() if doc.reviewed_at else None,
+        reviewed_by=doc.reviewed_by,
     )
+
+
+@router.post("/knowledge-bases/{kb_id}/documents/{doc_id}/approve", response_model=DocumentOut)
+async def approve_document(
+    kb_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    embedder: EmbeddingModel = Depends(get_embedder),
+    llm: OpenAICompatProvider = Depends(get_llm),
+    user: User = Depends(require_kb_access("edit")),
+):
+    """审核通过：翻转状态为已审核，并触发摄入（切分+向量化+ES+图谱）。
+
+    方案 A 的核心入口：上传时只落库不摄入，检索侧天然隔离未审核内容；
+    这里才真正把文档纳入检索库。幂等：已是「已审核」直接返回，不重复摄入。
+    """
+    doc = await db.scalar(select(Document).where(Document.id == doc_id, Document.kb_id == kb_id))
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    if doc.status == "已审核":
+        return _doc_out(doc)  # 幂等：已审核不再重复摄入
+
+    doc.status = "已审核"
+    doc.reviewed_at = datetime.now(timezone.utc)
+    doc.reviewed_by = str(user.id)
+    await db.flush()
+
+    # 触发摄入：与 seed / upload 共用同一套 chunk/embed/ES/图谱逻辑
+    ingester = DocumentIngester(embedder, es=ESClient(), graph=GraphStore(llm, embedder))
+    await ingester.ingest_existing(doc, db)
+    await db.refresh(doc)
+    return _doc_out(doc)
+
+
+@router.post("/knowledge-bases/{kb_id}/documents/{doc_id}/reject", response_model=DocumentOut)
+async def reject_document(
+    kb_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_kb_access("edit")),
+):
+    """审核驳回：状态改为已拒绝，保留原始文件与解析文本留痕，但不摄入（不进检索库）。"""
+    doc = await db.scalar(select(Document).where(Document.id == doc_id, Document.kb_id == kb_id))
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    doc.status = "已拒绝"
+    doc.reviewed_at = datetime.now(timezone.utc)
+    doc.reviewed_by = str(user.id)
+    await db.commit()
+    await db.refresh(doc)
+    return _doc_out(doc)
+
+
+@router.delete("/knowledge-bases/{kb_id}/documents/{doc_id}", status_code=204)
+async def delete_document(
+    kb_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_kb_access("edit")),
+):
+    """删除文档：级联清理 chunk / ES 索引 / 图谱节点 / 对象存储原始文件。
+
+    顺序很关键：先取 chunk_id → 删图节点（引用 chunk_id）→ 删 DocChunk
+    （FK 必须在删 Document 之前清）→ 删 ES → 删对象存储 → 最后删 Document。
+    """
+    doc = await db.scalar(select(Document).where(Document.id == doc_id, Document.kb_id == kb_id))
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    # 1) 取该文档的全部 chunk id（删图节点 / 删 ES 前先取）
+    chunk_ids = (
+        await db.execute(select(DocChunk.id).where(DocChunk.document_id == doc.id))
+    ).scalars().all()
+
+    # 2) 删图谱节点（按 chunk_id 归属）
+    await GraphStore().delete_by_doc(db, kb_id, chunk_ids)
+
+    # 3) 删 DocChunk（FK 必须在删 Document 前清，否则违反外键）
+    await db.execute(delete(DocChunk).where(DocChunk.document_id == doc.id))
+
+    # 4) 删 ES 索引里的该文档 chunk（ES 不可用时静默跳过）
+    await ESClient().delete_by_doc(kb_id, str(doc.id))
+
+    # 5) 删对象存储原始文件（缺失不阻断删除）
+    store = get_object_store()
+    try:
+        await store.delete(doc.source_path)
+    except Exception:
+        pass
+
+    # 6) 删文档本身
+    await db.delete(doc)
+    await db.commit()
 
 
 _TYPE_MAP = {

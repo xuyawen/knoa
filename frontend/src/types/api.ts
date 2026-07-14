@@ -6,6 +6,12 @@ export interface KnowledgeBase {
   badgeType: 'danger' | 'info' | null
 }
 
+export interface KBCreate {
+  name: string
+  icon?: string | null
+  description?: string | null
+}
+
 export interface HealthItem {
   kb: string
   docCount: number
@@ -23,8 +29,23 @@ export interface DocumentItem {
   title: string
   type: string      // 'MD' | 'TXT' | 'DOCX' | 'PDF'
   sizeKb: number
-  status: string     // '已审核' | '待复核'
+  status: string     // '已审核' | '待复核' | '已拒绝'
   updatedAt: string
+  originalFilename?: string | null
+  fileSize?: number | null
+}
+
+export interface DocumentDetail {
+  id: string
+  title: string
+  type: string
+  status: string
+  contentMd: string
+  originalFilename?: string | null
+  fileSize?: number | null
+  updatedAt: string
+  reviewedAt?: string | null
+  reviewedBy?: string | null
 }
 
 export interface SourceItem {
