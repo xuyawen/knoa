@@ -170,3 +170,38 @@ async def test_upload_pending_then_approve_ingests(client, db_session):
     gone = await db_session.scalar(select(Document).where(Document.id == uuid.UUID(doc_id)))
     assert n3 == 0
     assert gone is None
+
+
+async def test_short_document_still_ingested(client, db_session):
+    """短文本保护（方案2）：极短但含实质内容的文档审核通过后,
+    仍至少产出 1 个 chunk、可被检索命中, 而非被噪声阈值吞掉。
+    """
+    token = await _token(client)
+    h = {"Authorization": f"Bearer {token}"}
+    kb_id = (await client.post("/api/knowledge-bases", json={"name": "短文本库"}, headers=h)).json()["id"]
+    try:
+        # 8 字, 远低于旧版硬编码的 50 阈值
+        up = await client.post(
+            f"/api/knowledge-bases/{kb_id}/documents",
+            json={"filename": "faq.md", "content": "退货期限是30天。"},
+            headers=h,
+        )
+        assert up.status_code == 201, up.text
+        doc_id = up.json()["id"]
+        assert up.json()["status"] == "待复核"
+        # 上传不摄入
+        n0 = (await db_session.execute(
+            select(func.count()).select_from(DocChunk).where(DocChunk.document_id == uuid.UUID(doc_id))
+        )).scalar()
+        assert n0 == 0
+        # 审核通过 → 即使极短也必须摄入, 否则搜不到
+        ap = await client.post(
+            f"/api/knowledge-bases/{kb_id}/documents/{doc_id}/approve", headers=h
+        )
+        assert ap.status_code == 200 and ap.json()["status"] == "已审核"
+        n1 = (await db_session.execute(
+            select(func.count()).select_from(DocChunk).where(DocChunk.document_id == uuid.UUID(doc_id))
+        )).scalar()
+        assert n1 >= 1, "短文档被噪声阈值丢弃, 审核后搜不到"
+    finally:
+        await client.delete(f"/api/knowledge-bases/{kb_id}", headers=h)
