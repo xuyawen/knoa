@@ -16,18 +16,35 @@ const iconName = computed(() => {
   }
 })
 
-const pct = computed(() => Math.round(props.item.coverage * 100))
+const pct = computed(() => Math.round(props.item.healthScore * 100))
 
 const band = computed<'good' | 'mid' | 'low'>(() => {
-  const c = props.item.coverage
+  const c = props.item.healthScore
   if (c >= 0.8) return 'good'
   if (c >= 0.6) return 'mid'
   return 'low'
 })
 
-const bandLabel = computed(
-  () => ({ good: '覆盖良好', mid: '覆盖一般', low: '覆盖偏低' })[band.value],
-)
+const metrics = computed(() => {
+  const it = props.item
+  const fmt = (n: number) => `${Math.round(n * 100)}%`
+  return [
+    { label: '审核率', value: fmt(it.reviewRate) },
+    { label: '可检索', value: fmt(it.retrievableRate) },
+    {
+      label: '新鲜度',
+      value: it.freshnessHours == null
+        ? '无文档'
+        : it.freshnessHours < 24
+          ? '今天'
+          : it.freshnessHours < 24 * 7
+            ? '本周'
+            : it.freshnessHours < 24 * 30
+              ? '本月'
+              : '较旧',
+    },
+  ]
+})
 
 function relTime(iso: string): string {
   const then = new Date(iso).getTime()
@@ -52,14 +69,18 @@ function relTime(iso: string): string {
         <div class="name">{{ item.kb }}</div>
         <div class="sub">{{ item.docCount }} 篇 · {{ relTime(item.updatedAt) }}</div>
       </div>
-      <div class="score" :class="band">{{ pct }}%</div>
+      <div class="score" :class="band">{{ pct }}<span class="pct">%</span></div>
     </div>
 
     <div class="bar">
       <div class="fill" :class="band" :style="{ width: pct + '%' }" />
     </div>
 
-    <div class="caption" :class="band">{{ bandLabel }}</div>
+    <div class="metrics">
+      <span v-for="m in metrics" :key="m.label" class="metric">
+        <i>{{ m.label }}</i>{{ m.value }}
+      </span>
+    </div>
   </div>
 </template>
 
@@ -149,4 +170,26 @@ function relTime(iso: string): string {
 .score.good { color: var(--success); }
 .score.mid { color: var(--warning); }
 .score.low { color: var(--danger); }
+.score .pct {
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 1px;
+}
+
+.metrics {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.metric {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.metric i {
+  font-style: normal;
+  color: var(--text-placeholder);
+  margin-right: 4px;
+  font-weight: 400;
+}
 </style>

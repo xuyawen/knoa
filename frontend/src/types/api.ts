@@ -33,7 +33,10 @@ export interface HealthItem {
   kb: string
   docCount: number
   updatedAt: string
-  coverage: number
+  reviewRate: number       // 审核率 = 已审核/总文档
+  retrievableRate: number  // 可检索率 = 有向量文档/总文档
+  freshnessHours: number | null  // 最近更新距现在小时，null=无文档
+  healthScore: number      // 综合健康分
 }
 
 export interface TrendingItem {

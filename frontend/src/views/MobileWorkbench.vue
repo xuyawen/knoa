@@ -48,7 +48,7 @@ const kbCards = computed(() => {
       icon: kb.icon,
       name: kb.name,
       alert: kb.badge?.includes('待复核'),
-      meta: h ? `${h.docCount} 篇 · ${Math.round(h.coverage * 100)}% 覆盖` : '',
+      meta: h ? `${h.docCount} 篇 · 健康 ${Math.round(h.healthScore * 100)}%` : '',
     }
   })
   const fromWs = ['文档管理'].map(e => ({

@@ -23,7 +23,10 @@ class HealthItemOut(CamelModel):
     kb: str
     doc_count: int
     updated_at: str
-    coverage: float
+    review_rate: float          # 审核率 = 已审核文档 / 总文档
+    retrievable_rate: float     # 可检索率 = 有向量的文档 / 总文档
+    freshness_hours: float | None  # 最近更新距现在小时，None=无文档
+    health_score: float         # 综合健康分 = 审核率*0.4 + 可检索率*0.4 + 新鲜度分*0.2
 
 
 class TrendingItemOut(CamelModel):

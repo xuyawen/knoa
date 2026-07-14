@@ -68,6 +68,17 @@ async def get_knowledge_bases(
     ).all()
     stats_map = {row.kb_id: row for row in stats_rows}
 
+    # 可检索率：统计「有至少 1 个 chunk（已向量化）的文档数」按 kb 分组。
+    # 暴露「有文档但 chunker 没切进去 → 搜不到」的坑（如短文本被丢弃）。
+    ret_rows = (
+        await db.execute(
+            select(Document.kb_id, func.count(func.distinct(Document.id)).label("ret"))
+            .join(DocChunk, DocChunk.document_id == Document.id)
+            .group_by(Document.kb_id)
+        )
+    ).all()
+    ret_map = {row.kb_id: row.ret for row in ret_rows}
+
     kb_list = []
     health_list = []
     for kb in kbs:
@@ -80,9 +91,31 @@ async def get_knowledge_bases(
         latest = stat.latest if stat else None
         pending_count = stat.pending if stat else 0
         approved_count = stat.approved if stat else 0
+        retrievable_count = ret_map.get(kb.id, 0)
 
-        # 覆盖率 = 已审核文档占比（0 篇时为 0，不显示假数字）
-        coverage = round(approved_count / doc_count, 2) if doc_count > 0 else 0.0
+        # 健康度三维（取代原模糊的 coverage 单值）：
+        #  审核率  = 已审核 / 总文档
+        #  可检索率 = 有向量(chunk)文档 / 总文档
+        #  新鲜度  = 最近更新距现在小时（无文档为 None → 新鲜度分 0）
+        review_rate = round(approved_count / doc_count, 2) if doc_count > 0 else 0.0
+        retrievable_rate = round(retrievable_count / doc_count, 2) if doc_count > 0 else 0.0
+        if latest is not None:
+            freshness_hours = round((datetime.now(timezone.utc) - latest).total_seconds() / 3600, 1)
+            if freshness_hours < 24:
+                freshness_score = 1.0
+            elif freshness_hours < 24 * 7:
+                freshness_score = 0.8
+            elif freshness_hours < 24 * 30:
+                freshness_score = 0.5
+            elif freshness_hours < 24 * 90:
+                freshness_score = 0.3
+            else:
+                freshness_score = 0.1
+        else:
+            freshness_hours = None
+            freshness_score = 0.0
+        # 综合健康分：审核率与可检索率各 0.4，新鲜度 0.2
+        health_score = round(review_rate * 0.4 + retrievable_rate * 0.4 + freshness_score * 0.2, 2)
 
         badge = None
         badge_type = None
@@ -104,7 +137,10 @@ async def get_knowledge_bases(
                 kb=kb.name,
                 doc_count=doc_count or 0,
                 updated_at=latest.isoformat() if latest else "",
-                coverage=coverage,
+                review_rate=review_rate,
+                retrievable_rate=retrievable_rate,
+                freshness_hours=freshness_hours,
+                health_score=health_score,
             )
         )
 
