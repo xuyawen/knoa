@@ -175,6 +175,8 @@ async function openDetail(doc: DocumentItem) {
   currentDoc.value = doc
   loadingDetail.value = true
   detailDoc.value = null
+  reviewResult.value = null
+  showFullContent.value = false
   try {
     detailDoc.value = await getDocument(kbId.value, doc.id)
   } catch (e) {
@@ -995,19 +997,21 @@ watch(() => route.params.id, () => loadDocuments())
   overflow-y: auto;
 }
 
-/* 可折叠的文档预览 */
+/* ── 可折叠的文档预览 ── */
 .content-toggle {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
   cursor: pointer;
   font-size: 12px;
   color: var(--brand);
   font-weight: 500;
-  margin-bottom: 4px;
-  padding: 0;
+  padding: 4px 0;
   user-select: none;
   transition: opacity 0.15s ease;
+  border: none;
+  background: none;
+  margin: 0;
 }
 .content-toggle:hover {
   opacity: 0.75;
@@ -1018,22 +1022,33 @@ watch(() => route.params.id, () => loadDocuments())
 .content-toggle.expanded .toggle-arrow {
   transform: rotate(180deg);
 }
+
+/* 初始折叠态：只显示前 N 行，末尾省略号 */
 .content-preview {
   display: -webkit-box;
-  -webkit-line-clamp: 6;
+  -webkit-line-clamp: 8;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-height: none;
+  margin-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 .content-preview.expanded {
   -webkit-line-clamp: unset;
-  max-height: none;
+  margin-bottom: 12px;
+  border-bottom-left-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
 }
+
 .expand-hint {
+  display: block;
   font-size: 12px;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 4px 0;
+  padding: 6px 0 0;
+  transition: color 0.15s ease;
 }
 .expand-hint:hover {
   color: var(--brand);
