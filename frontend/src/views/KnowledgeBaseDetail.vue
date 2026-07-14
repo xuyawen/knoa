@@ -4,8 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
-import { getDocuments, uploadDocument, getDocument, approveDocument, rejectDocument, deleteDocument } from '@/api'
-import type { DocumentItem, DocumentDetail } from '@/types/api'
+import { getDocuments, uploadDocument, getDocument, approveDocument, rejectDocument, deleteDocument, aiReviewDocument } from '@/api'
+import type { DocumentItem, DocumentDetail, AIReview } from '@/types/api'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
 
@@ -13,6 +13,11 @@ const route = useRoute()
 const router = useRouter()
 const { collapsed } = useSidebarCollapsed()
 const knowledgeStore = useKnowledgeStore()
+
+function verdictLabel(v: string): string {
+  const map: Record<string, string> = { approve: '✅ 建议通过', reject: '❌ 建议驳回', manual_review: '⚠️ 需人工复核' }
+  return map[v] || v
+}
 
 function onCollapse() {
   collapsed.value = true
@@ -129,6 +134,34 @@ async function onFilePicked(e: Event) {
 const detailDoc = ref<DocumentDetail | null>(null)
 const loadingDetail = ref(false)
 
+/* 当前操作的文档项（带 sizeKb 等列表字段） */
+const currentDoc = ref<DocumentItem | null>(null)
+
+/* AI 审核建议 */
+const reviewResult = ref<AIReview | null>(null)
+const loadingReview = ref(false)
+
+async function openReview(doc: DocumentItem) {
+  loadingReview.value = true
+  reviewResult.value = null
+  try {
+    reviewResult.value = await aiReviewDocument(kbId.value, doc.id)
+  } catch (e) {
+    console.error('AI 审核失败', e)
+    reviewResult.value = {
+      verdict: 'manual_review',
+      summary: 'AI 审核失败，请手动审核。',
+      duplicates: [],
+      outdatedFindings: [],
+      qualityNotes: [],
+      suggestedKb: null,
+      similarityFindings: [],
+    }
+  } finally {
+    loadingReview.value = false
+  }
+}
+
 function statusClass(s: string): string {
   if (s === '已审核') return ''
   if (s === '待复核') return 'pending'
@@ -136,6 +169,7 @@ function statusClass(s: string): string {
 }
 
 async function openDetail(doc: DocumentItem) {
+  currentDoc.value = doc
   loadingDetail.value = true
   detailDoc.value = null
   try {
@@ -149,6 +183,8 @@ async function openDetail(doc: DocumentItem) {
 
 function closeDetail() {
   detailDoc.value = null
+  currentDoc.value = null
+  reviewResult.value = null
 }
 
 async function approve(doc: DocumentItem) {
@@ -174,7 +210,7 @@ async function remove(doc: DocumentItem) {
   try {
     await deleteDocument(kbId.value, doc.id)
     await loadDocuments()
-    if (detailDoc.value?.id === doc.id) detailDoc.value = null
+    if (detailDoc.value?.id === doc.id) { detailDoc.value = null; currentDoc.value = null; reviewResult.value = null }
   } catch (e) {
     console.error('删除失败', e)
   }
@@ -304,8 +340,69 @@ watch(() => route.params.id, () => loadDocuments())
           {{ detailDoc.type }} · {{ detailDoc.fileSize ? Math.round(detailDoc.fileSize / 1024 * 10) / 10 + ' KB' : '—' }}
           <template v-if="detailDoc.originalFilename"> · {{ detailDoc.originalFilename }}</template>
         </div>
+
+        <!-- 审核操作按钮（仅待复核状态） -->
+        <div v-if="detailDoc?.status === '待复核'" class="modal-actions">
+          <button class="btn-approve" @click="approve(currentDoc!)" :disabled="loadingDetail || loadingReview">
+            <Icon name="check" :size="15" /> 审核通过
+          </button>
+          <button class="btn-reject" @click="reject(currentDoc!)">
+            <Icon name="thumb-down" :size="15" /> 驳回
+          </button>
+          <button class="btn-review" @click="openReview(currentDoc!)" :disabled="loadingReview">
+            <Icon name="sparkle" :size="15" />
+            {{ loadingReview ? 'AI 审核中…' : 'AI 辅助审核' }}
+          </button>
+        </div>
+
         <div v-if="loadingDetail" class="detail-loading">加载中...</div>
-        <pre v-else class="detail-content">{{ detailDoc.contentMd }}</pre>
+        <pre v-else-if="detailDoc" class="detail-content">{{ detailDoc.contentMd }}</pre>
+
+        <!-- AI 审核建议面板 -->
+        <div v-if="reviewResult" class="ai-review-panel" :class="{ loading: loadingReview }">
+          <div class="review-header">
+            <Icon name="sparkle" :size="16" /> AI 审核建议
+          </div>
+          <div class="verdict-badge" :class="reviewResult.verdict">
+            {{ verdictLabel(reviewResult.verdict) }}
+          </div>
+          <p class="review-summary">{{ reviewResult.summary }}</p>
+          <div v-if="reviewResult.duplicates.length > 0" class="review-section">
+            <h4 class="review-title danger">重复风险</h4>
+            <ul class="review-list">
+              <li v-for="(d, i) in reviewResult.duplicates" :key="i">{{ d }}</li>
+            </ul>
+          </div>
+          <div v-if="reviewResult.outdatedFindings.length > 0" class="review-section">
+            <h4 class="review-title warning">过时信息</h4>
+            <ul class="review-list">
+              <li v-for="(o, i) in reviewResult.outdatedFindings" :key="i">{{ o }}</li>
+            </ul>
+          </div>
+          <div v-if="reviewResult.qualityNotes.length > 0" class="review-section">
+            <h4 class="review-title">质量建议</h4>
+            <ul class="review-list">
+              <li v-for="(q, i) in reviewResult.qualityNotes" :key="i">{{ q }}</li>
+            </ul>
+          </div>
+          <div v-if="reviewResult.suggestedKb" class="review-section">
+            <h4 class="review-title">建议归属</h4>
+            <p class="review-note">该文档可能更适合：<strong>{{ reviewResult.suggestedKb }}</strong></p>
+          </div>
+          <!-- 相似度发现详情 -->
+          <div v-if="reviewResult.similarityFindings.length > 0" class="review-section">
+            <h4 class="review-title danger">相似内容对比</h4>
+            <div class="sim-detail">
+              <div v-for="(f, i) in reviewResult.similarityFindings" :key="i" class="sim-card">
+                <div class="sim-row">
+                  <span class="sim-doc">{{ f.docTitle }}</span>
+                  <span class="sim-score">相似度 {{ (f.similarity * 100).toFixed(0) }}%</span>
+                </div>
+                <pre class="sim-snippet">{{ f.snippet }}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -553,6 +650,182 @@ watch(() => route.params.id, () => loadDocuments())
 }
 .empty-state p {
   font-size: 14px;
+}
+
+/* ── 审核操作按钮 ── */
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.btn-approve,
+.btn-reject,
+.btn-review {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.btn-approve {
+  background: var(--success);
+  color: #fff;
+}
+.btn-approve:hover:not(:disabled) {
+  background: #059669;
+  transform: translateY(-1px);
+}
+.btn-reject {
+  background: var(--warning);
+  color: #fff;
+}
+.btn-reject:hover:not(:disabled) {
+  background: #D97706;
+  transform: translateY(-1px);
+}
+.btn-review {
+  background: var(--brand);
+  color: #fff;
+  margin-left: auto;
+}
+.btn-review:hover:not(:disabled) {
+  background: var(--brand-hover);
+  transform: translateY(-1px);
+}
+.btn-approve:disabled,
+.btn-reject:disabled,
+.btn-review:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* ── AI 审核建议面板 ── */
+.ai-review-panel {
+  margin-top: 12px;
+  padding: 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.review-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand);
+  margin-bottom: 10px;
+}
+.verdict-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.verdict-badge.approve {
+  background: #D1FAE5;
+  color: #065F46;
+}
+.verdict-badge.reject {
+  background: #FEE2E2;
+  color: #991B1B;
+}
+.verdict-badge.manual_review {
+  background: #FEF3C7;
+  color: #92400E;
+}
+.review-summary {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.review-section {
+  margin-bottom: 12px;
+}
+.review-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 6px;
+}
+.review-title.danger {
+  color: var(--danger);
+}
+.review-title.warning {
+  color: var(--warning);
+}
+.review-list {
+  margin: 0;
+  padding: 0 0 0 16px;
+  list-style: none;
+}
+.review-list li {
+  position: relative;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  padding-left: 12px;
+  margin-bottom: 4px;
+}
+.review-list li::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--text-placeholder);
+}
+.review-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.sim-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sim-card {
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.sim-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.sim-doc {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sim-score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger);
+}
+.sim-snippet {
+  margin: 0;
+  padding: 8px;
+  background: var(--bg-subtle);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 /* 详情弹窗 */

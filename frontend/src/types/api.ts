@@ -68,6 +68,24 @@ export interface DocumentDetail {
   reviewedBy?: string | null
 }
 
+export interface AIReviewFinding {
+  similarity: number
+  docTitle: string
+  docId: string
+  snippet: string
+  matchedChunk: string
+}
+
+export interface AIReview {
+  verdict: 'approve' | 'reject' | 'manual_review'
+  summary: string
+  duplicates: string[]
+  outdatedFindings: string[]
+  qualityNotes: string[]
+  suggestedKb: string | null
+  similarityFindings: AIReviewFinding[]
+}
+
 export interface SourceItem {
   id: number
   chunkId: string

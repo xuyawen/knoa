@@ -58,6 +58,28 @@ class KnowledgeBasesResponse(CamelModel):
     health: list[HealthItemOut]
 
 
+# ── AI 辅助审核 ──────────────────────────────────────────────
+
+
+class AIReviewFindingOut(CamelModel):
+    """单条相似度发现"""
+    similarity: float
+    doc_title: str
+    doc_id: str
+    snippet: str
+    matched_chunk: str
+
+
+class AIReviewOut(CamelModel):
+    verdict: str                      # approve | reject | manual_review
+    summary: str                      # 一句话总结
+    duplicates: list[str]             # 重复风险
+    outdated_findings: list[str]      # 过时信息
+    quality_notes: list[str]          # 质量建议
+    suggested_kb: str | None          # 建议归属库
+    similarity_findings: list[AIReviewFindingOut]  # 相似度详情
+
+
 class DocumentOut(CamelModel):
     id: str
     title: str

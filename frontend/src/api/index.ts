@@ -9,6 +9,7 @@ import type {
   SessionDetail,
   KBUpdate,
   KnowledgeBase,
+  AIReview,
 } from '@/types/api'
 import { authHeaders } from './http'
 
@@ -113,6 +114,22 @@ export async function deleteDocument(kbId: string, docId: string): Promise<void>
     const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
     throw new Error(err.detail || `HTTP ${resp.status}`)
   }
+}
+
+/** AI 辅助审核文档。 */
+export async function aiReviewDocument(
+  kbId: string,
+  docId: string,
+): Promise<AIReview> {
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/documents/${docId}/ai-review`, {
+    method: 'POST',
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
 }
 
 /** 溯源详情：按 chunk 的 UUID 取原文。 */

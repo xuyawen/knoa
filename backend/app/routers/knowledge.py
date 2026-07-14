@@ -23,6 +23,7 @@ from app.core.security import (
 from app.db import DocChunk, Document, KBPermission, KnowledgeBase, User
 from app.deps import get_db, get_embedder, get_llm
 from app.models.knowledge import (
+    AIReviewOut,
     DocumentDetailOut,
     DocumentOut,
     DocumentUploadIn,
@@ -347,6 +348,42 @@ async def reject_document(
     await db.commit()
     await db.refresh(doc)
     return _doc_out(doc)
+
+
+@router.post("/knowledge-bases/{kb_id}/documents/{doc_id}/ai-review", response_model=AIReviewOut)
+async def ai_review_document(
+    kb_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    embedder: EmbeddingModel = Depends(get_embedder),
+    llm: OpenAICompatProvider = Depends(get_llm),
+    _: User = Depends(require_kb_access("view")),
+):
+    """AI 辅助审核：相似度检索 + LLM 结构化建议。只读分析，不写库。"""
+    from app.core.rag.ai_review import ai_review_document as _review
+
+    result = await _review(kb_id, doc_id, db, embedder, llm)
+    if result is None:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    # 对齐 Pydantic camelCase 输出
+    return {
+        "verdict": result["verdict"],
+        "summary": result["summary"],
+        "duplicates": result["duplicates"],
+        "outdatedFindings": result["outdated_findings"],
+        "qualityNotes": result["quality_notes"],
+        "suggestedKb": result["suggested_kb"],
+        "similarityFindings": [
+            {
+                "similarity": f["similarity"],
+                "docTitle": f["docTitle"],
+                "docId": f["docId"],
+                "snippet": f["snippet"],
+                "matchedChunk": f["matchedChunk"],
+            }
+            for f in result.get("similarity_findings", [])
+        ],
+    }
 
 
 @router.delete("/knowledge-bases/{kb_id}/documents/{doc_id}", status_code=204)
