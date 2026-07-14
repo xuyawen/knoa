@@ -380,7 +380,7 @@ watch(() => route.params.id, () => {
         <div v-if="loadingDetail" class="detail-loading">加载中...</div>
 
         <!-- 文档正文：可折叠预览 -->
-        <div v-if="showFullContent" class="content-wrapper">
+        <div v-if="showFullContent" class="content-wrapper content-wrapper--full">
           <pre class="detail-content">{{ detailDoc.contentMd }}</pre>
         </div>
         <template v-else>
@@ -784,6 +784,11 @@ watch(() => route.params.id, () => {
   transition: opacity 0.2s ease;
   border-bottom-left-radius: var(--radius-md);
   border-bottom-right-radius: var(--radius-md);
+}
+
+/* 展开后隐藏渐变遮罩 */
+.content-wrapper--full::after {
+  display: none;
 }
 
 /* 渐变遮罩下的展开按钮 */
