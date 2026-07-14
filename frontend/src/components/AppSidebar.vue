@@ -30,6 +30,12 @@ const emit = defineEmits<{
 
 const bases = computed(() => knowledge.bases)
 
+// 知识库列表可折叠，默认展开；收起后侧栏变短、用户卡上移
+const kbOpen = ref(true)
+function toggleKb() {
+  kbOpen.value = !kbOpen.value
+}
+
 // 确保在任何页面刷新都能加载知识库列表
 onMounted(() => {
   knowledge.load()
@@ -80,9 +86,12 @@ onMounted(() => {
       </router-link>
     </nav>
 
-    <!-- 知识库导航（标题固定，列表滚动） -->
-    <div v-show="!collapsed" class="nav-label nav-label-fixed">知识库</div>
-    <div class="nav-scroll">
+    <!-- 知识库导航（标题可折叠，列表滚动） -->
+    <button v-show="!collapsed" class="nav-label nav-label-fixed" @click="toggleKb">
+      <span>知识库</span>
+      <Icon name="chevron-down" :size="14" class="nav-caret" :class="{ closed: !kbOpen }" />
+    </button>
+    <div v-show="kbOpen || collapsed" class="nav-scroll">
     <nav class="nav">
       <router-link
         v-for="kb in bases"
@@ -249,10 +258,32 @@ onMounted(() => {
   padding: 6px 12px 4px;
   letter-spacing: 0.04em;
 }
-/* 知识库标签固定在滚动区上方，不随列表滚动 */
+/* 知识库标签固定在滚动区上方，可点击折叠，不随列表滚动 */
 .nav-label-fixed {
   margin-top: 8px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 8px 4px 12px;
+  border: none;
+  background: none;
+  font: inherit;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.nav-label-fixed:hover {
+  color: var(--text-primary);
+}
+.nav-caret {
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.nav-caret.closed {
+  transform: rotate(-90deg);
 }
 .nav-item {
   display: flex;
