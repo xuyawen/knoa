@@ -4,6 +4,7 @@ import { useChatStore } from '@/stores/chat'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import SourceCard from './SourceCard.vue'
 import SourceDetailDrawer from './SourceDetailDrawer.vue'
+import Icon from './Icon.vue'
 import HealthBar from './HealthBar.vue'
 import TrendingList from './TrendingList.vue'
 
