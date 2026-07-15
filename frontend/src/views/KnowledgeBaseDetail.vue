@@ -34,44 +34,37 @@ function syncMobile() {
 /* 硬数据兜底 —— 详情页头部信息（store 无 description 字段时回退） */
 const kbMap: Record<string, {
   name: string
-  icon: string
   description: string
 }> = {
   compliance: {
     name: '合规库',
-    icon: 'compliance',
     description: '亚马逊平台合规政策、产品认证标准、知识产权法规等文档集合。',
   },
   ads: {
     name: '广告投放',
-    icon: 'ads',
     description: 'PPC 广告策略、关键词优化、品牌推广、Sponsored Products 等实操指南。',
   },
   logistics: {
     name: '物流仓储',
-    icon: 'logistics',
     description: 'FBA/FBM 物流方案、仓储管理、头程运输、清关流程、退换货处理。',
   },
   selection: {
     name: '选品策略',
-    icon: 'selection',
     description: '市场调研方法论、竞品分析框架、选品工具使用、利润测算模板。',
   },
   service: {
     name: '客服话术',
-    icon: 'service',
     description: '售前咨询话术、售后纠纷处理、Review 管理、客户沟通 SOP。',
   },
 }
 
 const kbId = computed(() => route.params.id as string)
-// 头部信息：优先用 store 里真实的库名/图标，description 回退到 kbMap
+// 头部信息：优先用 store 里真实的库名，description 回退到 kbMap
 const kb = computed(() => {
   const s = knowledgeStore.bases.find(b => b.id === kbId.value)
-  const base = kbMap[kbId.value] || { name: '未知', icon: 'library', description: '' }
+  const base = kbMap[kbId.value] || { name: '未知', description: '' }
   return {
     name: s?.name || base.name,
-    icon: s?.icon || base.icon,
     description: base.description,
   }
 })
@@ -285,7 +278,6 @@ watch(() => route.params.id, () => {
 
         <!-- 库信息卡片 -->
         <div class="kb-header">
-          <div class="kb-header-icon"><Icon :name="kb.icon" :size="28" /></div>
           <div class="kb-header-info">
             <h2 class="kb-title">{{ kb.name }}</h2>
             <p class="kb-desc">{{ kb.description }}</p>
@@ -469,17 +461,6 @@ watch(() => route.params.id, () => {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   margin-bottom: 20px;
-}
-.kb-header-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: var(--radius-md);
-  background: var(--brand-soft);
-  color: var(--brand);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
 }
 .kb-header-info {
   display: flex;

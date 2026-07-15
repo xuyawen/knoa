@@ -86,7 +86,6 @@ const kbCards = computed(() => {
     const h = healthMap.get(kb.name)
     return {
       id: kb.id,
-      icon: kb.icon,
       name: kb.name,
       alert: kb.badge?.includes('待复核'),
       meta: h ? `${h.docCount} 篇 · 健康 ${Math.round(h.healthScore * 100)}%` : '',
@@ -94,7 +93,6 @@ const kbCards = computed(() => {
   })
   const fromWs = ['文档管理'].map(e => ({
     id: null,
-    icon: 'library',
     name: e,
     alert: false,
     meta: '快捷入口',
@@ -155,7 +153,6 @@ const kbCards = computed(() => {
               v-for="c in kbCards"
               :key="c.name"
               :id="c.id"
-              :icon="c.icon"
               :name="c.name"
               :meta="c.meta"
               :alert="c.alert"
@@ -181,7 +178,6 @@ const kbCards = computed(() => {
               v-for="c in kbCards"
               :key="c.name"
               :id="c.id"
-              :icon="c.icon"
               :name="c.name"
               :meta="c.meta"
               :alert="c.alert"

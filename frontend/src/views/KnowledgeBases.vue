@@ -80,17 +80,11 @@ const createError = ref<string | null>(null)
 const editingId = ref<string | null>(null)
 const newName = ref('')
 const newDesc = ref('')
-const newIcon = ref('library')
-const ICON_OPTIONS = [
-  'library', 'compliance', 'ads', 'logistics', 'selection',
-  'service', 'graph', 'bell', 'search', 'users',
-]
 
 function openCreate() {
   editingId.value = null
   newName.value = ''
   newDesc.value = ''
-  newIcon.value = 'library'
   createError.value = null
   showCreate.value = true
 }
@@ -98,7 +92,6 @@ function openEdit(kb: KnowledgeBase) {
   editingId.value = kb.id
   newName.value = kb.name
   newDesc.value = kb.description || ''
-  newIcon.value = kb.icon
   createError.value = null
   showCreate.value = true
 }
@@ -118,13 +111,11 @@ async function submitCreate() {
     if (editingId.value) {
       await updateKnowledgeBase(editingId.value, {
         name,
-        icon: newIcon.value,
         description: newDesc.value.trim() || null,
       })
     } else {
       await createKnowledgeBase({
         name,
-        icon: newIcon.value,
         description: newDesc.value.trim() || null,
       })
     }
@@ -260,7 +251,6 @@ function goDetail(id: string) {
               @click.stop
               @change="onCheck(kb.id, $event)"
             />
-            <span class="kb-icon" @click="goDetail(kb.id)"><Icon :name="kb.icon" :size="20" /></span>
             <div class="kb-info">
               <span class="kb-name" @click="goDetail(kb.id)">{{ kb.name }}</span>
               <span class="kb-meta">{{ kb.documentCount }} 篇文档</span>
@@ -291,22 +281,6 @@ function goDetail(id: string) {
         <label class="field">
           <span class="field-label">名称 <em>*</em></span>
           <input v-model="newName" type="text" placeholder="如：合规管理 / 广告运营" class="input" />
-        </label>
-
-        <label class="field">
-          <span class="field-label">图标</span>
-          <div class="icon-grid">
-            <button
-              v-for="ic in ICON_OPTIONS"
-              :key="ic"
-              type="button"
-              class="icon-opt"
-              :class="{ active: newIcon === ic }"
-              @click="newIcon = ic"
-            >
-              <Icon :name="ic" :size="20" />
-            </button>
-          </div>
         </label>
 
         <label class="field">
@@ -473,18 +447,6 @@ function goDetail(id: string) {
   flex-shrink: 0;
   cursor: pointer;
 }
-.kb-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--bg-subtle);
-  color: var(--text-secondary);
-  flex-shrink: 0;
-  cursor: pointer;
-}
 .kb-info {
   flex: 1;
   display: flex;
@@ -632,30 +594,6 @@ function goDetail(id: string) {
 }
 .input:focus {
   border-color: var(--brand);
-}
-.icon-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-}
-.icon-opt {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 40px;
-  border-radius: var(--radius-md);
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
-}
-.icon-opt:hover {
-  border-color: var(--brand);
-}
-.icon-opt.active {
-  border-color: var(--brand);
-  color: var(--brand);
-  background: var(--brand-soft);
 }
 .create-error {
   margin: -4px 0 12px;
