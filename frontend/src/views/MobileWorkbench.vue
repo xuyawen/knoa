@@ -297,7 +297,7 @@ const kbCards = computed(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 16px;
+  padding: 0 12px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
 }
@@ -336,7 +336,7 @@ const kbCards = computed(() => {
 .scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 16px calc(90px + env(safe-area-inset-bottom));
+  padding: 12px 12px calc(90px + env(safe-area-inset-bottom));
 }
 .scroll.center {
   display: flex;
@@ -354,13 +354,13 @@ const kbCards = computed(() => {
 .profile {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
 }
 .pf-head {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 18px 16px;
+  padding: 16px 14px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -408,7 +408,7 @@ const kbCards = computed(() => {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 20px 16px;
+  padding: 18px 14px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
