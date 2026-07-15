@@ -227,7 +227,7 @@ const kbCards = computed(() => {
                 <span class="stat-label">知识库</span>
               </div>
               <div class="stat">
-                <span class="stat-num">{{ knowledge.health.length }}</span>
+                <span class="stat-num">{{ knowledge.bases.reduce((s, kb) => s + (kb.pendingCount || 0), 0) }}</span>
                 <span class="stat-label">需复核</span>
               </div>
             </div>
