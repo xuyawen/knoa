@@ -239,6 +239,8 @@ class AgenticRAGAgent:
     """Agentic RAG 代理 — 用 LLM 驱动的决策闭环替代固定检索流程。"""
 
     MAX_STEPS = 3
+    # 上下文窗口：最近多少条历史消息注入 LLM（约 N/2 轮对话）
+    MAX_HISTORY_MESSAGES = 20
 
     def __init__(
         self,
@@ -327,8 +329,12 @@ class AgenticRAGAgent:
             user_content = self._build_user_content(question, files)
             st = _AgentState(question, kb_id)
             st.all_sources = all_sources
+
+            # ── 加载会话历史，注入上下文（让 LLM 知道"这个产品"是什么）──
+            history_msgs = await self._load_session_history(session.id)
             st.messages = [
                 {"role": "system", "content": AGENT_SYSTEM_PROMPT + self._memory_section()},
+                *history_msgs,
                 {"role": "user", "content": user_content},
             ]
             if files:
@@ -667,6 +673,45 @@ class AgenticRAGAgent:
                     await self.memory.save(self.user_id, memories, s)
         except Exception as e:
             logger.warning("memory save failed (skipped): %s", e)
+
+    async def _load_session_history(self, session_id: uuid.UUID) -> list[dict]:
+        """从 DB 加载该会话最近的消息历史，拼成 LLM 可用的 messages 列表。
+
+        排除当前轮刚插入的那条 user 消息（它会在 stream_answer 末尾单独追加）。
+        历史消息上限 MAX_HISTORY_MESSAGES（约 10 轮对话），防止 token 爆炸。
+        用户消息若带 attachments（多模态），回构为 content blocks。
+        """
+        result = await self.db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.created_at.asc())
+        )
+        all_msgs = result.scalars().all()
+
+        # 排除最后一条（就是本轮刚 flush 的 user message）
+        if len(all_msgs) > 1:
+            all_msgs = all_msgs[:-1]
+        else:
+            return []  # 第一条消息，无历史
+
+        # 截断到窗口大小
+        if len(all_msgs) > self.MAX_HISTORY_MESSAGES:
+            all_msgs = all_msgs[-self.MAX_HISTORY_MESSAGES:]
+
+        history: list[dict] = []
+        for msg in all_msgs:
+            if msg.role == "user":
+                # 回构多模态内容（图片等）
+                if msg.attachments:
+                    content = self._build_user_content(msg.content or "", msg.attachments)
+                else:
+                    content = msg.content or ""
+                history.append({"role": "user", "content": content})
+            elif msg.role == "assistant":
+                if msg.content:
+                    history.append({"role": "assistant", "content": msg.content})
+
+        return history
 
     @staticmethod
     def _build_user_content(question: str, files: "list[dict] | None") -> "str | list[dict]":
