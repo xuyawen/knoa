@@ -38,4 +38,5 @@ deploy/backup/*.sql.gz
 deploy/backup/*.sql
 
 # personal AI study notes (user-only, not part of the project)
-AI学习笔记_核心功能.md
+# 命名形如 AI学习笔记_*.md 的学习笔记均忽略，不在项目内同步
+AI学习笔记_*.md
