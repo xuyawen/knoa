@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     MEMORY_ENABLED: bool = True        # 总开关：false 则完全跳过记忆抽取/召回/注入
     MEMORY_TOP_K: int = 5               # 每轮问答注入 prompt 的相关记忆条数
     MEMORY_SIM_THRESHOLD: float = 0.92  # 新记忆与旧记忆余弦相似度超此值则更新而非新增（去重/冲突消解）
+    # 对话滚动摘要（长会话上下文压缩）：窗口外的旧对话由 LLM 滚动压缩成一段摘要，
+    # 注入 system prompt（route 决策 + 最终生成），避免长会话「忘了开头说啥」。
+    # 与 Mem0 长期记忆互补：Mem0 管「事实/偏好」，本机制管「对话流」；二者均异步后台跑。
+    CONV_SUMMARY_ENABLED: bool = True       # 总开关：false 则纯固定窗口（旧消息直接丢弃）
+    CONV_SUMMARY_KEEP_RECENT: int = 10     # 保留最近 N 条原始消息不摘要（细节不失真）
+    CONV_SUMMARY_STEP: int = 6             # 窗口外每积累 N 条新消息才重新调 LLM 摘要一次（省成本）
     # 知识图谱 / Graph RAG（Phase 3 T1；Postgres 图存储，无需 Neo4j server）
     GRAPH_ENABLED: bool = True         # 总开关：false 则跳过建图与图检索，回退普通 RAG
     GRAPH_TOP_K: int = 5               # 每轮问答图检索召回的实体种子数（再去 1 跳扩展）

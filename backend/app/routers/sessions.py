@@ -36,14 +36,15 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
                 .limit(1)
             )
             title = (first_user[:24] + "…") if first_user else "新对话"
-        out.append(
-            SessionOut(
-                id=str(s.id),
-                title=title,
-                updated_at=s.updated_at.isoformat() if s.updated_at else "",
-                msg_count=msg_count or 0,
+            out.append(
+                SessionOut(
+                    id=str(s.id),
+                    title=title,
+                    updated_at=s.updated_at.isoformat() if s.updated_at else "",
+                    msg_count=msg_count or 0,
+                    summary=s.summary,
+                )
             )
-        )
     return out
 
 
@@ -62,6 +63,7 @@ async def create_session(
         title=session.title or "新对话",
         updated_at=session.updated_at.isoformat() if session.updated_at else "",
         msg_count=0,
+        summary=session.summary,
     )
 
 
@@ -84,6 +86,7 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
     return SessionDetailOut(
         id=str(session.id),
         title=session.title or "新对话",
+        summary=session.summary,
         messages=[
             SessionMessageOut(
                 role=m.role,

@@ -110,6 +110,7 @@ export interface ChatSession {
   title: string
   updatedAt: string
   msgCount: number
+  summary?: string | null
 }
 
 export interface SessionMessage {
@@ -123,6 +124,7 @@ export interface SessionMessage {
 export interface SessionDetail {
   id: string
   title: string
+  summary?: string | null
   messages: SessionMessage[]
 }
 

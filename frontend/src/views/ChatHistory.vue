@@ -102,6 +102,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
             @click="onPick(s.id)"
           >
             <div class="session-title">{{ s.title }}</div>
+            <div v-if="s.summary" class="session-summary">{{ s.summary }}</div>
             <div class="session-meta">
               <span>{{ s.msgCount }} 条消息</span>
               <span>{{ fmtTime(s.updatedAt) }}</span>
@@ -181,6 +182,16 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   overflow: hidden;
   text-overflow: ellipsis;
   margin-bottom: 4px;
+}
+.session-summary {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 6px;
 }
 .session-meta {
   display: flex;

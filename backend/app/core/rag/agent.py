@@ -213,6 +213,18 @@ def _should_web_search(question: str) -> bool:
     return any(p.search(q) for p in _WEB_SEARCH_PATTERNS)
 
 
+_ROLL_SUMMARY_SYSTEM = (
+    "你是一个对话摘要压缩器。给定某跨境电商运营知识助手会话里「较早的对话片段」，"
+    "请把它压缩成一段简洁的摘要，供后续轮次理解上下文。\n"
+    "规则：\n"
+    "1. 保留关键事实：用户提到的产品/实体名称、已确认的结论、已做的决策、待办、用户偏好。\n"
+    "2. 丢弃寒暄、重复、与后续无关的细节。\n"
+    "3. 若给出「已有摘要」，请把新对话与已有摘要融合，输出一段连贯的新摘要（不要重复罗列）。\n"
+    "4. 语言与用户一致（中文则用中文）。\n"
+    "5. 输出一段紧凑的自然语言摘要，不超过 200 字。不要使用 markdown、不要解释。"
+)
+
+
 class _AgentState:
     """LangGraph 风格的共享状态：节点读写它，边（下一节点名）决定流转。
 
@@ -261,6 +273,7 @@ class AgenticRAGAgent:
         self.graph = graph
         self._memories: list[str] = []  # 本轮召回的该用户长期记忆
         self._graph_chunks: list[dict] = []  # 本轮图检索召回的相关 chunk
+        self._summary_text: str = ""  # 本轮会话的滚动摘要文本（注入 system）
 
     @traceable(name="agentic_rag_stream", tags=["agent", "rag"])
     async def stream_answer(
@@ -330,11 +343,12 @@ class AgenticRAGAgent:
             st = _AgentState(question, kb_id)
             st.all_sources = all_sources
 
-            # ── 加载会话历史，注入上下文（让 LLM 知道"这个产品"是什么）──
-            history_msgs = await self._load_session_history(session.id)
+            # ── 加载会话历史 + 滚动摘要，注入上下文 ──
+            raw_history, summary = await self._load_session_history(session)
+            self._summary_text = summary or ""
             st.messages = [
-                {"role": "system", "content": AGENT_SYSTEM_PROMPT + self._memory_section()},
-                *history_msgs,
+                {"role": "system", "content": AGENT_SYSTEM_PROMPT + self._memory_section() + self._summary_section()},
+                *raw_history,
                 {"role": "user", "content": user_content},
             ]
             if files:
@@ -372,6 +386,12 @@ class AgenticRAGAgent:
                     asyncio.create_task(self._save_memory(question, final_answer_text))
                 except Exception:
                     pass
+
+            # ── 滚动摘要：后台压缩窗口外旧对话（不阻塞 SSE 流，下一轮才生效） ──
+            try:
+                asyncio.create_task(self._roll_summary(session.id))
+            except Exception:
+                pass
 
             yield {
                 "event": "done",
@@ -638,7 +658,7 @@ class AgenticRAGAgent:
             "（如汇率、价格、日期、政策要点），请直接从片段中提取并呈现给用户，"
             "并标注对应编号；不要说「无法获取/无法访问数据」，因为数据已在上文给出。\n"
             "确实没有任何来源覆盖该问题时，再如实说明。\n\n"
-            f"来源资料：\n{context}" + self._memory_section()
+            f"来源资料：\n{context}" + self._memory_section() + self._summary_section()
         )
         return [{"role": "system", "content": system}, {"role": "user", "content": question}]
 
@@ -674,34 +694,41 @@ class AgenticRAGAgent:
         except Exception as e:
             logger.warning("memory save failed (skipped): %s", e)
 
-    async def _load_session_history(self, session_id: uuid.UUID) -> list[dict]:
-        """从 DB 加载该会话最近的消息历史，拼成 LLM 可用的 messages 列表。
+    async def _load_session_history(self, session) -> "tuple[list[dict], str | None]":
+        """返回 (保留区原始消息, 滚动摘要文本)。
 
-        排除当前轮刚插入的那条 user 消息（它会在 stream_answer 末尾单独追加）。
-        历史消息上限 MAX_HISTORY_MESSAGES（约 10 轮对话），防止 token 爆炸。
-        用户消息若带 attachments（多模态），回构为 content blocks。
+        保留最近 CONV_SUMMARY_KEEP_RECENT 条原始消息（细节不失真），
+        更早的已由后台 _roll_summary 压缩进 session.summary（长会话上下文）。
+        summary 取自 ChatSession.summary（由 _roll_summary 异步维护）。
+        排除当前轮刚 flush 的 user 消息。
         """
         result = await self.db.execute(
             select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
+            .where(ChatMessage.session_id == session.id)
             .order_by(ChatMessage.created_at.asc())
         )
         all_msgs = result.scalars().all()
 
-        # 排除最后一条（就是本轮刚 flush 的 user message）
+        # 排除最后一条（本轮刚 flush 的 user message）；首条消息则无历史
         if len(all_msgs) > 1:
             all_msgs = all_msgs[:-1]
         else:
-            return []  # 第一条消息，无历史
+            return [], (session.summary or None)
 
-        # 截断到窗口大小
-        if len(all_msgs) > self.MAX_HISTORY_MESSAGES:
-            all_msgs = all_msgs[-self.MAX_HISTORY_MESSAGES:]
+        n = len(all_msgs)
+        keep = settings.CONV_SUMMARY_KEEP_RECENT
+        if n <= keep:
+            # 全部作原始消息；若 session 已有旧摘要也一并带上
+            return self._msgs_to_llm(all_msgs), (session.summary or None)
 
+        recent = all_msgs[-keep:]
+        return self._msgs_to_llm(recent), (session.summary or None)
+
+    def _msgs_to_llm(self, msgs) -> list[dict]:
+        """把 ChatMessage 列表回构为 LLM messages（多模态 user 回构 content blocks）。"""
         history: list[dict] = []
-        for msg in all_msgs:
+        for msg in msgs:
             if msg.role == "user":
-                # 回构多模态内容（图片等）
                 if msg.attachments:
                     content = self._build_user_content(msg.content or "", msg.attachments)
                 else:
@@ -710,8 +737,113 @@ class AgenticRAGAgent:
             elif msg.role == "assistant":
                 if msg.content:
                     history.append({"role": "assistant", "content": msg.content})
-
         return history
+
+    @staticmethod
+    def _format_history_text(msgs) -> str:
+        """把一段历史消息拼成纯文本（给 LLM 做摘要用）。
+
+        多模态图片：只标注「附 N 张图片」，绝不塞 base64（太大且无意义）。
+        """
+        parts = []
+        for m in msgs:
+            if m.role == "user":
+                extra = ""
+                if m.attachments:
+                    n = len(m.attachments) if isinstance(m.attachments, list) else 0
+                    if n:
+                        extra = f"（附 {n} 张图片）"
+                parts.append(f"用户：{(m.content or '').strip()}{extra}")
+            elif m.role == "assistant" and m.content:
+                parts.append(f"助手：{m.content.strip()}")
+        return "\n".join(parts)
+
+    def _summary_section(self) -> str:
+        """把滚动摘要格式化成可注入 system prompt 的文本块（无摘要则返回空串）。"""
+        if not getattr(self, "_summary_text", ""):
+            return ""
+        return (
+            "\n\n## 对话历史摘要（较早对话已压缩，供你理解上下文）\n"
+            + self._summary_text
+        )
+
+    async def _roll_summary(self, session_id: uuid.UUID) -> None:
+        """后台滚动摘要：把窗口外的旧对话段压缩进 ChatSession.summary。
+
+        与 Mem0 的 _save_memory 同源模式——自己开独立 db session，
+        不阻塞已返回的 SSE 流；本轮 user+assistant 落库后才触发，
+        故能读到完整历史。下一轮提问时 summary 才被注入
+        （滚动摘要本就是给未来轮次用的）。
+
+        触发闸门（省成本）：
+        - 历史总条数 <= KEEP_RECENT：不摘要
+        - 窗口外、尚未摘要的段为空：跳过
+        - 非首次且累计新段 < STEP：跳过（每积累 STEP 条才重摘一次）
+        """
+        if not settings.CONV_SUMMARY_ENABLED:
+            return
+        try:
+            async with AsyncSessionLocal() as s:
+                sess = (
+                    await s.execute(
+                        select(ChatSession).where(ChatSession.id == session_id)
+                    )
+                ).scalar_one_or_none()
+                if not sess:
+                    return
+                msgs = (
+                    await s.execute(
+                        select(ChatMessage)
+                        .where(ChatMessage.session_id == session_id)
+                        .order_by(ChatMessage.created_at.asc())
+                    )
+                ).scalars().all()
+
+                n = len(msgs)
+                keep = settings.CONV_SUMMARY_KEEP_RECENT
+                if n <= keep:
+                    return  # 还不够长，无需摘要
+
+                window_start = n - keep  # 窗口外（需摘要）/ 窗口内（保留）分界
+                already = sess.summarized_count or 0
+                if window_start <= already:
+                    return  # 没有新窗口外消息需要摘要
+                new_segment_count = window_start - already
+                if already > 0 and new_segment_count < settings.CONV_SUMMARY_STEP:
+                    return  # 非首次：累计新段未达 STEP，先不重摘（省 LLM 调用）
+
+                segment_text = self._format_history_text(msgs[already:window_start])
+                if not segment_text.strip():
+                    # 边界前移，避免反复空尝试
+                    sess.summarized_count = window_start
+                    await s.commit()
+                    return
+
+                prompt = [
+                    {"role": "system", "content": _ROLL_SUMMARY_SYSTEM},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"[已有摘要]\n{sess.summary or '（无）'}\n\n"
+                            f"[本轮需要压缩的新对话]\n{segment_text}"
+                        ),
+                    },
+                ]
+                try:
+                    new_summary = (await self.llm.chat(prompt, temperature=0.2)).strip()
+                except Exception as e:
+                    logger.warning("roll summary llm failed (skip): %s", e)
+                    return
+                if not new_summary:
+                    sess.summarized_count = window_start
+                    await s.commit()
+                    return
+
+                sess.summary = new_summary
+                sess.summarized_count = window_start
+                await s.commit()
+        except Exception as e:
+            logger.warning("roll summary failed (skipped): %s", e)
 
     @staticmethod
     def _build_user_content(question: str, files: "list[dict] | None") -> "str | list[dict]":

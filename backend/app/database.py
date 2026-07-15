@@ -71,6 +71,15 @@ async def _migrate_columns(conn) -> None:
         await conn.execute(
             text(f"ALTER TABLE chat_message ADD COLUMN IF NOT EXISTS {name} {typ}")
         )
+    # 对话滚动摘要：chat_session.summary(文本) + summarized_count(已摘要边界)
+    session_cols = [
+        ("summary", "TEXT"),
+        ("summarized_count", "INTEGER NOT NULL DEFAULT 0"),
+    ]
+    for name, typ in session_cols:
+        await conn.execute(
+            text(f"ALTER TABLE chat_session ADD COLUMN IF NOT EXISTS {name} {typ}")
+        )
 
 
 async def init_db():

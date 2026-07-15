@@ -40,6 +40,7 @@ class SessionOut(CamelModel):
     title: str
     updated_at: str
     msg_count: int
+    summary: str | None = None
 
 
 class SessionMessageOut(CamelModel):
@@ -53,4 +54,5 @@ class SessionMessageOut(CamelModel):
 class SessionDetailOut(CamelModel):
     id: str
     title: str
+    summary: str | None = None
     messages: list[SessionMessageOut]
