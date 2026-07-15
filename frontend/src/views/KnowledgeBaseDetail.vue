@@ -9,6 +9,9 @@ import { getDocuments, uploadDocument, getDocument, approveDocument, rejectDocum
 import type { DocumentItem, DocumentDetail, AIReview } from '@/types/api'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
+import { useConfirm } from '@/composables/useConfirm'
+
+const { confirm } = useConfirm()
 
 const route = useRoute()
 const router = useRouter()
@@ -239,14 +242,18 @@ async function reject(doc: DocumentItem) {
 }
 
 async function remove(doc: DocumentItem) {
-  if (!confirm(`确定删除「${doc.title}」？该操作会同时清理检索索引，不可恢复。`)) return
-  try {
-    await deleteDocument(kbId.value, doc.id)
-    await loadDocuments()
-    if (currentDoc.value?.id === doc.id) closeDetail()
-  } catch (e) {
-    console.error('删除失败', e)
-  }
+  const ok = await confirm({
+    title: '删除文档',
+    message: `确定删除「${doc.title}」？该操作会同时清理检索索引，不可恢复。`,
+    confirmText: '删除',
+    danger: true,
+    onConfirm: async () => {
+      await deleteDocument(kbId.value, doc.id)
+      await loadDocuments()
+      if (currentDoc.value?.id === doc.id) closeDetail()
+    },
+  })
+  if (!ok) return
 }
 
 onMounted(() => {

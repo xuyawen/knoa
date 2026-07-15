@@ -6,6 +6,9 @@ import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
 import { useChatStore } from '@/stores/chat'
 import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
+import { useConfirm } from '@/composables/useConfirm'
+
+const { confirm } = useConfirm()
 
 const router = useRouter()
 const route = useRoute()
@@ -54,27 +57,30 @@ function cancelSelection() {
 }
 
 async function handleDeleteOne(id: string) {
-  if (!confirm('确定删除此会话？消息将一并清除。')) return
-  try {
-    await chat.removeSession(id)
-    if (selecting.value) {
-      selectedIds.value = new Set(selectedIds.value)
-      selectedIds.value.delete(id)
-    }
-  } catch {
-    alert('删除失败')
+  const ok = await confirm({
+    title: '删除会话',
+    message: '确定删除此会话？会话内的全部消息将一并清除，且无法恢复。',
+    confirmText: '删除',
+    danger: true,
+    onConfirm: async () => { await chat.removeSession(id) },
+  })
+  if (ok && selecting.value) {
+    const next = new Set(selectedIds.value)
+    next.delete(id)
+    selectedIds.value = next
   }
 }
 
 async function handleBatchDelete() {
   const n = selectedIds.value.size
-  if (!confirm(`确定删除选中的 ${n} 个会话？消息将一并清除。`)) return
-  try {
-    await chat.removeSessions(Array.from(selectedIds.value))
-    cancelSelection()
-  } catch {
-    alert('批量删除失败')
-  }
+  const ok = await confirm({
+    title: '批量删除',
+    message: `确定删除选中的 ${n} 个会话？会话内的全部消息将一并清除，且无法恢复。`,
+    confirmText: `删除 ${n} 个`,
+    danger: true,
+    onConfirm: async () => { await chat.removeSessions(Array.from(selectedIds.value)) },
+  })
+  if (ok) cancelSelection()
 }
 
 function syncMobile() {

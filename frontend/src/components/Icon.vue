@@ -150,6 +150,16 @@ defineProps<{ name: string; size?: number }>()
       <rect x="3" y="3" width="18" height="18" rx="3" ry="3" stroke-width="2" fill="none" />
       <path d="M8 12l3 3 6-6" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
     </template>
+    <template v-else-if="name === 'alert-triangle'">
+      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+      <line x1="12" y1="9" x2="12" y2="13" stroke-width="2" stroke-linecap="round" />
+      <circle cx="12" cy="17" r="1" fill="currentColor" stroke="none" />
+    </template>
+    <template v-else-if="name === 'help-circle'">
+      <circle cx="12" cy="12" r="9" stroke-width="2" fill="none" />
+      <path d="M9.5 9a2.5 2.5 0 115 1c0 1.5-2.5 2-2.5 3.5" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+      <circle cx="12" cy="17" r="1" fill="currentColor" stroke="none" />
+    </template>
     <template v-else>
       <circle cx="12" cy="12" r="3" />
     </template>

@@ -2,6 +2,7 @@
 import { onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import CommandPalette from '@/components/CommandPalette.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const auth = useAuthStore()
 
@@ -14,6 +15,7 @@ onMounted(() => {
   <div class="app-root">
     <router-view />
     <CommandPalette />
+    <ConfirmDialog />
   </div>
 </template>
 
