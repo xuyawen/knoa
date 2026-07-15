@@ -354,7 +354,8 @@ const kbCards = computed(() => {
 .profile {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
+  padding-top: 8px;
 }
 .pf-head {
   display: flex;
@@ -407,8 +408,8 @@ const kbCards = computed(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 16px;
+  gap: 6px;
+  padding: 20px 16px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -432,7 +433,7 @@ const kbCards = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 13px 16px;
+  padding: 14px 16px;
   font-size: 14px;
 }
 .pf-row + .pf-row {
@@ -450,7 +451,7 @@ const kbCards = computed(() => {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 46px;
+  height: 48px;
   border-radius: var(--radius-md);
   background: var(--bg-surface);
   border: 1px solid var(--danger-soft, #f3c0c0);
@@ -458,6 +459,7 @@ const kbCards = computed(() => {
   font-size: 14px;
   font-weight: 500;
   transition: background 0.15s ease;
+  margin-top: 4px;
 }
 .pf-logout:hover {
   background: var(--danger-soft, #fde8e8);
