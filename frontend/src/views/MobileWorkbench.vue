@@ -336,7 +336,7 @@ const kbCards = computed(() => {
 .scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 20px 20px calc(90px + env(safe-area-inset-bottom));
+  padding: 16px 16px calc(90px + env(safe-area-inset-bottom));
 }
 .scroll.center {
   display: flex;
@@ -355,7 +355,6 @@ const kbCards = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 24px;
-  padding-top: 8px;
 }
 .pf-head {
   display: flex;
