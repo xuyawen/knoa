@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
-import Icon from './Icon.vue'
 
 const knowledge = useKnowledgeStore()
 const emit = defineEmits<{ (e: 'ask', q: string): void }>()
@@ -18,7 +17,7 @@ const trending = computed(() => knowledge.trending)
     >
       <span class="rank" :class="{ top: i < 3 }">{{ i + 1 }}</span>
       <span class="q">{{ t.question }}</span>
-      <span class="fire"><Icon name="fire" :size="13" /> {{ t.count }}</span>
+      <span class="count">{{ t.count }}</span>
     </li>
   </ul>
 </template>
@@ -69,7 +68,7 @@ const trending = computed(() => knowledge.trending)
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.fire {
+.count {
   display: inline-flex;
   align-items: center;
   gap: 3px;

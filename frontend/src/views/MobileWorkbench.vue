@@ -188,7 +188,7 @@ onMounted(() => {
             <li v-for="(t, i) in knowledge.trending" :key="i">
               <span class="rk" :class="{ top: i < 3 }">{{ i + 1 }}</span>
               <span class="tq">{{ t.question }}</span>
-              <span class="tf"><Icon name="fire" :size="13" />{{ t.count }}</span>
+              <span class="tf">{{ t.count }}</span>
             </li>
           </ul>
         </template>
