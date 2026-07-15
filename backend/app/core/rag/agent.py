@@ -545,8 +545,25 @@ class AgenticRAGAgent:
         st.next = "_n_route" if st.web_loop else "_n_generate"
 
     async def _n_generate(self, st: "_AgentState") -> AsyncIterator[dict]:
-        """终态节点：基于全部来源流式生成最终回答。"""
-        final_messages = self._build_final_prompt(st.question, st.all_sources, None)
+        """终态节点：基于全部来源流式生成最终回答。
+
+        复用 st.messages（已含 system / history / 多模态图片），
+        不再用 _build_final_prompt 重建——否则会丢失 image_url content blocks
+        和会话历史上下文。
+        """
+        # 基于 st.messages 追加「来源 + 回答指令」，不丢弃已有消息
+        final_messages = list(st.messages)  # 浅拷贝：system + history + user(含图)
+        if st.all_sources:
+            ctx = self._sources_to_context(st.all_sources)
+            final_messages.append({
+                "role": "user",
+                "content": (
+                    f"来源资料：\n{ctx}\n\n"
+                    "请基于以上对话上下文及来源资料回答用户问题。"
+                    "引用时使用 [1] [2] 标注编号；若某条标记为联网来源可注明「据联网信息」；"
+                    "确实无来源覆盖时再如实说明。"
+                ),
+            })
         full_answer = ""
         async for delta in self.llm.stream_chat(final_messages):
             full_answer += delta
@@ -564,13 +581,13 @@ class AgenticRAGAgent:
             st.next = "_n_generate"
             return
         else:
-            # 无任何检索结果时才走纯通用回答
+            # 无任何检索结果时基于 st.messages 回答（保留多模态图片 + 历史）
             quick_msgs = [
                 {"role": "system", "content": (
                     "你是「知海 Knoa」，一个跨境电商运营知识助手。"
                     "请简洁友好地回答用户的问题。不要自我介绍或罗列功能。"
-                ) + self._memory_section()},
-                {"role": "user", "content": st.question},
+                ) + self._memory_section() + self._summary_section()},
+                *list(st.messages)[1:],  # 跳过 system，保留 history + user(含图)
             ]
             try:
                 st.final_answer_text = await self.llm.chat(quick_msgs)
