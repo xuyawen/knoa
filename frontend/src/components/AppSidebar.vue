@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useAuthStore } from '@/stores/auth'
+import type { KnowledgeBase } from '@/types/api'
 import Icon from './Icon.vue'
 
 const route = useRoute()
@@ -34,6 +35,17 @@ const bases = computed(() => knowledge.bases)
 onMounted(() => {
   knowledge.load()
 })
+
+// 根据健康度给侧边栏 KB 条目算左侧色条颜色：
+// 有待复核(red) > 健康分<0.6(red) > 0.6~0.85(黄) > 正常(绿)
+function healthColor(kb: KnowledgeBase): string {
+  if (kb.badgeType === 'danger') return 'var(--danger)'
+  const h = knowledge.health.find(x => x.kb === kb.id)
+  if (!h) return 'var(--success)'
+  if (h.healthScore >= 0.85) return 'var(--success)'
+  if (h.healthScore >= 0.6) return 'var(--warning)'
+  return 'var(--danger)'
+}
 </script>
 
 <template>
@@ -91,7 +103,7 @@ onMounted(() => {
         class="nav-item"
         :class="{ active: route.path === '/knowledge-bases/' + kb.id }"
       >
-        <span class="nav-icon"><Icon :name="kb.icon" :size="18" /></span>
+        <span class="h-bar" :style="{ background: healthColor(kb) }" />
         <span v-show="!collapsed" class="nav-name">{{ kb.name }}</span>
         <span v-if="kb.badge && !collapsed" class="nav-badge" :class="kb.badgeType">{{ kb.badge }}</span>
       </router-link>
@@ -270,17 +282,29 @@ onMounted(() => {
   color: var(--text-primary);
 }
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
   height: 40px;
-  padding: 0 12px;
+  padding: 0 12px 0 16px;
   border-radius: var(--radius-md);
   color: var(--text-primary);
   font-size: 14px;
   text-align: left;
   width: 100%;
   transition: background 0.15s ease, color 0.15s ease;
+}
+/* 知识库健康度色条：左侧独立竖条，不与选中态(整行品牌色)冲突 */
+.h-bar {
+  position: absolute;
+  left: 6px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  transition: background 0.2s ease;
 }
 .nav-item:hover {
   background: var(--bg-surface);
