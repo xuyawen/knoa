@@ -133,6 +133,9 @@ defineProps<{ name: string; size?: number }>()
       <path d="M10 8l-4 4 4 4" />
       <path d="M6 12h11" />
     </template>
+    <template v-else-if="name === 'key'">
+      <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.78 7.78 5.5 5.5 0 017.78-7.78zM15 8h3m0 0v3m0-3l-6 6" stroke-linecap="round" stroke-linejoin="round" />
+    </template>
     <template v-else-if="name === 'inbox'">
       <path d="M4 13l3-8h10l3 8M4 13v6h16v-6M4 13h5l1 2h4l1-2h5" />
     </template>

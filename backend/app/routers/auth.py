@@ -13,6 +13,7 @@ from app.core.security import (
 from app.db import ChatSession, KBPermission, Memory, User
 from app.deps import get_db
 from app.models.auth import (
+    ChangePasswordIn,
     LoginIn,
     TokenOut,
     UserCreateIn,
@@ -46,6 +47,26 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
 @router.get("/auth/me", response_model=UserOut)
 async def me(user: User = Depends(get_current_user)):
     return _to_out(user)
+
+
+@router.put("/auth/change-password")
+async def change_password(
+    payload: ChangePasswordIn,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """用户自行修改密码（验证旧密码 + 设置新密码）。"""
+    if not current.verify_password(payload.old_password):
+        raise HTTPException(status_code=400, detail="原密码不正确")
+    if payload.old_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="新密码不能与原密码相同")
+    # 重新加载最新状态，避免 stale ORM 对象
+    fresh = await db.scalar(select(User).where(User.id == current.id))
+    if fresh is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    fresh.password_hash = User.hash_password(payload.new_password)
+    await db.commit()
+    return {"detail": "密码修改成功"}
 
 
 @router.get("/auth/users", response_model=list[UserOut])

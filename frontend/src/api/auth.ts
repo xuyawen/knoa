@@ -66,3 +66,16 @@ export async function deleteUser(id: string): Promise<void> {
     throw new Error(err.detail || `HTTP ${resp.status}`)
   }
 }
+
+/** 修改密码（验证旧密码 + 设新密码）。 */
+export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+  const resp = await fetch('/api/auth/change-password', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ oldPassword, newPassword }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+}

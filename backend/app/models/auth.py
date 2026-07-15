@@ -37,3 +37,8 @@ class UserUpdateIn(CamelModel):
     role: str | None = None
     is_active: bool | None = None
     password: str | None = None
+
+
+class ChangePasswordIn(CamelModel):
+    old_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=6, max_length=128)
