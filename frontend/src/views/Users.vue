@@ -7,11 +7,13 @@ import Icon from '@/components/Icon.vue'
 import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
 import { createUser, deleteUser, getUserList, updateUser } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { useToast } from '@/composables/useToast'
 import type { UserOut } from '@/types/api'
 
 const auth = useAuthStore()
 const { collapsed } = useSidebarCollapsed()
 const router = useRouter()
+const toast = useToast()
 function onCollapse() { collapsed.value = true }
 function onExpand() { collapsed.value = false }
 
@@ -61,45 +63,18 @@ function resetFilters() {
 
 const form = ref({ username: '', password: '', displayName: '', role: 'viewer' })
 const submitting = ref(false)
-const formError = ref('')
 const showCreate = ref(false)   // 新建用户弹窗开关
-
-// 成功提示（轻量 toast）
-const successMsg = ref('')
-let successTimer: ReturnType<typeof setTimeout> | undefined
-function scheduleClear() {
-  if (successTimer) clearTimeout(successTimer)
-  successTimer = setTimeout(() => { successMsg.value = '' }, 3000)
-}
-function dismissSuccess() {
-  successMsg.value = ''
-  if (successTimer) clearTimeout(successTimer)
-}
-
-// 失败提示（同一套悬浮 toast，红色）
-const errorMsg = ref('')
-let errorTimer: ReturnType<typeof setTimeout> | undefined
-function scheduleErrorClear() {
-  if (errorTimer) clearTimeout(errorTimer)
-  errorTimer = setTimeout(() => { errorMsg.value = '' }, 3000)
-}
-function dismissError() {
-  errorMsg.value = ''
-  if (errorTimer) clearTimeout(errorTimer)
-}
 
 // 弹窗状态
 const showPwd = ref(false)                       // 重置密码弹窗
 const pwdTarget = ref<UserOut | null>(null)      // 正在重置密码的用户
 const pwdValue = ref('')
 const pwdSubmitting = ref(false)
-const pwdError = ref('')
 const showDel = ref(false)                       // 删除确认弹窗
 const delTarget = ref<UserOut | null>(null)      // 正在删除的用户
 const delSubmitting = ref(false)
 const delError = ref('')
 const rowBusy = ref<string | null>(null)       // 正在请求的行，禁用该行操作
-const rowError = ref('')                        // 行级错误提示
 
 const ROLE_LABEL: Record<string, string> = { admin: '管理员', editor: '编辑', viewer: '访客' }
 const ROLES = ['admin', 'editor', 'viewer'] as const
@@ -122,7 +97,6 @@ function patchRow(updated: UserOut) {
 
 function openCreate() {
   form.value = { username: '', password: '', displayName: '', role: 'viewer' }
-  formError.value = ''
   showCreate.value = true
 }
 
@@ -130,7 +104,6 @@ function closeCreate() {
   if (submitting.value) return
   showCreate.value = false
   form.value = { username: '', password: '', displayName: '', role: 'viewer' }
-  formError.value = ''
 }
 
 function onKey(e: KeyboardEvent) {
@@ -142,19 +115,16 @@ function onKey(e: KeyboardEvent) {
 }
 
 async function onSubmit() {
-  formError.value = ''
-  if (form.value.username.length < 2) { formError.value = '用户名至少 2 个字符'; return }
-  if (form.value.password.length < 6) { formError.value = '密码至少 6 个字符'; return }
+  if (form.value.username.length < 2) { toast.error('用户名至少 2 个字符'); return }
+  if (form.value.password.length < 6) { toast.error('密码至少 6 个字符'); return }
   submitting.value = true
   try {
     const u = await createUser({ ...form.value })
     users.value = [...users.value, u]
-    successMsg.value = `用户「${u.username}」创建成功`
-    submitting.value = false
     closeCreate()
-    scheduleClear()
+    toast.success(`用户「${u.username}」创建成功`)
   } catch (e) {
-    formError.value = e instanceof Error ? e.message : '创建失败'
+    toast.error(e instanceof Error ? e.message : '创建失败')
   } finally {
     submitting.value = false
   }
@@ -163,11 +133,10 @@ async function onSubmit() {
 async function onRoleChange(u: UserOut, role: string) {
   if (u.role === role) return
   rowBusy.value = u.id
-  rowError.value = ''
   try {
     patchRow(await updateUser(u.id, { role }))
   } catch (e) {
-    rowError.value = e instanceof Error ? e.message : '修改角色失败'
+    toast.error(e instanceof Error ? e.message : '修改角色失败')
   } finally {
     rowBusy.value = null
   }
@@ -175,11 +144,10 @@ async function onRoleChange(u: UserOut, role: string) {
 
 async function toggleActive(u: UserOut) {
   rowBusy.value = u.id
-  rowError.value = ''
   try {
     patchRow(await updateUser(u.id, { isActive: !u.isActive }))
   } catch (e) {
-    rowError.value = e instanceof Error ? e.message : '状态切换失败'
+    toast.error(e instanceof Error ? e.message : '状态切换失败')
   } finally {
     rowBusy.value = null
   }
@@ -188,7 +156,6 @@ async function toggleActive(u: UserOut) {
 function startPwd(u: UserOut) {
   pwdTarget.value = u
   pwdValue.value = ''
-  pwdError.value = ''
   showPwd.value = true
 }
 
@@ -197,19 +164,17 @@ function closePwd() {
   showPwd.value = false
   pwdTarget.value = null
   pwdValue.value = ''
-  pwdError.value = ''
 }
 
 async function confirmPwd() {
   if (!pwdTarget.value) return
-  pwdError.value = ''
-  if (pwdValue.value.length < 6) { pwdError.value = '新密码至少 6 个字符'; return }
+  if (pwdValue.value.length < 6) { toast.error('新密码至少 6 个字符'); return }
   pwdSubmitting.value = true
   try {
     await updateUser(pwdTarget.value.id, { password: pwdValue.value })
     closePwd()
   } catch (e) {
-    pwdError.value = e instanceof Error ? e.message : '重置密码失败'
+    toast.error(e instanceof Error ? e.message : '重置密码失败')
   } finally {
     pwdSubmitting.value = false
   }
@@ -232,18 +197,14 @@ async function confirmDel() {
   if (!delTarget.value) return
   const name = delTarget.value.username
   delSubmitting.value = true
-  delError.value = ''
   try {
     await deleteUser(delTarget.value.id)
     users.value = users.value.filter((x) => x.id !== delTarget.value!.id)
-    delSubmitting.value = false
     closeDel()
-    successMsg.value = `用户「${name}」已删除`
-    scheduleClear()
+    toast.success(`用户「${name}」已删除`)
   } catch (e) {
     closeDel()
-    errorMsg.value = e instanceof Error ? e.message : '删除失败'
-    scheduleErrorClear()
+    toast.error(e instanceof Error ? e.message : '删除失败')
   } finally {
     delSubmitting.value = false
   }
@@ -273,8 +234,6 @@ onMounted(() => {
 onUnmounted(() => {
   mq?.removeEventListener('change', syncMobile)
   window.removeEventListener('keydown', onKey)
-  if (successTimer) clearTimeout(successTimer)
-  if (errorTimer) clearTimeout(errorTimer)
 })
 </script>
 
@@ -295,22 +254,6 @@ onUnmounted(() => {
     <div class="main">
       <TopBar v-if="!isMobile" title="用户管理" subtitle="管理系统用户与角色" />
       <div class="body">
-        <Teleport to="body">
-          <transition name="toast">
-            <div v-if="successMsg" class="toast" role="status" @click="dismissSuccess">
-              <Icon name="check" :size="16" class="toast-icon" />
-              <span>{{ successMsg }}</span>
-            </div>
-          </transition>
-        </Teleport>
-        <Teleport to="body">
-          <transition name="toast">
-            <div v-if="errorMsg" class="toast err-toast" role="alert" @click="dismissError">
-              <Icon name="alert-circle" :size="16" class="toast-icon" />
-              <span>{{ errorMsg }}</span>
-            </div>
-          </transition>
-        </Teleport>
         <!-- 操作栏：搜索 + 新建 -->
         <div class="toolbar">
           <form class="search-form" @submit.prevent>
@@ -462,7 +405,6 @@ onUnmounted(() => {
           <p v-if="!filtered.length" class="empty">
             {{ users.length ? '没有匹配的用户' : '暂无用户' }}
           </p>
-          <p v-if="rowError" class="err row-err">{{ rowError }}</p>
         </template>
       </div>
     </div>
@@ -505,7 +447,6 @@ onUnmounted(() => {
                 </transition>
               </div>
             </label>
-            <p v-if="formError" class="err">{{ formError }}</p>
           </form>
           <footer class="m-foot">
             <button class="mini" type="button" :disabled="submitting" @click="closeCreate">取消</button>
@@ -531,7 +472,6 @@ onUnmounted(() => {
               <span>新密码<span class="req">*</span></span>
               <input v-model="pwdValue" type="password" placeholder="至少 6 个字符" />
             </label>
-            <p v-if="pwdError" class="err">{{ pwdError }}</p>
           </form>
           <footer class="m-foot">
             <button class="mini" type="button" :disabled="pwdSubmitting" @click="closePwd">取消</button>
@@ -899,43 +839,7 @@ onUnmounted(() => {
 .m-warn strong { color: var(--danger); }
 
 .err { color: var(--danger); font-size: 13px; margin: 0; }
-.row-err { margin: 8px 0 0; }
 .empty { color: var(--text-secondary); font-size: 13px; margin: 10px 0 0; }
-
-/* 成功提示 toast（悬浮，fixed 顶部居中） */
-.toast {
-  position: fixed;
-  top: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 90;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 11px 18px;
-  border-radius: var(--radius-md);
-  background: #16a34a;
-  border: 1px solid #15803d;
-  color: #ffffff;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
-  animation: toast-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.toast .toast-icon { flex: none; opacity: 0.95; }
-.toast-enter-active,
-.toast-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
-.toast-enter-from,
-.toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
-@keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(-8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
-
-/* 失败提示 toast：同款悬浮，红色实心 */
-.toast.err-toast {
-  background: #dc2626;
-  border: 1px solid #b91c1c;
-  color: #ffffff;
-}
 
 /* 新建用户弹窗 */
 .modal-overlay {

@@ -6,12 +6,14 @@ import ThemeToggle from './ThemeToggle.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { changePassword } from '@/api/auth'
+import { useToast } from '@/composables/useToast'
 
 defineProps<{ title?: string; subtitle?: string }>()
 
 const router = useRouter()
 const auth = useAuthStore()
 const ui = useUiStore()
+const toast = useToast()
 const menuOpen = ref(false)
 const accountWrap = ref<HTMLElement | null>(null)
 
@@ -21,8 +23,6 @@ const pwdOld = ref('')
 const pwdNew = ref('')
 const pwdConfirm = ref('')
 const pwdSaving = ref(false)
-const pwdMsg = ref('') // '' | 'success' | error text
-const pwdError = ref(false)
 
 const ROLE_LABEL: Record<string, string> = { admin: '管理员', editor: '编辑', viewer: '访客' }
 
@@ -46,8 +46,6 @@ function openPwdDialog() {
   pwdOld.value = ''
   pwdNew.value = ''
   pwdConfirm.value = ''
-  pwdMsg.value = ''
-  pwdError.value = false
   pwdDialogOpen.value = true
   menuOpen.value = false
 }
@@ -58,36 +56,28 @@ function closePwdDialog() {
 }
 
 async function onSubmitPassword() {
-  pwdMsg.value = ''
-  pwdError.value = false
-
   if (!pwdOld.value || !pwdNew.value || !pwdConfirm.value) {
-    pwdMsg.value = '请填写所有字段'
-    pwdError.value = true
+    toast.error('请填写所有字段')
     return
   }
   if (pwdNew.value.length < 6) {
-    pwdMsg.value = '新密码至少 6 位'
-    pwdError.value = true
+    toast.error('新密码至少 6 位')
     return
   }
   if (pwdNew.value !== pwdConfirm.value) {
-    pwdMsg.value = '两次输入的新密码不一致'
-    pwdError.value = true
+    toast.error('两次输入的新密码不一致')
     return
   }
 
   pwdSaving.value = true
   try {
     await changePassword(pwdOld.value, pwdNew.value)
-    pwdMsg.value = '密码修改成功'
-    pwdError.value = false
+    toast.success('密码修改成功')
     setTimeout(() => {
       closePwdDialog()
     }, 1500)
   } catch (e: any) {
-    pwdMsg.value = e.message || '修改失败，请重试'
-    pwdError.value = true
+    toast.error(e.message || '修改失败，请重试')
   } finally {
     pwdSaving.value = false
   }
@@ -180,7 +170,6 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
                   :disabled="pwdSaving"
                 />
               </label>
-              <p v-if="pwdMsg" class="pwd-msg" :class="{ error: pwdError, success: !pwdError }">{{ pwdMsg }}</p>
               <div class="pwd-actions">
                 <button type="button" class="pwd-btn cancel" @click="closePwdDialog" :disabled="pwdSaving">取消</button>
                 <button type="submit" class="pwd-btn submit" :disabled="pwdSaving">
@@ -436,13 +425,6 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 }
 .pwd-field input:focus { border-color: var(--brand); }
 .pwd-field input:disabled { opacity: 0.6; }
-.pwd-msg {
-  font-size: 13px;
-  margin: -4px 0 0;
-  min-height: 20px;
-}
-.pwd-msg.error { color: var(--danger); }
-.pwd-msg.success { color: var(--success, #22c55e); }
 .pwd-actions {
   display: flex;
   justify-content: flex-end;
