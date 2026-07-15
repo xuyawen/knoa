@@ -40,7 +40,7 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   <header class="topbar">
     <!-- 左：标题区 -->
     <div class="title-block">
-      <h1 class="title">{{ title || '全部知识' }}</h1>
+      <h1 v-if="title" class="title">{{ title }}</h1>
       <span class="subtitle">{{ subtitle || '运营知识一站式问答' }}</span>
     </div>
 
