@@ -145,7 +145,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
             </button>
             <button
               v-if="selectedIds.size > 0"
-              class="sel-btn"
+              class="batch-del-btn"
               @click="handleBatchDelete"
               title="批量删除"
             >
@@ -239,24 +239,24 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   background: var(--brand-hover);
 }
 
-.sel-btn {
+/* 批量删除按钮（红色实心，与文档管理页 .btn-danger 同款） */
+.batch-del-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: var(--btn-padding-md);
   height: var(--btn-height);
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
+  background: #dc2626;
+  color: #fff;
   border-radius: var(--radius-md);
   font-size: var(--btn-font-size);
   font-weight: var(--btn-font-weight);
+  border: none;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, transform 0.15s ease;
 }
-.sel-btn:hover {
-  color: var(--brand);
-  border-color: var(--brand);
+.batch-del-btn:hover:not(:disabled) {
+  background: #b91c1c;
 }
 
 /* ── 列表上方工具栏（新建对话 / 批量删除） ── */
