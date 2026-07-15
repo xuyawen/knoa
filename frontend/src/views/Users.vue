@@ -857,12 +857,13 @@ onUnmounted(() => {
 .modal {
   width: min(440px, 92vw);
   max-height: 90vh;
-  overflow-y: auto;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-float);
   animation: m-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
 }
 .m-head {
   display: flex;
@@ -870,6 +871,7 @@ onUnmounted(() => {
   justify-content: space-between;
   padding: 18px 20px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .m-head h3 {
   font-family: var(--font-display);
@@ -895,6 +897,8 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 14px;
   padding: 20px;
+  overflow-y: auto;
+  min-height: 0;
 }
 .m-field {
   display: flex;
