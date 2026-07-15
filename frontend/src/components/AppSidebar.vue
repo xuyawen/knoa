@@ -41,7 +41,7 @@ onMounted(() => {
 function healthColor(kb: KnowledgeBase): string {
   if (kb.badgeType === 'danger') return 'var(--danger)'
   const h = knowledge.health.find(x => x.kb === kb.id)
-  if (!h) return 'var(--success)'
+  if (!h) return 'var(--text-secondary)'
   if (h.healthScore >= 0.85) return 'var(--success)'
   if (h.healthScore >= 0.6) return 'var(--warning)'
   return 'var(--danger)'
