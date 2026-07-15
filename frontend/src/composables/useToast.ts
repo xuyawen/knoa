@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { isTokenExpired } from '@/api/http'
 
 export type ToastType = 'success' | 'error'
 
@@ -11,6 +12,8 @@ const state = reactive({
 let timer: ReturnType<typeof setTimeout> | undefined
 
 function show(message: string, type: ToastType, duration = 3000) {
+  // token 已失效时，全局重登录弹窗接管 UI，抑制其它错误/成功提示
+  if (isTokenExpired()) return
   state.message = message
   state.type = type
   state.visible = true

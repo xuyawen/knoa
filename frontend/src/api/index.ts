@@ -12,7 +12,7 @@ import type {
   AIReview,
   ChatAttachment,
 } from '@/types/api'
-import { authHeaders } from './http'
+import { authHeaders, TokenExpiredError } from './http'
 
 export async function getKnowledgeBases(): Promise<KnowledgeBasesResponse> {
   const resp = await fetch('/api/knowledge-bases', { headers: authHeaders() })
@@ -326,6 +326,10 @@ export async function* streamAsk(
       }
     }
   } catch (e: unknown) {
+    if (e instanceof TokenExpiredError) {
+      // 身份失效由全局弹窗统一处理，流直接结束，不追加错误文案
+      return
+    }
     if (controller.signal.aborted) {
       yield { event: 'error', data: { message: '请求超时，请稍后重试' } }
     } else {

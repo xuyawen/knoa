@@ -15,17 +15,99 @@ export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-// 全局 fetch 包装：捕获后端下发的滑动令牌（X-Access-Token 响应头），
-// 自动写回 localStorage。后端每次有效认证请求都会重签 24h 令牌，
-// 因此只要用户持续操作，token 就不会过期（闲置 >24h 才失效）。
+// ── 统一 token 失效拦截 ──
+// 后端对失效/无效的令牌统一返回 401（detail 如「令牌已过期」）。
+// 任何 authed 接口一旦收到 401，就视为身份失效：取消所有在途请求，
+// 并触发全局「请重新登录」弹窗（不可关闭，仅确定按钮 → 回登录页）。
+
+export class TokenExpiredError extends Error {
+  constructor() {
+    super('身份凭证已失效')
+    this.name = 'TokenExpiredError'
+  }
+}
+
+const inFlight = new Set<AbortController>()
+let tokenExpired = false
+let expiredHandler: (() => void) | null = null
+
+/** 当前是否已触发 token 失效（供 toast 等组件抑制后续提示）。 */
+export function isTokenExpired(): boolean {
+  return tokenExpired
+}
+
+/** 注册 token 失效回调（由 App 注册，用于弹出重登录框）。 */
+export function onTokenExpired(fn: () => void): void {
+  expiredHandler = fn
+}
+
+function triggerTokenExpired(): void {
+  if (tokenExpired) return
+  tokenExpired = true
+  // 取消所有其它在途请求
+  for (const c of inFlight) {
+    try {
+      c.abort()
+    } catch {
+      /* noop */
+    }
+  }
+  inFlight.clear()
+  expiredHandler?.()
+}
+
+/** 合并多个 AbortSignal（优先用 AbortSignal.any，低版本浏览器降级手动合并）。 */
+function mergeSignals(signals: AbortSignal[]): AbortSignal {
+  const anyFn = (AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }).any
+  if (typeof anyFn === 'function') return anyFn(signals)
+  const ctrl = new AbortController()
+  for (const s of signals) {
+    if (s.aborted) ctrl.abort()
+    else s.addEventListener('abort', () => ctrl.abort(), { once: true })
+  }
+  return ctrl.signal
+}
+
+function reqUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input
+  if (input instanceof URL) return input.href
+  return (input as Request).url ?? ''
+}
+
 const _nativeFetch = window.fetch.bind(window)
-async function fetchWithSliding(
+
+async function trackedFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
-  const resp = await _nativeFetch(input, init)
-  const sliding = resp.headers.get('X-Access-Token')
-  if (sliding) setToken(sliding)
-  return resp
+  // 已经失效则快速失败，不再发起任何网络请求
+  if (tokenExpired) throw new TokenExpiredError()
+
+  const ctrl = new AbortController()
+  const signals: AbortSignal[] = [ctrl.signal]
+  if (init?.signal) signals.push(init.signal as AbortSignal)
+
+  const mergedInit: RequestInit = {
+    ...init,
+    signal: mergeSignals(signals),
+  }
+
+  inFlight.add(ctrl)
+  try {
+    const resp = await _nativeFetch(input, mergedInit)
+    // 登录接口本身会返回 401（账号密码错误），那不是 token 失效，不拦截
+    if (resp.status === 401 && !reqUrl(input).includes('/api/auth/login')) {
+      triggerTokenExpired()
+      throw new TokenExpiredError()
+    }
+    // 后端每次有效认证请求都会重签 24h 令牌（滑动令牌），回写即可
+    const sliding = resp.headers.get('X-Access-Token')
+    if (sliding) setToken(sliding)
+    return resp
+  } finally {
+    inFlight.delete(ctrl)
+  }
 }
-window.fetch = fetchWithSliding as typeof window.fetch
+
+// 全局替换 fetch，使所有（含各 api 模块直接调用的）请求都经过统一拦截
+window.fetch = trackedFetch as typeof window.fetch
