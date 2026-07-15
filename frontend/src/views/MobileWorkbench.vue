@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useChatStore } from '@/stores/chat'
+import { useAuthStore } from '@/stores/auth'
 import AppSidebar from '@/components/AppSidebar.vue'
 import Icon from '@/components/Icon.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
@@ -13,6 +15,8 @@ import SourcePanel from '@/components/SourcePanel.vue'
 
 const knowledge = useKnowledgeStore()
 const chat = useChatStore()
+const auth = useAuthStore()
+const router = useRouter()
 
 const drawer = ref(false)
 const tab = ref('home')
@@ -21,12 +25,48 @@ const showSources = ref(false)
 
 const sourceCount = computed(() => chat.sources.length)
 
+const roleLabel = computed(() => {
+  const r = auth.user?.role
+  if (r === 'admin') return '管理员'
+  if (r === 'editor') return '编辑'
+  if (r === 'viewer') return '访客'
+  return r || ''
+})
+
+const initial = computed(() => (auth.user?.displayName || auth.user?.username || '?').charAt(0))
+
+const greeting = computed(() => {
+  const name = auth.user?.displayName || auth.user?.username || ''
+  return name ? `你好，${name}` : '你好'
+})
+
+const joinedAt = computed(() => {
+  const s = auth.user?.createdAt
+  if (!s) return ''
+  return new Date(s).toLocaleDateString('zh-CN')
+})
+
 async function submit() {
   const q = question.value.trim()
   if (!q) return
   question.value = ''
   await knowledge.load()
   send(q)
+}
+
+function onLogout() {
+  auth.logout()
+  router.replace('/login')
+}
+
+function onCardSelect(id: string | null) {
+  if (id) {
+    knowledge.selectBase(id)
+    tab.value = 'chat'
+  } else {
+    // "文档管理"等无 id 的快捷入口 → 跳知识库管理列表
+    router.push('/knowledge-bases')
+  }
 }
 
 function send(q: string) {
@@ -45,6 +85,7 @@ const kbCards = computed(() => {
   const fromKb = knowledge.bases.map(kb => {
     const h = healthMap.get(kb.name)
     return {
+      id: kb.id,
       icon: kb.icon,
       name: kb.name,
       alert: kb.badge?.includes('待复核'),
@@ -52,6 +93,7 @@ const kbCards = computed(() => {
     }
   })
   const fromWs = ['文档管理'].map(e => ({
+    id: null,
     icon: 'library',
     name: e,
     alert: false,
@@ -75,7 +117,7 @@ const kbCards = computed(() => {
       <span class="brand">知海 Knoa</span>
       <div class="actions">
         <ThemeToggle />
-        <div class="account">运</div>
+        <div class="account">{{ initial }}</div>
       </div>
     </header>
 
@@ -93,7 +135,7 @@ const kbCards = computed(() => {
         <!-- 首页 -->
         <template v-if="tab === 'home'">
           <div class="greet">
-            <h2>你好，运营小王</h2>
+            <h2>{{ greeting }}</h2>
             <p>向知海提问，获取带溯源的运营答案</p>
           </div>
 
@@ -113,10 +155,12 @@ const kbCards = computed(() => {
             <KnowledgeCard
               v-for="c in kbCards"
               :key="c.name"
+              :id="c.id"
               :icon="c.icon"
               :name="c.name"
               :meta="c.meta"
               :alert="c.alert"
+              @select="onCardSelect"
             />
           </div>
 
@@ -137,10 +181,12 @@ const kbCards = computed(() => {
             <KnowledgeCard
               v-for="c in kbCards"
               :key="c.name"
+              :id="c.id"
               :icon="c.icon"
               :name="c.name"
               :meta="c.meta"
               :alert="c.alert"
+              @select="onCardSelect"
             />
           </div>
         </template>
@@ -167,9 +213,45 @@ const kbCards = computed(() => {
 
         <!-- 我的 -->
         <template v-else>
-          <div class="empty-me">
-            <Icon name="user" :size="28" />
-            <p>「我的」功能即将上线</p>
+          <div class="profile">
+            <div class="pf-head">
+              <div class="pf-avatar">{{ initial }}</div>
+              <div class="pf-id">
+                <div class="pf-name">{{ auth.user?.displayName || auth.user?.username }}</div>
+                <div class="pf-role">{{ roleLabel }}</div>
+              </div>
+            </div>
+
+            <div class="pf-stats">
+              <div class="stat">
+                <span class="stat-num">{{ knowledge.bases.length }}</span>
+                <span class="stat-label">知识库</span>
+              </div>
+              <div class="stat">
+                <span class="stat-num">{{ knowledge.health.length }}</span>
+                <span class="stat-label">需复核</span>
+              </div>
+            </div>
+
+            <div class="pf-list">
+              <div class="pf-row">
+                <span class="pf-k">用户名</span>
+                <span class="pf-v">{{ auth.user?.username }}</span>
+              </div>
+              <div class="pf-row">
+                <span class="pf-k">角色</span>
+                <span class="pf-v">{{ roleLabel }}</span>
+              </div>
+              <div class="pf-row" v-if="joinedAt">
+                <span class="pf-k">加入时间</span>
+                <span class="pf-v">{{ joinedAt }}</span>
+              </div>
+            </div>
+
+            <button class="pf-logout" @click="onLogout">
+              <Icon name="logout" :size="16" />
+              <span>退出登录</span>
+            </button>
           </div>
         </template>
       </div>
@@ -268,6 +350,117 @@ const kbCards = computed(() => {
 .empty-me p {
   margin-top: 8px;
   font-size: 13px;
+}
+.profile {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pf-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.pf-avatar {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--brand);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 600;
+}
+.pf-id {
+  min-width: 0;
+}
+.pf-name {
+  font-size: 17px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pf-role {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-weight: 500;
+}
+.pf-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.stat-num {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: var(--font-display);
+}
+.stat-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.pf-list {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.pf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 16px;
+  font-size: 14px;
+}
+.pf-row + .pf-row {
+  border-top: 1px solid var(--border);
+}
+.pf-k {
+  color: var(--text-secondary);
+}
+.pf-v {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.pf-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 46px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--danger-soft, #f3c0c0);
+  color: var(--danger, #e5484d);
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.15s ease;
+}
+.pf-logout:hover {
+  background: var(--danger-soft, #fde8e8);
 }
 .greet {
   margin-bottom: 14px;

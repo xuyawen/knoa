@@ -82,6 +82,14 @@ const loadingDocs = ref(false)
 const isUploading = ref(false)
 const uploadError = ref<string | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+const docSearch = ref('')
+
+// 文档列表本地关键字过滤（按标题）
+const filteredDocs = computed(() => {
+  const q = docSearch.value.trim().toLowerCase()
+  if (!q) return documents.value
+  return documents.value.filter((d) => d.title.toLowerCase().includes(q))
+})
 
 async function loadDocuments() {
   loadingDocs.value = true
@@ -292,14 +300,14 @@ watch(() => route.params.id, () => {
             {{ isUploading ? '上传中...' : '上传文档' }}
           </button>
           <div class="toolbar-right">
-            <input type="text" placeholder="搜索文档..." class="search-input" />
+            <input v-model="docSearch" type="text" placeholder="搜索文档..." class="search-input" />
           </div>
         </div>
         <p v-if="uploadError" class="upload-error">{{ uploadError }}</p>
 
         <!-- 文档列表 -->
         <div class="doc-list">
-          <div v-for="doc in documents" :key="doc.id" class="doc-item">
+          <div v-for="doc in filteredDocs" :key="doc.id" class="doc-item">
             <div class="doc-icon">
               <Icon name="library" :size="18" />
             </div>
@@ -332,6 +340,10 @@ watch(() => route.params.id, () => {
           <div v-if="!loadingDocs && documents.length === 0" class="empty-state">
             <Icon name="library" :size="36" />
             <p>暂无文档，点击上方按钮上传</p>
+          </div>
+          <div v-else-if="!loadingDocs && filteredDocs.length === 0" class="empty-state">
+            <Icon name="search" :size="36" />
+            <p>没有匹配「{{ docSearch }}」的文档</p>
           </div>
           <div v-if="loadingDocs" class="empty-state">
             <p>加载中...</p>

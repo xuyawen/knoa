@@ -1,16 +1,23 @@
 <script setup lang="ts">
 import Icon from './Icon.vue'
 
-defineProps<{
+const props = defineProps<{
+  id?: string | null
   icon: string
   name: string
   meta?: string
   alert?: boolean
 }>()
+
+const emit = defineEmits<{ (e: 'select', id: string | null): void }>()
+
+function onClick() {
+  emit('select', props.id ?? null)
+}
 </script>
 
 <template>
-  <button class="kc" :class="{ alert }">
+  <button class="kc" :class="{ alert }" @click="onClick">
     <span class="ic"><Icon :name="icon" :size="15" /></span>
     <span class="nm">{{ name }}</span>
     <span v-if="meta" class="mt">{{ meta }}</span>
