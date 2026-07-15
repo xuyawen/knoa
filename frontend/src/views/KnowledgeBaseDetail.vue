@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import Icon from '@/components/Icon.vue'
+import AIReviewPanel from '@/components/AIReviewPanel.vue'
 import { getDocuments, uploadDocument, getDocument, approveDocument, rejectDocument, deleteDocument, aiReviewDocument } from '@/api'
 import type { DocumentItem, DocumentDetail, AIReview } from '@/types/api'
 import { useKnowledgeStore } from '@/stores/knowledge'
@@ -13,11 +14,6 @@ const route = useRoute()
 const router = useRouter()
 const { collapsed } = useSidebarCollapsed()
 const knowledgeStore = useKnowledgeStore()
-
-function verdictLabel(v: string): string {
-  const map: Record<string, string> = { approve: '✅ 建议通过', reject: '❌ 建议驳回', manual_review: '⚠️ 需人工复核' }
-  return map[v] || v
-}
 
 function onCollapse() {
   collapsed.value = true
@@ -140,6 +136,7 @@ async function onFilePicked(e: Event) {
 }
 
 /* ── 文档操作：查看 / 审核通过 / 驳回 / 删除 ── */
+const detailOpen = ref(false)
 const detailDoc = ref<DocumentDetail | null>(null)
 const loadingDetail = ref(false)
 
@@ -181,6 +178,7 @@ function statusClass(s: string): string {
 }
 
 async function openDetail(doc: DocumentItem) {
+  detailOpen.value = true
   currentDoc.value = doc
   loadingDetail.value = true
   detailDoc.value = null
@@ -196,6 +194,7 @@ async function openDetail(doc: DocumentItem) {
 }
 
 function closeDetail() {
+  detailOpen.value = false
   detailDoc.value = null
   currentDoc.value = null
   reviewResult.value = null
@@ -206,6 +205,7 @@ async function approve(doc: DocumentItem) {
   try {
     await approveDocument(kbId.value, doc.id)
     await loadDocuments()
+    closeDetail()
   } catch (e) {
     console.error('审核通过失败', e)
   }
@@ -215,6 +215,7 @@ async function reject(doc: DocumentItem) {
   try {
     await rejectDocument(kbId.value, doc.id)
     await loadDocuments()
+    closeDetail()
   } catch (e) {
     console.error('驳回失败', e)
   }
@@ -225,7 +226,7 @@ async function remove(doc: DocumentItem) {
   try {
     await deleteDocument(kbId.value, doc.id)
     await loadDocuments()
-    if (detailDoc.value?.id === doc.id) { detailDoc.value = null; currentDoc.value = null; reviewResult.value = null }
+    if (currentDoc.value?.id === doc.id) closeDetail()
   } catch (e) {
     console.error('删除失败', e)
   }
@@ -347,25 +348,22 @@ watch(() => route.params.id, () => {
     </div>
 
     <!-- 文档详情弹窗（只读预览 content_md） -->
-    <div v-if="detailDoc" class="modal-mask" @click.self="closeDetail">
+    <div v-if="detailOpen" class="modal-mask" @click.self="closeDetail">
       <div class="modal">
+        <!-- 固定头部 -->
         <div class="modal-head">
           <div class="modal-title">
-            <span class="doc-title">{{ detailDoc.title }}</span>
-            <span class="doc-status" :class="statusClass(detailDoc.status)">{{ detailDoc.status }}</span>
+            <span class="doc-title">{{ detailDoc?.title ?? currentDoc?.title }}</span>
+            <span v-if="detailDoc" class="doc-status" :class="statusClass(detailDoc.status)">{{ detailDoc.status }}</span>
           </div>
           <button class="modal-close" @click="closeDetail">
             <Icon name="plus" :size="16" style="transform: rotate(45deg)" />
           </button>
         </div>
-        <div class="modal-meta">
-          {{ detailDoc.type }} · {{ detailDoc.fileSize ? Math.round(detailDoc.fileSize / 1024 * 10) / 10 + ' KB' : '—' }}
-          <template v-if="detailDoc.originalFilename"> · {{ detailDoc.originalFilename }}</template>
-        </div>
 
-        <!-- 审核操作按钮（仅待复核状态） -->
+        <!-- 固定操作栏（仅待复核；滚动时长驻可见） -->
         <div v-if="detailDoc?.status === '待复核'" class="modal-actions">
-          <button class="btn-approve" @click="approve(currentDoc!)" :disabled="loadingDetail || loadingReview">
+          <button class="btn-approve" @click="approve(currentDoc!)" :disabled="loadingReview">
             <Icon name="check" :size="15" /> 审核通过
           </button>
           <button class="btn-reject" @click="reject(currentDoc!)">
@@ -377,63 +375,30 @@ watch(() => route.params.id, () => {
           </button>
         </div>
 
-        <div v-if="loadingDetail" class="detail-loading">加载中...</div>
+        <!-- 滚动内容区 -->
+        <div class="modal-body">
+          <div v-if="loadingDetail" class="detail-loading">
+            <span class="spinner" /> 加载中…
+          </div>
 
-        <!-- 文档正文：可折叠预览 -->
-        <div v-if="showFullContent" class="content-wrapper content-wrapper--full">
-          <pre class="detail-content">{{ detailDoc.contentMd }}</pre>
-        </div>
-        <template v-else>
-          <div class="content-wrapper">
-            <pre class="detail-content content-preview">{{ detailDoc.contentMd }}</pre>
-            <button class="expand-btn" @click="showFullContent = true"><Icon name="chevron-up" :size="12" /> 展开完整内容</button>
-          </div>
-        </template>
-
-        <!-- AI 审核建议面板 -->
-        <div v-if="reviewResult" class="ai-review-panel" :class="{ loading: loadingReview }">
-          <div class="review-header">
-            <Icon name="sparkle" :size="16" /> AI 审核建议
-          </div>
-          <div class="verdict-badge" :class="reviewResult.verdict">
-            {{ verdictLabel(reviewResult.verdict) }}
-          </div>
-          <p class="review-summary">{{ reviewResult.summary }}</p>
-          <div v-if="reviewResult.duplicates.length > 0" class="review-section">
-            <h4 class="review-title danger">重复风险</h4>
-            <ul class="review-list">
-              <li v-for="(d, i) in reviewResult.duplicates" :key="i">{{ d }}</li>
-            </ul>
-          </div>
-          <div v-if="reviewResult.outdatedFindings.length > 0" class="review-section">
-            <h4 class="review-title warning">过时信息</h4>
-            <ul class="review-list">
-              <li v-for="(o, i) in reviewResult.outdatedFindings" :key="i">{{ o }}</li>
-            </ul>
-          </div>
-          <div v-if="reviewResult.qualityNotes.length > 0" class="review-section">
-            <h4 class="review-title">质量建议</h4>
-            <ul class="review-list">
-              <li v-for="(q, i) in reviewResult.qualityNotes" :key="i">{{ q }}</li>
-            </ul>
-          </div>
-          <div v-if="reviewResult.suggestedKb" class="review-section">
-            <h4 class="review-title">建议归属</h4>
-            <p class="review-note">该文档可能更适合：<strong>{{ reviewResult.suggestedKb }}</strong></p>
-          </div>
-          <!-- 相似度发现详情 -->
-          <div v-if="reviewResult.similarityFindings.length > 0" class="review-section">
-            <h4 class="review-title danger">相似内容对比</h4>
-            <div class="sim-detail">
-              <div v-for="(f, i) in reviewResult.similarityFindings" :key="i" class="sim-card">
-                <div class="sim-row">
-                  <span class="sim-doc">{{ f.docTitle }}</span>
-                  <span class="sim-score">相似度 {{ (f.similarity * 100).toFixed(0) }}%</span>
-                </div>
-                <pre class="sim-snippet">{{ f.snippet }}</pre>
-              </div>
+          <template v-else-if="detailDoc">
+            <div class="modal-meta">
+              {{ detailDoc.type }} · {{ detailDoc.fileSize ? Math.round(detailDoc.fileSize / 1024 * 10) / 10 + ' KB' : '—' }}
+              <template v-if="detailDoc.originalFilename"> · {{ detailDoc.originalFilename }}</template>
             </div>
-          </div>
+
+            <!-- 文档正文：可折叠预览 -->
+            <div v-if="showFullContent" class="content-wrapper content-wrapper--full">
+              <pre class="detail-content">{{ detailDoc.contentMd }}</pre>
+            </div>
+            <div v-else class="content-wrapper">
+              <pre class="detail-content content-preview">{{ detailDoc.contentMd }}</pre>
+              <button class="expand-btn" @click="showFullContent = true"><Icon name="chevron-up" :size="12" /> 展开完整内容</button>
+            </div>
+
+            <!-- AI 审核建议面板 -->
+            <AIReviewPanel v-if="reviewResult" :review="reviewResult" :loading="loadingReview" />
+          </template>
         </div>
       </div>
     </div>
@@ -684,64 +649,7 @@ watch(() => route.params.id, () => {
   font-size: 14px;
 }
 
-/* ── 审核操作按钮 ── */
-.modal-actions {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.btn-approve,
-.btn-reject,
-.btn-review {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
-}
-.btn-approve {
-  background: var(--success);
-  color: #fff;
-}
-.btn-approve:hover:not(:disabled) {
-  background: #059669;
-  transform: translateY(-1px);
-}
-.btn-reject {
-  background: var(--warning);
-  color: #fff;
-}
-.btn-reject:hover:not(:disabled) {
-  background: #D97706;
-  transform: translateY(-1px);
-}
-.btn-review {
-  background: var(--brand);
-  color: #fff;
-  margin-left: auto;
-}
-.btn-review:hover:not(:disabled) {
-  background: var(--brand-hover);
-  transform: translateY(-1px);
-}
-.btn-approve:disabled,
-.btn-reject:disabled,
-.btn-review:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none !important;
-}
-
 /* ── 文档正文折叠容器 ── */
-.content-wrapper {
-  position: relative;
-}
-
 .detail-content {
   margin: 0;
   padding: 12px 16px;
@@ -828,130 +736,6 @@ watch(() => route.params.id, () => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-/* ── AI 审核建议面板 ── */
-.ai-review-panel {
-  margin-top: 12px;
-  padding: 16px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  flex-shrink: 0;
-}
-.review-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--brand);
-  margin-bottom: 10px;
-}
-.verdict-badge {
-  display: inline-block;
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
-  font-size: 12px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.verdict-badge.approve {
-  background: #D1FAE5;
-  color: #065F46;
-}
-.verdict-badge.reject {
-  background: #FEE2E2;
-  color: #991B1B;
-}
-.verdict-badge.manual_review {
-  background: #FEF3C7;
-  color: #92400E;
-}
-.review-summary {
-  margin: 0 0 12px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-primary);
-}
-.review-section {
-  margin-bottom: 12px;
-}
-.review-title {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin: 0 0 6px;
-}
-.review-title.danger {
-  color: var(--danger);
-}
-.review-title.warning {
-  color: var(--warning);
-}
-.review-list {
-  margin: 0;
-  padding: 0 0 0 16px;
-  list-style: none;
-}
-.review-list li {
-  position: relative;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  padding-left: 12px;
-  margin-bottom: 4px;
-}
-.review-list li::before {
-  content: '•';
-  position: absolute;
-  left: 0;
-  color: var(--text-placeholder);
-}
-.review-note {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.sim-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.sim-card {
-  padding: 10px 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-.sim-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-.sim-doc {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.sim-score {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--danger);
-}
-.sim-snippet {
-  margin: 0;
-  padding: 8px;
-  background: var(--bg-subtle);
-  border-radius: 4px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  max-height: 120px;
-  overflow-y: auto;
-}
-
 /* ── 详情弹窗 ── */
 .modal-mask {
   position: fixed;
@@ -965,22 +749,25 @@ watch(() => route.params.id, () => {
 .modal {
   width: 640px;
   max-width: calc(100vw - 32px);
-  max-height: 84vh;
+  max-height: 88vh;
   display: flex;
   flex-direction: column;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-float);
-  padding: 22px 22px 18px;
+  overflow: hidden;
+  padding: 0;
   gap: 0;
 }
 .modal-head {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  flex-shrink: 0;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
 }
 .modal-title {
   display: flex;
@@ -1007,22 +794,44 @@ watch(() => route.params.id, () => {
   background: var(--bg-subtle);
 }
 .modal-meta {
-  margin: 8px 0 10px;
+  margin: 0 0 12px;
   font-size: 12px;
   color: var(--text-placeholder);
-  flex-shrink: 0;
+}
+.modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 22px 20px;
+}
+.detail-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 0;
+  color: var(--text-placeholder);
+  font-size: 13px;
+}
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: modal-spin 0.7s linear infinite;
+}
+@keyframes modal-spin {
+  to { transform: rotate(360deg); }
 }
 
-/* ── 审核操作按钮 ── */
+/* ── 审核操作按钮（固定栏，滚动时常驻） ── */
 .modal-actions {
+  flex-shrink: 0;
   display: flex;
   gap: 8px;
-  margin-bottom: 10px;
-  padding: 10px 0;
+  padding: 12px 22px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-surface);
-  flex-shrink: 0;
-  z-index: 1;
+  background: var(--bg-subtle);
 }
 .btn-approve,
 .btn-reject,
@@ -1071,8 +880,6 @@ watch(() => route.params.id, () => {
   cursor: not-allowed;
   transform: none !important;
 }
-
-/* ── 文档正文折叠容器 ── */
 
 /* 移动端顶栏 */
 .m-top {
