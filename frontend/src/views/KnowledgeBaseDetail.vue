@@ -205,6 +205,7 @@ async function approve(doc: DocumentItem) {
   try {
     await approveDocument(kbId.value, doc.id)
     await loadDocuments()
+    knowledgeStore.reload() // 刷新侧边栏 pendingCount
     closeDetail()
   } catch (e) {
     console.error('审核通过失败', e)
@@ -215,6 +216,7 @@ async function reject(doc: DocumentItem) {
   try {
     await rejectDocument(kbId.value, doc.id)
     await loadDocuments()
+    knowledgeStore.reload() // 刷新侧边栏 pendingCount
     closeDetail()
   } catch (e) {
     console.error('驳回失败', e)
