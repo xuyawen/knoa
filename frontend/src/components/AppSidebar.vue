@@ -103,7 +103,7 @@ function healthColor(kb: KnowledgeBase): string {
         class="nav-item"
         :class="{ active: route.path === '/knowledge-bases/' + kb.id }"
       >
-        <span class="h-bar" :style="{ background: healthColor(kb) }" />
+        <span class="h-dot" :style="{ '--dot-color': healthColor(kb) }" />
         <span v-show="!collapsed" class="nav-name">{{ kb.name }}</span>
         <span v-if="kb.badge && !collapsed" class="nav-badge" :class="kb.badgeType">{{ kb.badge }}</span>
       </router-link>
@@ -295,16 +295,25 @@ function healthColor(kb: KnowledgeBase): string {
   width: 100%;
   transition: background 0.15s ease, color 0.15s ease;
 }
-/* 知识库健康度色条：左侧独立竖条，不与选中态(整行品牌色)冲突 */
-.h-bar {
-  position: absolute;
-  left: 6px;
-  top: 9px;
-  bottom: 9px;
-  width: 3px;
-  border-radius: 2px;
+/* 知识库健康度圆点：取代原 icon 位置，10px 圆点 + 同色微光晕 */
+.h-dot {
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
-  transition: background 0.2s ease;
+  position: relative;
+}
+.h-dot::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--dot-color);
+  box-shadow: 0 0 6px var(--dot-color);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 .nav-item:hover {
   background: var(--bg-surface);
