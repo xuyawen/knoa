@@ -63,8 +63,8 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
     <div class="main">
       <TopBar :title="knowledge.activeBase ? knowledge.bases.find(b => b.id === knowledge.activeBase)?.name ?? '' : ''">
         <template #actions-extra>
-          <button class="new-chat-btn" @click="chat.startNewChat()" title="新建对话">
-            <Icon name="plus" :size="16" />
+          <button class="new-chat-btn" @click="chat.startNewChat()">
+            <Icon name="plus" :size="15" /> 新建对话
           </button>
         </template>
       </TopBar>
@@ -105,17 +105,18 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   overflow: hidden;
 }
 .new-chat-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 14px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--bg-subtle);
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: all 0.15s ease;
 }
 .new-chat-btn:hover {
   background: var(--brand-soft);
