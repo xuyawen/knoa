@@ -1,28 +1,24 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { HealthItem } from '@/types/api'
-import Icon from './Icon.vue'
 
 const props = defineProps<{ item: HealthItem }>()
-
-const iconName = computed(() => {
-  switch (props.item.kb) {
-    case '合规库': return 'compliance'
-    case '广告投放': return 'ads'
-    case '物流仓储': return 'logistics'
-    case '选品策略': return 'selection'
-    case '客服话术': return 'service'
-    default: return 'fire'
-  }
-})
 
 const pct = computed(() => Math.round(props.item.healthScore * 100))
 
 const band = computed<'good' | 'mid' | 'low'>(() => {
   const c = props.item.healthScore
-  if (c >= 0.8) return 'good'
+  if (c >= 0.85) return 'good'
   if (c >= 0.6) return 'mid'
   return 'low'
+})
+
+/** 圆点颜色，与 AppSidebar healthColor() 保持一致 */
+const dotColor = computed(() => {
+  const c = props.item.healthScore
+  if (c < 0.6) return 'var(--danger)'
+  if (c < 0.85) return 'var(--warning)'
+  return 'var(--success)'
 })
 
 const metrics = computed(() => {
@@ -62,9 +58,7 @@ function relTime(iso: string): string {
 <template>
   <div class="card" :class="band">
     <div class="head">
-      <div class="icon">
-        <Icon :name="iconName" :size="15" />
-      </div>
+      <span class="h-dot" :style="{ '--dot-color': dotColor }" />
       <div class="meta">
         <div class="name">{{ item.kb }}</div>
         <div class="sub">{{ item.docCount }} 篇 · {{ relTime(item.updatedAt) }}</div>
@@ -107,17 +101,26 @@ function relTime(iso: string): string {
   align-items: center;
   gap: 10px;
 }
-.icon {
+
+/* 健康度圆点 — 与侧边栏 h-dot 同款 */
+.h-dot {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--bg-surface);
-  color: var(--brand);
+  width: 18px;
+  height: 18px;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
 }
+.h-dot::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--dot-color);
+  box-shadow: 0 0 6px var(--dot-color);
+}
+
 .meta {
   flex: 1;
   min-width: 0;
@@ -158,14 +161,6 @@ function relTime(iso: string): string {
 .fill.good { background: var(--success); }
 .fill.mid { background: var(--warning); }
 .fill.low { background: var(--danger); }
-
-.caption {
-  font-size: 11px;
-  font-weight: 500;
-}
-.caption.good { color: var(--success); }
-.caption.mid { color: var(--warning); }
-.caption.low { color: var(--danger); }
 
 .score.good { color: var(--success); }
 .score.mid { color: var(--warning); }
