@@ -603,13 +603,20 @@ class AgenticRAGAgent:
             "data": {"step": 0, "action": "direct_answer",
                      "detail": "识别为常识/实时问题，跳过检索直接回答", "raw_reasoning": ""},
         }
+        # 用户消息：结构性防御——优先复用 st.messages 里已拼好的多模态内容
+        # （含图片 image_url blocks）。即便理论上带图走 _n_route 不会到这，
+        # 这里也不依赖入口守卫，任何重构都不会再掉图。纯文本时退化为 st.question。
+        user_turn = next(
+            (m for m in reversed(st.messages) if m.get("role") == "user"), None
+        )
+        user_content = user_turn["content"] if user_turn else st.question
         quick_messages = [
             {"role": "system", "content": (
                 "你是「知海 Knoa」，一个跨境电商运营知识助手。"
                 "用户问了一个知识库无法覆盖的常识/实时类问题（如天气、时间、股价等），"
                 "请友好简洁地回答。如果确实不知道，就直说。不要自我介绍或罗列功能。"
             ) + self._memory_section()},
-            {"role": "user", "content": st.question},
+            {"role": "user", "content": user_content},
         ]
         full_answer = ""
         async for delta in self.llm.stream_chat(quick_messages):
@@ -659,25 +666,6 @@ class AgenticRAGAgent:
             body = r.get("content") or r.get("snippet", "")
             parts.append(f"\n[{r['id']}] {r['title']} ({r['kb']})\n{body}")
         return "\n".join(parts)
-
-    def _build_final_prompt(self, question: str, all_sources: list[dict], _) -> list[dict]:
-        parts = []
-        for i, s in enumerate(all_sources, 1):
-            tag = "联网来源" if s.get("source_type") == "web" else "知识库"
-            parts.append(f"\n[{i}] ({tag}) {s['title']}\n{s.get('snippet', '')}\n")
-        context = "\n".join(parts)
-        system = (
-            "你是「知海 Knoa」，一个跨境电商运营知识助手。\n"
-            "请基于以下来源（知识库 / 联网）回答用户问题，回答必须忠实于来源内容。\n\n"
-            "引用规则：引用时使用 [1] [2] 这样的标注对应下方编号；"
-            "若某来源标记为（联网来源），引用时可注明「据联网信息」。\n"
-            "关键要求：来源资料里的「片段」通常已包含用户要的具体数据"
-            "（如汇率、价格、日期、政策要点），请直接从片段中提取并呈现给用户，"
-            "并标注对应编号；不要说「无法获取/无法访问数据」，因为数据已在上文给出。\n"
-            "确实没有任何来源覆盖该问题时，再如实说明。\n\n"
-            f"来源资料：\n{context}" + self._memory_section() + self._summary_section()
-        )
-        return [{"role": "system", "content": system}, {"role": "user", "content": question}]
 
     @staticmethod
     def _extract_citations(text: str) -> list[int]:
