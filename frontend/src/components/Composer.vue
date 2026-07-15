@@ -31,7 +31,7 @@ function onKey(e: KeyboardEvent) {
         v-model="text"
         :placeholder="placeholder"
         @keydown="onKey"
-        rows="1"
+        rows="3"
       />
       <button class="send" @click="send" title="发送" :disabled="!text.trim()">
         <Icon name="send" :size="18" />
@@ -72,6 +72,7 @@ textarea {
   font-family: inherit;
   font-size: 14px;
   line-height: 1.5;
+  min-height: 63px;
   max-height: 100px;
 }
 textarea::placeholder {
