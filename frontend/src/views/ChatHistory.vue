@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
@@ -19,59 +19,16 @@ const isMobile = ref(false)
 const drawer = ref(false)
 let mq: MediaQueryList | undefined
 
-// ── 选择 / 删除模式 ──
-const selecting = ref(false)
+// ── 多选 / 删除（勾选即选，无需进入模式）──
 const selectedIds = ref<Set<string>>(new Set())
 const hoverId = ref<string | null>(null)
 
-const allSelected = computed(() => {
-  return chat.sessions.length > 0 && selectedIds.value.size === chat.sessions.length
-})
-
-function toggleSelect(id: string) {
-  const s = new Set(selectedIds.value)
-  if (s.has(id)) {
-    s.delete(id)
-  } else {
-    s.add(id)
-  }
-  selectedIds.value = s
-}
-
-/** 勾选框点击：非选择模式先进入，再切换选中状态 */
-function onCheckItem(id: string, e: Event) {
+function onCheck(id: string, e: Event) {
   const checked = (e.target as HTMLInputElement).checked
-  if (!selecting.value) {
-    startSelection()
-  }
-  // 延迟一 tick 确保 selecting 已更新、selectedIds 已初始化
-  requestAnimationFrame(() => {
-    if (checked) {
-      selectedIds.value = new Set([...selectedIds.value, id])
-    } else {
-      const next = new Set(selectedIds.value)
-      next.delete(id)
-      selectedIds.value = next
-    }
-  })
-}
-
-function toggleSelectAll() {
-  if (allSelected.value) {
-    selectedIds.value = new Set()
-  } else {
-    selectedIds.value = new Set(chat.sessions.map((s) => s.id))
-  }
-}
-
-function startSelection() {
-  selecting.value = true
-  selectedIds.value = new Set()
-}
-
-function cancelSelection() {
-  selecting.value = false
-  selectedIds.value = new Set()
+  const next = new Set(selectedIds.value)
+  if (checked) next.add(id)
+  else next.delete(id)
+  selectedIds.value = next
 }
 
 async function handleDeleteOne(id: string) {
@@ -82,7 +39,7 @@ async function handleDeleteOne(id: string) {
     danger: true,
     onConfirm: async () => { await chat.removeSession(id) },
   })
-  if (ok && selecting.value) {
+  if (ok) {
     const next = new Set(selectedIds.value)
     next.delete(id)
     selectedIds.value = next
@@ -90,15 +47,16 @@ async function handleDeleteOne(id: string) {
 }
 
 async function handleBatchDelete() {
-  const n = selectedIds.value.size
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
   const ok = await confirm({
     title: '批量删除',
-    message: `确定删除选中的 ${n} 个会话？会话内的全部消息将一并清除，且无法恢复。`,
-    confirmText: `删除 ${n} 个`,
+    message: `确定删除选中的 ${ids.length} 个会话？会话内的全部消息将一并清除，且无法恢复。`,
+    confirmText: `删除 ${ids.length} 个`,
     danger: true,
-    onConfirm: async () => { await chat.removeSessions(Array.from(selectedIds.value)) },
+    onConfirm: async () => { await chat.removeSessions(ids) },
   })
-  if (ok) cancelSelection()
+  if (ok) selectedIds.value = new Set()
 }
 
 function syncMobile() {
@@ -124,11 +82,6 @@ function fmtTime(iso: string): string {
 }
 
 async function onPick(id: string) {
-  // 选择模式下点击不跳转，只切换选中状态
-  if (selecting.value) {
-    toggleSelect(id)
-    return
-  }
   await chat.switchSession(id)
   if (isMobile.value) {
     router.push('/')
@@ -167,14 +120,13 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
       </button>
       <span class="m-title">问答记录</span>
       <div class="m-top-right">
-        <button v-if="!selecting" class="m-new-btn" @click="onNew" title="新建对话">
+        <button class="m-new-btn" @click="onNew" title="新建对话">
           <Icon name="plus" :size="16" />
         </button>
-        <button v-else class="m-act-btn" @click="handleBatchDelete" :disabled="selectedIds.size === 0" title="删除选中">
+        <button v-if="selectedIds.size > 0" class="m-act-btn" @click="handleBatchDelete" title="删除选中">
           <Icon name="trash" :size="16" />
         </button>
-        <button v-if="!selecting" class="m-back" @click="router.push('/')">返回</button>
-        <button v-else class="m-cancel" @click="cancelSelection">取消</button>
+        <button class="m-back" @click="router.push('/')">返回</button>
       </div>
     </header>
 
@@ -185,29 +137,21 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
       </div>
 
       <div class="body">
-        <!-- 列表操作区：新建 + 选择工具栏 -->
+        <!-- 列表操作区：新建 + 批量删除 -->
         <div v-if="!isMobile" class="list-toolbar">
-          <!-- 普通模式：左侧新建对话 + 管理 -->
-          <div v-if="!selecting" class="list-toolbar-left">
+          <div class="list-toolbar-left">
             <button class="new-btn" @click="onNew">
               <Icon name="plus" :size="15" /> 新建对话
             </button>
-            <button class="sel-btn" @click="startSelection" title="批量删除">
-              <Icon name="check-square" :size="15" /> 批量删除
+            <button
+              v-if="selectedIds.size > 0"
+              class="sel-btn"
+              @click="handleBatchDelete"
+              title="批量删除"
+            >
+              <Icon name="check-square" :size="15" /> 批量删除（{{ selectedIds.size }}）
             </button>
           </div>
-          <!-- 选择模式工具栏 -->
-          <template v-else>
-            <button class="sel-toggle" @click="toggleSelectAll">
-              {{ allSelected ? '取消全选' : '全选' }}
-            </button>
-            <div class="sel-toolbar-right">
-              <button class="del-btn" @click="handleBatchDelete" :disabled="selectedIds.size === 0">
-                <Icon name="trash" :size="14" /> 删除选中（{{ selectedIds.size }}）
-              </button>
-              <button class="cancel-btn" @click="cancelSelection">取消</button>
-            </div>
-          </template>
         </div>
 
         <div v-if="chat.loadingHistory" class="empty">加载中…</div>
@@ -217,15 +161,15 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
             v-for="s in chat.sessions"
             :key="s.id"
             class="session-item"
-            :class="{ active: s.id === chat.sessionId, sel: selecting, checked: selectedIds.has(s.id) }"
+            :class="{ active: s.id === chat.sessionId, checked: selectedIds.has(s.id) }"
           >
-            <!-- 勾选框始终显示；非选择模式下点击自动进入选择模式 -->
+            <!-- 勾选框始终显示，勾选即选 -->
             <label class="check-wrap" @click.stop>
               <input
                 type="checkbox"
                 class="app-checkbox"
-                :checked="selecting ? selectedIds.has(s.id) : false"
-                @change="onCheckItem(s.id, $event)"
+                :checked="selectedIds.has(s.id)"
+                @change="onCheck(s.id, $event)"
               />
             </label>
 
@@ -238,10 +182,10 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
               </div>
             </button>
 
-            <!-- 单个删除按钮（hover 显示；选择模式始终显示） -->
+            <!-- 单个删除按钮（hover 显示） -->
             <button
               class="item-del"
-              :class="{ show: selecting || s.id === hoverId }"
+              :class="{ show: s.id === hoverId }"
               @click.stop="handleDeleteOne(s.id)"
               @mouseenter="hoverId = s.id"
               @mouseleave="hoverId = null"
@@ -315,65 +259,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   border-color: var(--brand);
 }
 
-.sel-toggle {
-  padding: var(--btn-padding-md);
-  height: var(--btn-height);
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: var(--btn-font-size);
-  font-weight: var(--btn-font-weight);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.sel-toggle:hover {
-  color: var(--brand);
-  border-color: var(--brand);
-}
-
-.del-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: var(--btn-padding-md);
-  height: var(--btn-height);
-  background: #dc2626;
-  color: #fff;
-  border-radius: var(--radius-md);
-  font-size: var(--btn-font-size);
-  font-weight: var(--btn-font-weight);
-  border: none;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.del-btn:hover:not(:disabled) {
-  background: #b91c1c;
-}
-.del-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.cancel-btn {
-  padding: var(--btn-padding-md);
-  height: var(--btn-height);
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: var(--btn-font-size);
-  font-weight: var(--btn-font-weight);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.cancel-btn:hover {
-  color: var(--text-primary);
-  border-color: var(--text-placeholder);
-}
-
-/* ── 选择模式工具栏（列表内） ── */
-/* 列表上方工具栏（新建对话 / 选择模式） */
+/* ── 列表上方工具栏（新建对话 / 批量删除） ── */
 .list-toolbar {
   display: flex;
   align-items: center;
@@ -382,11 +268,6 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   margin-bottom: 4px;
 }
 .list-toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.list-toolbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -420,9 +301,6 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 .session-item.active {
   border-color: var(--brand);
   background: var(--brand-soft);
-}
-.session-item.sel {
-  padding-left: 8px;
 }
 .session-item.checked {
   border-color: var(--brand);
