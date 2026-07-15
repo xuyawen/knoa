@@ -96,6 +96,7 @@ const kbCards = computed(() => {
       name: kb.name,
       alert: kb.badge?.includes('待复核'),
       meta: h ? `${h.docCount} 篇 · 健康 ${Math.round(h.healthScore * 100)}%` : '',
+      healthScore: h ? h.healthScore : 0,
     }
   })
   const fromWs = ['文档管理'].map(e => ({
@@ -103,6 +104,7 @@ const kbCards = computed(() => {
     name: e,
     alert: false,
     meta: '快捷入口',
+    healthScore: undefined as number | undefined,
   }))
   return [...fromKb, ...fromWs]
 })
@@ -170,6 +172,7 @@ onMounted(() => {
               :name="c.name"
               :meta="c.meta"
               :alert="c.alert"
+              :healthScore="c.healthScore"
               @select="onCardSelect"
             />
           </div>
@@ -195,6 +198,7 @@ onMounted(() => {
               :name="c.name"
               :meta="c.meta"
               :alert="c.alert"
+              :healthScore="c.healthScore"
               @select="onCardSelect"
             />
           </div>
