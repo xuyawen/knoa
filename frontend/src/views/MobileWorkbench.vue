@@ -127,7 +127,6 @@ const kbCards = computed(() => {
         class="pane"
         :class="{
           scroll: tab === 'home' || tab === 'kb' || tab === 'me',
-          'scroll center': tab === 'me',
           'chat-view': tab === 'chat',
         }"
         :key="tab"
