@@ -47,6 +47,7 @@ function stepIcon(action: string): string {
     case 'retrieve': return 'search'
     case 'supplement_search': return 'refresh'
     case 'web_search': return 'external'
+    case 'generate': return 'sparkle'
     default: return 'alert-circle'  // 未知/异常动作用警告图标
   }
 }
@@ -371,8 +372,9 @@ async function onCopy() {
 .step-icon.direct_answer { color: #22c55e; }   /* 绿：直接答 */
 .step-icon.retrieve { color: var(--brand); }     /* 蓝：检索 */
 .step-icon.supplement_search { color: #f59e0b; } /* 橙：补检 */
+.step-icon.generate { color: #8b5cf6; } /* 紫：生成回答 */
 /* 未匹配到已知动作 → 警告色（异常步骤） */
-.step-icon:not(.direct_answer):not(.retrieve):not(.supplement_search) {
+.step-icon:not(.direct_answer):not(.retrieve):not(.supplement_search):not(.generate) {
   color: var(--warning, #f59e0b);
 }
 .step-text {
