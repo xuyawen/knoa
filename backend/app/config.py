@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     EMBEDDING_BASE_URL: str = "https://api.openai.com/v1"
     EMBEDDING_API_KEY: str = ""
     EMBEDDING_MODEL: str = "text-embedding-3-small"
-    EMBEDDING_DIM: int = 1536
+    EMBEDDING_DIM: int = 1024
     # LLM (M3 启用)
     LLM_BASE_URL: str = "https://api.deepseek.com/v1"
     LLM_API_KEY: str = ""
