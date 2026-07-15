@@ -80,12 +80,11 @@ async function onSubmitPassword() {
   pwdSaving.value = true
   try {
     await changePassword(pwdOld.value, pwdNew.value)
-    pwdMsg.value = '密码修改成功，即将返回登录页重新登录…'
+    pwdMsg.value = '密码修改成功'
     pwdError.value = false
     setTimeout(() => {
-      auth.logout()
-      router.replace('/login')
-    }, 1200)
+      closePwdDialog()
+    }, 1500)
   } catch (e: any) {
     pwdMsg.value = e.message || '修改失败，请重试'
     pwdError.value = true
