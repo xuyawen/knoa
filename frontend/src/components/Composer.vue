@@ -48,7 +48,7 @@ function onKey(e: KeyboardEvent) {
 }
 .box {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
