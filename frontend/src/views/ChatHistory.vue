@@ -163,22 +163,21 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
     <div class="main">
       <!-- 桌面端顶栏 -->
       <div v-if="!isMobile" class="toolbar-row">
-        <TopBar title="问答记录">
-          <template #actions-extra>
-            <button class="sel-btn" @click="startSelection" v-if="!selecting" title="管理/批量操作">
-              <Icon name="check-square" :size="15" /> 管理
-            </button>
-          </template>
-        </TopBar>
+        <TopBar title="问答记录" />
       </div>
 
       <div class="body">
         <!-- 列表操作区：新建 + 选择工具栏 -->
         <div v-if="!isMobile" class="list-toolbar">
-          <!-- 普通模式：左侧新建对话 -->
-          <button v-if="!selecting" class="new-btn" @click="onNew">
-            <Icon name="plus" :size="15" /> 新建对话
-          </button>
+          <!-- 普通模式：左侧新建对话 + 管理 -->
+          <div v-if="!selecting" class="list-toolbar-left">
+            <button class="new-btn" @click="onNew">
+              <Icon name="plus" :size="15" /> 新建对话
+            </button>
+            <button class="sel-btn" @click="startSelection" title="管理/批量操作">
+              <Icon name="check-square" :size="15" /> 管理
+            </button>
+          </div>
           <!-- 选择模式工具栏 -->
           <template v-else>
             <button class="sel-toggle" @click="toggleSelectAll">
@@ -350,6 +349,11 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   justify-content: space-between;
   padding: 8px 4px;
   margin-bottom: 4px;
+}
+.list-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .list-toolbar-right {
   display: flex;
