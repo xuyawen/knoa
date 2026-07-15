@@ -110,17 +110,16 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   gap: 4px;
   padding: 7px 14px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--bg-subtle);
-  color: var(--text-secondary);
+  border: none;
+  background: var(--brand);
+  color: #fff;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, transform 0.15s ease;
 }
 .new-chat-btn:hover {
-  background: var(--brand-soft);
-  color: var(--brand);
-  border-color: transparent;
+  background: var(--brand-hover);
+  transform: translateY(-1px);
 }
 </style>
