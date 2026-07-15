@@ -165,9 +165,6 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
       <div v-if="!isMobile" class="toolbar-row">
         <TopBar title="问答记录">
           <template #actions-extra>
-            <button class="new-btn" @click="onNew" v-if="!selecting">
-              <Icon name="plus" :size="15" /> 新建对话
-            </button>
             <button class="sel-btn" @click="startSelection" v-if="!selecting" title="管理/批量操作">
               <Icon name="check-square" :size="15" /> 管理
             </button>
@@ -176,17 +173,24 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
       </div>
 
       <div class="body">
-        <!-- 选择模式工具栏（列表内，紧贴列表上方） -->
-        <div v-if="selecting && !isMobile" class="sel-toolbar">
-          <button class="sel-toggle" @click="toggleSelectAll">
-            {{ allSelected ? '取消全选' : '全选' }}
+        <!-- 列表操作区：新建 + 选择工具栏 -->
+        <div v-if="!isMobile" class="list-toolbar">
+          <!-- 普通模式：左侧新建对话 -->
+          <button v-if="!selecting" class="new-btn" @click="onNew">
+            <Icon name="plus" :size="15" /> 新建对话
           </button>
-          <div class="sel-toolbar-right">
-            <button class="del-btn" @click="handleBatchDelete" :disabled="selectedIds.size === 0">
-              <Icon name="trash" :size="14" /> 删除选中（{{ selectedIds.size }}）
+          <!-- 选择模式工具栏 -->
+          <template v-else>
+            <button class="sel-toggle" @click="toggleSelectAll">
+              {{ allSelected ? '取消全选' : '全选' }}
             </button>
-            <button class="cancel-btn" @click="cancelSelection">取消</button>
-          </div>
+            <div class="sel-toolbar-right">
+              <button class="del-btn" @click="handleBatchDelete" :disabled="selectedIds.size === 0">
+                <Icon name="trash" :size="14" /> 删除选中（{{ selectedIds.size }}）
+              </button>
+              <button class="cancel-btn" @click="cancelSelection">取消</button>
+            </div>
+          </template>
         </div>
 
         <div v-if="chat.loadingHistory" class="empty">加载中…</div>
@@ -339,14 +343,15 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 }
 
 /* ── 选择模式工具栏（列表内） ── */
-.sel-toolbar {
+/* 列表上方工具栏（新建对话 / 选择模式） */
+.list-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 8px 4px;
   margin-bottom: 4px;
 }
-.sel-toolbar-right {
+.list-toolbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
