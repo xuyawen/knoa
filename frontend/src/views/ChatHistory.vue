@@ -283,6 +283,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   align-items: center;
   gap: 4px;
   padding: var(--btn-padding-md);
+  height: var(--btn-height);
   background: var(--brand);
   color: #fff;
   border-radius: var(--radius-md);
@@ -298,12 +299,14 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: var(--btn-padding-sm);
+  padding: var(--btn-padding-md);
+  height: var(--btn-height);
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   font-size: var(--btn-font-size);
+  font-weight: var(--btn-font-weight);
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -313,12 +316,14 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 }
 
 .sel-toggle {
-  padding: var(--btn-padding-sm);
+  padding: var(--btn-padding-md);
+  height: var(--btn-height);
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   font-size: var(--btn-font-size);
+  font-weight: var(--btn-font-weight);
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -332,6 +337,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   align-items: center;
   gap: 4px;
   padding: var(--btn-padding-md);
+  height: var(--btn-height);
   background: #dc2626;
   color: #fff;
   border-radius: var(--radius-md);
@@ -350,12 +356,14 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 }
 
 .cancel-btn {
-  padding: var(--btn-padding-sm);
+  padding: var(--btn-padding-md);
+  height: var(--btn-height);
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   font-size: var(--btn-font-size);
+  font-weight: var(--btn-font-weight);
   cursor: pointer;
   transition: all 0.15s ease;
 }
