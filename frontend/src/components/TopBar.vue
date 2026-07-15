@@ -53,6 +53,7 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 
     <!-- 右：操作区 -->
     <div class="actions">
+      <slot name="actions-extra" />
       <ThemeToggle />
       <div class="account-wrap" ref="accountWrap">
         <button class="account" @click.stop="toggleMenu" :title="auth.user?.displayName || auth.user?.username">

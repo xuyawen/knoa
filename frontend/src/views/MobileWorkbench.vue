@@ -136,6 +136,9 @@ onMounted(() => {
       </button>
       <span class="brand">知海 Knoa</span>
       <div class="actions">
+        <button class="m-new" @click="chat.startNewChat()" title="新建对话">
+          <Icon name="plus" :size="20" />
+        </button>
         <ThemeToggle />
         <div class="account">{{ initial }}</div>
       </div>
@@ -349,6 +352,19 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   color: var(--text-primary);
+}
+.m-new {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  transition: background 0.15s ease;
+}
+.m-new:active {
+  background: var(--bg-subtle);
 }
 .brand {
   font-family: var(--font-display);

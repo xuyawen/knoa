@@ -4,6 +4,7 @@ import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import ChatStream from '@/components/ChatStream.vue'
 import Composer from '@/components/Composer.vue'
+import Icon from '@/components/Icon.vue'
 import SourcePanel from '@/components/SourcePanel.vue'
 import MobileWorkbench from '@/views/MobileWorkbench.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
@@ -60,7 +61,13 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   <div v-else class="workbench">
     <AppSidebar :collapsed="collapsed" @collapse="onCollapse" @expand="onExpand" />
     <div class="main">
-      <TopBar :title="knowledge.activeBase ? knowledge.bases.find(b => b.id === knowledge.activeBase)?.name ?? '' : ''" />
+      <TopBar :title="knowledge.activeBase ? knowledge.bases.find(b => b.id === knowledge.activeBase)?.name ?? '' : ''">
+        <template #actions-extra>
+          <button class="new-chat-btn" @click="chat.startNewChat()" title="新建对话">
+            <Icon name="plus" :size="16" />
+          </button>
+        </template>
+      </TopBar>
       <div class="body">
         <div class="chat-wrap">
           <ChatStream @cite="onCite" />
@@ -94,5 +101,23 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+.new-chat-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.new-chat-btn:hover {
+  background: var(--brand-soft);
+  color: var(--brand);
+  border-color: transparent;
 }
 </style>
