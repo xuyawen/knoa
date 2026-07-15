@@ -1,19 +1,9 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import Icon from './Icon.vue'
-import { useChatStore } from '@/stores/chat'
 
-const chat = useChatStore()
 const text = ref('')
-const ta = ref<HTMLTextAreaElement | null>(null)
 const emit = defineEmits<{ (e: 'send', q: string): void }>()
-
-function focus() {
-  ta.value?.focus()
-}
-
-// ⌘K / 搜索按钮触发的全局聚焦信号
-watch(() => chat.focusTick, focus)
 
 function send() {
   const q = text.value.trim()
@@ -28,15 +18,12 @@ function onKey(e: KeyboardEvent) {
     send()
   }
 }
-
-defineExpose({ focus })
 </script>
 
 <template>
   <div class="composer">
     <div class="box">
       <textarea
-        ref="ta"
         v-model="text"
         placeholder="向知海提问…（Enter 发送，Shift+Enter 换行）"
         @keydown="onKey"

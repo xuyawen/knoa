@@ -4,12 +4,13 @@ import { useRouter } from 'vue-router'
 import Icon from './Icon.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useUiStore } from '@/stores/ui'
 
 defineProps<{ title?: string; subtitle?: string }>()
-const emit = defineEmits<{ (e: 'ask', q: string): void }>()
 
 const router = useRouter()
 const auth = useAuthStore()
+const ui = useUiStore()
 const menuOpen = ref(false)
 const accountWrap = ref<HTMLElement | null>(null)
 
@@ -43,8 +44,8 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
       <span class="subtitle">{{ subtitle || '运营知识一站式问答' }}</span>
     </div>
 
-    <!-- 中：全局提问框 -->
-    <button class="search" @click="emit('ask', '')">
+    <!-- 中：全局命令面板触发器 -->
+    <button class="search" @click="ui.openPalette()">
       <span class="search-icon"><Icon name="search" :size="16" /></span>
       <span class="search-placeholder">向知海提问，⌘K 唤起</span>
       <kbd class="kbd">⌘K</kbd>

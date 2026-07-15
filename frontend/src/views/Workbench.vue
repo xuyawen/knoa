@@ -30,7 +30,6 @@ function syncMobile() {
 
 function onAsk(q: string) {
   if (q.trim()) chat.ask(q, knowledge.activeBase)
-  else chat.focusComposer()
 }
 
 function onSend(q: string) {
@@ -60,7 +59,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   <div v-else class="workbench">
     <AppSidebar :collapsed="collapsed" @collapse="onCollapse" @expand="onExpand" />
     <div class="main">
-      <TopBar :title="knowledge.activeBase ? knowledge.bases.find(b => b.id === knowledge.activeBase)?.name || '全部知识' : '全部知识'" @ask="onAsk" />
+      <TopBar :title="knowledge.activeBase ? knowledge.bases.find(b => b.id === knowledge.activeBase)?.name || '全部知识' : '全部知识'" />
       <div class="body">
         <div class="chat-wrap">
           <ChatStream @cite="onCite" />
