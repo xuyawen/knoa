@@ -31,6 +31,11 @@ const error = ref('')
 const keyword = ref('')
 const roleFilter = ref<'all' | 'admin' | 'editor' | 'viewer'>('all')
 const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
+const roleOpen = ref(false)
+const statusOpen = ref(false)
+
+const ROLE_OPTIONS: Record<string, string> = { all: '全部角色', admin: '管理员', editor: '编辑', viewer: '访客' }
+const STATUS_OPTIONS: Record<string, string> = { all: '全部状态', active: '启用', inactive: '停用' }
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -248,6 +253,14 @@ onMounted(() => {
   mq.addEventListener('change', syncMobile)
   load()
   window.addEventListener('keydown', onKey)
+  // 点击外部关闭下拉
+  document.addEventListener('click', (e: MouseEvent) => {
+    const t = e.target as HTMLElement
+    if (!t.closest('.sf-dropdown')) {
+      roleOpen.value = false
+      statusOpen.value = false
+    }
+  })
 })
 onUnmounted(() => {
   mq?.removeEventListener('change', syncMobile)
@@ -300,17 +313,32 @@ onUnmounted(() => {
               type="text"
               placeholder="搜索用户名或显示名"
             />
-            <select v-model="roleFilter" class="sf-select">
-              <option value="all">全部角色</option>
-              <option value="admin">管理员</option>
-              <option value="editor">编辑</option>
-              <option value="viewer">访客</option>
-            </select>
-            <select v-model="statusFilter" class="sf-select">
-              <option value="all">全部状态</option>
-              <option value="active">启用</option>
-              <option value="inactive">停用</option>
-            </select>
+            <div class="sf-dropdown" :class="{ open: roleOpen }">
+              <button type="button" class="sf-trigger" @click="roleOpen = !roleOpen">
+                <span>{{ ROLE_OPTIONS[roleFilter] }}</span>
+                <Icon name="chevron-down" :size="14" />
+              </button>
+              <transition name="dropdown">
+                <ul v-if="roleOpen" class="sf-menu">
+                  <li v-for="(label, val) in ROLE_OPTIONS" :key="val"
+                    :class="{ active: roleFilter === val }"
+                    @click="roleFilter = (val as typeof roleFilter.value); roleOpen = false">{{ label }}</li>
+                </ul>
+              </transition>
+            </div>
+            <div class="sf-dropdown" :class="{ open: statusOpen }">
+              <button type="button" class="sf-trigger" @click="statusOpen = !statusOpen">
+                <span>{{ STATUS_OPTIONS[statusFilter] }}</span>
+                <Icon name="chevron-down" :size="14" />
+              </button>
+              <transition name="dropdown">
+                <ul v-if="statusOpen" class="sf-menu">
+                  <li v-for="(label, val) in STATUS_OPTIONS" :key="val"
+                    :class="{ active: statusFilter === val }"
+                    @click="statusFilter = (val as typeof statusFilter.value); statusOpen = false">{{ label }}</li>
+                </ul>
+              </transition>
+            </div>
             <button
               v-if="keyword || roleFilter !== 'all' || statusFilter !== 'all'"
               class="sf-reset"
@@ -563,18 +591,68 @@ onUnmounted(() => {
   color: var(--text-primary);
   font-size: 14px;
 }
-.sf-select {
+/* 自定义下拉筛选器 */
+.sf-dropdown {
+  position: relative;
+}
+.sf-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   height: 40px;
-  padding: 0 10px;
+  padding: 0 14px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--bg-subtle);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 13.5px;
   cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.sf-input:focus,
-.sf-select:focus {
+.sf-trigger:hover {
+  border-color: var(--brand);
+}
+.sf-dropdown.open .sf-trigger {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.12);
+}
+.sf-trigger .icon {
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+.sf-dropdown.open .sf-trigger .icon {
+  transform: rotate(180deg);
+}
+.sf-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  padding: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-float);
+  z-index: 10;
+  list-style: none;
+}
+.sf-menu li {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.sf-menu li:hover {
+  background: var(--brand-soft);
+}
+.sf-menu li.active {
+  color: var(--brand);
+  font-weight: 500;
+}
+.sf-input:focus {
   outline: none;
   border-color: var(--brand);
 }
@@ -919,5 +997,16 @@ onUnmounted(() => {
   position: fixed; inset: 0;
   background: rgba(0, 0, 0, 0.4);
   z-index: 35;
+}
+
+/* 下拉过渡 */
+.dropdown-enter-active,
+.dropdown-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.dropdown-enter-from,
+.dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 </style>
