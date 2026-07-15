@@ -94,7 +94,14 @@ async def ai_review_document(
                 # 只保留有向量的 chunk；跳过 embedding 为 None 的记录，
                 # 否则 np.array([None,...], dtype=float) 会塌成 1D，使 axis=1 的 norm 抛 AxisError。
                 # 注意 existing 与向量数组必须一一对应，故同步过滤，避免 best_idx 错位。
-                existing_f = [e for e in existing if e[0].embedding is not None]
+                # 只保留维度与待审文档一致的 chunk。库里存在 8 维脏数据，
+                # 维度不符会让 np.array 拼出非 (k,1024) 形状，matmul 直接 ValueError -> 500。
+                # 以新文档实时向量的维度为准（100% 可信），existing_f 同步过滤以保持索引对齐。
+                expected_dim = qvecs.shape[1]
+                existing_f = [
+                    e for e in existing
+                    if e[0].embedding is not None and len(e[0].embedding) == expected_dim
+                ]
                 if existing_f:
                     try:
                         cvecs = np.array([e[0].embedding for e in existing_f], dtype=float)

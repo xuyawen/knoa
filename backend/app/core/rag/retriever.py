@@ -41,6 +41,16 @@ class HybridRetriever:
 
         # 1. 向量检索 (numpy 余弦相似度, 归一化向量直接点积)
         query_vec = np.array(await self.embedder.embed_query(question))
+        # 过滤维度不符/为空的脏 chunk（库里存在 8 维脏数据，会让
+        # chunk_embeddings @ query_vec 维度不匹配 -> 500）。chunks 同步
+        # 过滤以保持与 cosine_scores 的索引对齐（后续用索引回查 chunks）。
+        valid = [
+            c for c in chunks
+            if c.embedding is not None and len(c.embedding) == query_vec.shape[0]
+        ]
+        if not valid:
+            return []
+        chunks = valid
         chunk_embeddings = np.array([c.embedding for c in chunks])
         cosine_scores = chunk_embeddings @ query_vec  # 归一化向量点积 = 余弦
         vector_ranked = sorted(
