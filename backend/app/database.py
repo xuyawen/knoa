@@ -65,6 +65,12 @@ async def _migrate_columns(conn) -> None:
         await conn.execute(
             text(f"ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS {name} {typ}")
         )
+    # 聊天消息多模态附件（一期仅 image JSONB 回显数据）
+    chat_cols = [("attachments", "JSONB")]
+    for name, typ in chat_cols:
+        await conn.execute(
+            text(f"ALTER TABLE chat_message ADD COLUMN IF NOT EXISTS {name} {typ}")
+        )
 
 
 async def init_db():
