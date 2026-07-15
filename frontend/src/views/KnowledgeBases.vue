@@ -377,18 +377,24 @@ function goDetail(id: string) {
 .btn-danger {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 9px 18px;
-  background: var(--danger);
+  gap: 4px;
+  padding: var(--btn-padding-md);
+  height: var(--btn-height);
+  background: #dc2626;
   color: #fff;
   border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--btn-font-size);
+  font-weight: var(--btn-font-weight);
+  border: none;
+  cursor: pointer;
   transition: background 0.15s ease, transform 0.15s ease;
 }
-.btn-danger:hover {
-  background: var(--danger-hover);
-  transform: translateY(-1px);
+.btn-danger:hover:not(:disabled) {
+  background: #b91c1c;
+}
+.btn-danger:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .select-all {
