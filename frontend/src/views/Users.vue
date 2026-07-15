@@ -33,6 +33,8 @@ const roleFilter = ref<'all' | 'admin' | 'editor' | 'viewer'>('all')
 const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
 const roleOpen = ref(false)
 const statusOpen = ref(false)
+const roleOpenRow = ref<string | null>(null)   // 表格行内角色下拉：存 user.id
+const modalRoleOpen = ref(false)               // 编辑弹窗角色下拉
 
 const ROLE_OPTIONS: Record<string, string> = { all: '全部角色', admin: '管理员', editor: '编辑', viewer: '访客' }
 const STATUS_OPTIONS: Record<string, string> = { all: '全部状态', active: '启用', inactive: '停用' }
@@ -260,6 +262,12 @@ onMounted(() => {
       roleOpen.value = false
       statusOpen.value = false
     }
+    if (!t.closest('.row-dropdown')) {
+      roleOpenRow.value = null
+    }
+    if (!t.closest('.modal-dropdown')) {
+      modalRoleOpen.value = false
+    }
   })
 })
 onUnmounted(() => {
@@ -369,16 +377,25 @@ onUnmounted(() => {
                 <td>{{ u.username }}</td>
                 <td>{{ u.displayName || '—' }}</td>
 
-                <!-- 角色：下拉直接改 -->
+                <!-- 角色：自定义下拉 -->
                 <td>
-                  <select
-                    class="role-select"
-                    :value="u.role"
-                    :disabled="rowBusy === u.id"
-                    @change="onRoleChange(u, ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option v-for="r in ROLES" :key="r" :value="r">{{ ROLE_LABEL[r] }}</option>
-                  </select>
+                  <div class="row-dropdown" :class="{ open: roleOpenRow === u.id }">
+                    <button type="button" class="row-trigger"
+                      :disabled="rowBusy === u.id"
+                      @click="roleOpenRow = roleOpenRow === u.id ? null : u.id"
+                    >
+                      <span>{{ ROLE_LABEL[u.role] || u.role }}</span>
+                      <Icon name="chevron-down" :size="12" />
+                    </button>
+                    <transition name="dropdown">
+                      <ul v-if="roleOpenRow === u.id" class="row-menu">
+                        <li v-for="r in ROLES" :key="r"
+                          :class="{ active: u.role === r }"
+                          @click="onRoleChange(u, r); roleOpenRow = null"
+                        >{{ ROLE_LABEL[r] }}</li>
+                      </ul>
+                    </transition>
+                  </div>
                 </td>
 
                 <!-- 状态：标签 -->
@@ -473,11 +490,20 @@ onUnmounted(() => {
             </label>
             <label class="m-field">
               <span>角色</span>
-              <select v-model="form.role">
-                <option value="viewer">访客（仅问答）</option>
-                <option value="editor">编辑（建库/传文档）</option>
-                <option value="admin">管理员（含用户管理）</option>
-              </select>
+              <div class="modal-dropdown" :class="{ open: modalRoleOpen }">
+                <button type="button" class="modal-trigger" @click="modalRoleOpen = !modalRoleOpen">
+                  <span>{{ ROLE_LABEL[form.role] || form.role }}</span>
+                  <Icon name="chevron-down" :size="14" />
+                </button>
+                <transition name="dropdown">
+                  <ul v-if="modalRoleOpen" class="modal-menu">
+                    <li v-for="(label, val) in ({ viewer: '访客（仅问答）', editor: '编辑（建库/传文档）', admin: '管理员（含用户管理）' })" :key="val"
+                      :class="{ active: form.role === val }"
+                      @click="form.role = val as 'viewer'|'editor'|'admin'; modalRoleOpen = false"
+                    >{{ label }}</li>
+                  </ul>
+                </transition>
+              </div>
             </label>
             <p v-if="formError" class="err">{{ formError }}</p>
           </form>
@@ -706,19 +732,114 @@ onUnmounted(() => {
 .muted { color: var(--text-secondary); font-size: 13px; }
 .col-ops { white-space: nowrap; }
 
-/* 角色下拉 */
-.role-select {
-  height: 30px;
-  padding: 0 8px;
+/* 表格行内角色下拉 */
+.row-dropdown {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.row-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-subtle);
   color: var(--text-primary);
   font-size: 13px;
   cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.role-select:focus { outline: none; border-color: var(--brand); }
-.role-select:disabled { cursor: default; }
+.row-trigger:hover:not(:disabled) {
+  border-color: var(--brand);
+}
+.row-dropdown.open .row-trigger {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.12);
+}
+.row-dropdown.open .row-trigger svg {
+  transform: rotate(180deg);
+}
+.row-trigger svg { transition: transform 0.2s; flex-shrink: 0; }
+.row-trigger:disabled { cursor: default; opacity: 0.55; }
+.row-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 100px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+  padding: 4px 0;
+  list-style: none;
+}
+.row-menu li {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.row-menu li:hover { background: var(--bg-subtle); }
+.row-menu li.active {
+  color: var(--brand);
+  font-weight: 600;
+}
+
+/* 编辑弹窗角色下拉 */
+.modal-dropdown {
+  position: relative;
+}
+.modal-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.modal-trigger:hover { border-color: var(--brand); }
+.modal-dropdown.open .modal-trigger {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.12);
+}
+.modal-dropdown.open .modal-trigger svg { transform: rotate(180deg); }
+.modal-trigger svg { transition: transform 0.2s; flex-shrink: 0; }
+.modal-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+  padding: 4px 0;
+  list-style: none;
+}
+.modal-menu li {
+  padding: 8px 16px;
+  font-size: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.modal-menu li:hover { background: var(--bg-subtle); }
+.modal-menu li.active {
+  color: var(--brand);
+  font-weight: 600;
+}
 
 /* 状态标签 */
 .status {
@@ -879,8 +1000,7 @@ onUnmounted(() => {
   color: var(--text-secondary);
 }
 .req { color: var(--danger); margin-left: 2px; }
-.m-field input,
-.m-field select {
+.m-field input {
   height: 40px;
   padding: 0 12px;
   border-radius: var(--radius-md);
@@ -889,8 +1009,7 @@ onUnmounted(() => {
   color: var(--text-primary);
   font-size: 14px;
 }
-.m-field input:focus,
-.m-field select:focus {
+.m-field input:focus {
   outline: none;
   border-color: var(--brand);
 }
