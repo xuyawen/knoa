@@ -1,3 +1,4 @@
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -58,10 +59,15 @@ app.add_middleware(
     expose_headers=["X-Access-Token"],
 )
 
-# 滑动过期中间件：每次携带有效令牌的认证请求，都重新签发一个
-# 全新 24h 有效期的令牌，并通过 X-Access-Token 响应头下发。
-# 效果：只要用户持续使用，令牌就不会过期；闲置超过 24h 才失效。
+# 滑动过期中间件：携带有效令牌的认证请求，在剩余有效期低于总寿命
+# 的 30% 时，才重新签发一个全新 24h 有效期的令牌，并通过
+# X-Access-Token 响应头下发。
+# 效果：活跃使用期间令牌保持稳定（不每次都换），只有快过期时
+# （如第 23 小时那次请求，剩 ~4% < 30%）才重置回完整 24h；
+# 闲置超过 24h 仍会失效。兼顾滑动效果与减少 token churn。
 SLIDING_TOKEN_HEADER = "X-Access-Token"
+# 剩余有效期低于总寿命的比例阈值时才重签（0.30 = 30%）
+SLIDING_REFRESH_RATIO = 0.30
 
 
 @app.middleware("http")
@@ -72,9 +78,14 @@ async def sliding_session(request: Request, call_next):
         raw = auth[len("Bearer "):].strip()
         try:
             payload = decode_access_token(raw)
-            new_token = create_access_token(
-                payload["sub"], payload["username"], payload["role"]
-            )
+            total = settings.JWT_EXPIRE_MINUTES * 60
+            remaining = payload["exp"] - int(time.time())
+            # 仅当剩余有效期不足总寿命的 30% 时才重签，
+            # 避免每次请求都换新 token（token churn + 多标签页竞态）。
+            if remaining < total * SLIDING_REFRESH_RATIO:
+                new_token = create_access_token(
+                    payload["sub"], payload["username"], payload["role"]
+                )
         except Exception:
             # 令牌无效/已过期：不重新签发，交由路由自身按原逻辑 401。
             new_token = None
