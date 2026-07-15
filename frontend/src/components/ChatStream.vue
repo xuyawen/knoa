@@ -1,15 +1,22 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useChatStore } from '@/stores/chat'
+import { useKnowledgeStore } from '@/stores/knowledge'
 import MessageBubble from './MessageBubble.vue'
 import Icon from './Icon.vue'
 
 const chat = useChatStore()
+const knowledge = useKnowledgeStore()
 
 const emit = defineEmits<{ (e: 'cite', id: number): void }>()
 
-const filters = ['全部', '合规库', '广告投放', '物流仓储']
-const activeFilter = ref('全部')
+// 知识域药丸：点击切换 knowledge.activeBase，与左侧边栏选库同源，
+// 真正影响 /api/ask 的检索范围（之前只是本地变量 activeFilter，不生效）
+const filters: { label: string; key: string | null }[] = [
+  { label: '全部', key: null },
+  { label: '合规库', key: 'compliance' },
+  { label: '广告投放', key: 'ads' },
+  { label: '物流仓储', key: 'logistics' },
+]
 </script>
 
 <template>
@@ -18,12 +25,12 @@ const activeFilter = ref('全部')
     <div class="filter-bar">
       <button
         v-for="f in filters"
-        :key="f"
+        :key="f.label"
         class="pill"
-        :class="{ active: f === activeFilter }"
-        @click="activeFilter = f"
+        :class="{ active: f.key === knowledge.activeBase }"
+        @click="knowledge.selectBase(f.key)"
       >
-        {{ f }}
+        {{ f.label }}
       </button>
     </div>
 
