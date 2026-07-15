@@ -356,18 +356,24 @@ function goDetail(id: string) {
 .btn-primary {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   padding: var(--btn-padding-md);
+  height: var(--btn-height);
   background: var(--brand);
   color: #fff;
   border-radius: var(--radius-md);
   font-size: var(--btn-font-size);
   font-weight: var(--btn-font-weight);
+  border: none;
+  cursor: pointer;
   transition: background 0.15s ease, transform 0.15s ease;
 }
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background: var(--brand-hover);
-  transform: translateY(-1px);
+}
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .btn-primary:disabled {
   opacity: 0.7;
