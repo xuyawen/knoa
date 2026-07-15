@@ -178,6 +178,20 @@ function statusClass(s: string): string {
   return 'rejected'
 }
 
+function formatDocTime(iso: string): string {
+  try {
+    const d = new Date(iso)
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const h = String(d.getHours()).padStart(2, '0')
+    const min = String(d.getMinutes()).padStart(2, '0')
+    return `${y}-${m}-${day} ${h}:${min}`
+  } catch {
+    return iso
+  }
+}
+
 async function openDetail(doc: DocumentItem) {
   detailOpen.value = true
   currentDoc.value = doc
@@ -305,7 +319,7 @@ watch(() => route.params.id, () => {
             </div>
             <div class="doc-info">
               <span class="doc-title">{{ doc.title }}</span>
-              <span class="doc-meta">{{ doc.type }} · {{ doc.sizeKb }} KB</span>
+              <span class="doc-meta">{{ doc.type }} · {{ doc.sizeKb }} KB · {{ formatDocTime(doc.updatedAt) }}</span>
             </div>
             <span class="doc-status" :class="statusClass(doc.status)">
               {{ doc.status }}
