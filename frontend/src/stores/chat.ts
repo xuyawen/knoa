@@ -22,6 +22,8 @@ export const useChatStore = defineStore('chat', () => {
   const sessions = ref<ChatSession[]>([])
   const historyOpen = ref(false)
   const loadingHistory = ref(false)
+  // ⌘K / 点击搜索按钮时让 Composer 聚焦的信号（全局可用）
+  const focusTick = ref(0)
 
   async function ask(question: string, knowledgeBase?: string | null) {
     if (streaming.value || !question.trim()) return
@@ -119,6 +121,11 @@ export const useChatStore = defineStore('chat', () => {
     historyOpen.value = false
   }
 
+  // 触发 Composer 聚焦（值变化即触发，无需关心当前路由/页面）
+  function focusComposer() {
+    focusTick.value++
+  }
+
   async function startNewChat() {
     try {
       const s = await createSession()
@@ -177,10 +184,10 @@ export const useChatStore = defineStore('chat', () => {
 
   return { messages, sources, streaming, sessionId, activeSourceId,
     activeSourceDetail, loadingSource,
-    sessions, historyOpen, loadingHistory,
+    sessions, historyOpen, loadingHistory, focusTick,
     ask, locateSource, clearActiveSource, openSource, closeSourceDetail,
     loadSessions, toggleHistory, closeHistory, startNewChat, switchSession,
-    rateMessage }
+    rateMessage, focusComposer }
 })
 
 // 支持 Pinia store 热更新（否则改 store 文件后 live 实例不会刷新，导致方法缺失）

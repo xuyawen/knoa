@@ -29,7 +29,8 @@ function syncMobile() {
 }
 
 function onAsk(q: string) {
-  chat.ask(q, knowledge.activeBase)
+  if (q.trim()) chat.ask(q, knowledge.activeBase)
+  else chat.focusComposer()
 }
 
 function onSend(q: string) {
