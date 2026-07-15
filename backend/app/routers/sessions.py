@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import ChatMessage, ChatSession
@@ -101,3 +101,38 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
             for m in msgs
         ],
     )
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
+    """删除单个会话（级联删除其消息）。"""
+    session = await db.scalar(
+        select(ChatSession).where(ChatSession.id == session_id)
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    # 先删消息，再删会话
+    await db.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
+    await db.execute(delete(ChatSession).where(ChatSession.id == session_id))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/sessions/batch-delete")
+async def batch_delete_sessions(
+    payload: dict[str, list[str]],  # {"ids": [...]}
+    db: AsyncSession = Depends(get_db),
+):
+    """批量删除会话。"""
+    ids = payload.get("ids", [])
+    if not ids:
+        return {"ok": True, "deleted": 0}
+    # 级联删除消息
+    await db.execute(
+        delete(ChatMessage).where(ChatMessage.session_id.in_(ids))
+    )
+    result = await db.execute(
+        delete(ChatSession).where(ChatSession.id.in_(ids))
+    )
+    await db.commit()
+    return {"ok": True, "deleted": result.rowcount}

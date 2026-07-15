@@ -143,6 +143,10 @@ defineProps<{ name: string; size?: number }>()
     <template v-else-if="name === 'trash'">
       <path d="M4 7h16M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2M6 7v12a2 2 0 002 2h8a2 2 0 002-2V7M10 11v6M14 11v6" />
     </template>
+    <template v-else-if="name === 'check-square'">
+      <rect x="3" y="3" width="18" height="18" rx="3" ry="3" stroke-width="2" fill="none" />
+      <path d="M8 12l3 3 6-6" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    </template>
     <template v-else>
       <circle cx="12" cy="12" r="3" />
     </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
@@ -15,6 +15,67 @@ const { collapsed } = useSidebarCollapsed()
 const isMobile = ref(false)
 const drawer = ref(false)
 let mq: MediaQueryList | undefined
+
+// ── 选择 / 删除模式 ──
+const selecting = ref(false)
+const selectedIds = ref<Set<string>>(new Set())
+const hoverId = ref<string | null>(null)
+
+const allSelected = computed(() => {
+  return chat.sessions.length > 0 && selectedIds.value.size === chat.sessions.length
+})
+
+function toggleSelect(id: string) {
+  const s = new Set(selectedIds.value)
+  if (s.has(id)) {
+    s.delete(id)
+  } else {
+    s.add(id)
+  }
+  selectedIds.value = s
+}
+
+function toggleSelectAll() {
+  if (allSelected.value) {
+    selectedIds.value = new Set()
+  } else {
+    selectedIds.value = new Set(chat.sessions.map((s) => s.id))
+  }
+}
+
+function startSelection() {
+  selecting.value = true
+  selectedIds.value = new Set()
+}
+
+function cancelSelection() {
+  selecting.value = false
+  selectedIds.value = new Set()
+}
+
+async function handleDeleteOne(id: string) {
+  if (!confirm('确定删除此会话？消息将一并清除。')) return
+  try {
+    await chat.removeSession(id)
+    if (selecting.value) {
+      selectedIds.value = new Set(selectedIds.value)
+      selectedIds.value.delete(id)
+    }
+  } catch {
+    alert('删除失败')
+  }
+}
+
+async function handleBatchDelete() {
+  const n = selectedIds.value.size
+  if (!confirm(`确定删除选中的 ${n} 个会话？消息将一并清除。`)) return
+  try {
+    await chat.removeSessions(Array.from(selectedIds.value))
+    cancelSelection()
+  } catch {
+    alert('批量删除失败')
+  }
+}
 
 function syncMobile() {
   isMobile.value = window.matchMedia('(max-width: 900px)').matches
@@ -39,6 +100,11 @@ function fmtTime(iso: string): string {
 }
 
 async function onPick(id: string) {
+  // 选择模式下点击不跳转，只切换选中状态
+  if (selecting.value) {
+    toggleSelect(id)
+    return
+  }
   await chat.switchSession(id)
   if (isMobile.value) {
     router.push('/')
@@ -77,37 +143,77 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
       </button>
       <span class="m-title">问答记录</span>
       <div class="m-top-right">
-        <button class="m-new-btn" @click="onNew" title="新建对话">
+        <button v-if="!selecting" class="m-new-btn" @click="onNew" title="新建对话">
           <Icon name="plus" :size="16" />
         </button>
-        <button class="m-back" @click="router.push('/')">返回</button>
+        <button v-else class="m-act-btn" @click="handleBatchDelete" :disabled="selectedIds.size === 0" title="删除选中">
+          <Icon name="trash" :size="16" />
+        </button>
+        <button v-if="!selecting" class="m-back" @click="router.push('/')">返回</button>
+        <button v-else class="m-cancel" @click="cancelSelection">取消</button>
       </div>
     </header>
 
     <div class="main">
-      <TopBar v-if="!isMobile" title="问答记录">
-        <button class="new-btn" @click="onNew">
-          <Icon name="plus" :size="15" /> 新建对话
-        </button>
-      </TopBar>
+      <!-- 桌面端顶栏 -->
+      <div v-if="!isMobile" class="toolbar-row">
+        <TopBar title="问答记录">
+          <template v-if="!selecting" #actions-extra>
+            <button class="new-btn" @click="onNew">
+              <Icon name="plus" :size="15" /> 新建对话
+            </button>
+            <button class="sel-btn" @click="startSelection" title="管理/批量操作">
+              <Icon name="check-square" :size="15" /> 管理
+            </button>
+          </template>
+          <template v-else #actions-extra>
+            <button class="sel-toggle" @click="toggleSelectAll">
+              {{ allSelected ? '取消全选' : '全选' }}
+            </button>
+            <button class="del-btn" @click="handleBatchDelete" :disabled="selectedIds.size === 0">
+              <Icon name="trash" :size="14" /> 删除选中（{{ selectedIds.size }}）
+            </button>
+            <button class="cancel-btn" @click="cancelSelection">取消</button>
+          </template>
+        </TopBar>
+      </div>
+
       <div class="body">
         <div v-if="chat.loadingHistory" class="empty">加载中…</div>
         <div v-else-if="chat.sessions.length === 0" class="empty">还没有对话记录</div>
         <div v-else class="session-list">
-          <button
+          <div
             v-for="s in chat.sessions"
             :key="s.id"
             class="session-item"
-            :class="{ active: s.id === chat.sessionId }"
-            @click="onPick(s.id)"
+            :class="{ active: s.id === chat.sessionId, sel: selecting, checked: selectedIds.has(s.id) }"
           >
-            <div class="session-title">{{ s.title }}</div>
-            <div v-if="s.summary" class="session-summary">{{ s.summary }}</div>
-            <div class="session-meta">
-              <span>{{ s.msgCount }} 条消息</span>
-              <span>{{ fmtTime(s.updatedAt) }}</span>
-            </div>
-          </button>
+            <!-- 选择模式下：左侧复选框 -->
+            <label v-if="selecting" class="check-wrap" @click.stop>
+              <input type="checkbox" :checked="selectedIds.has(s.id)" @change="toggleSelect(s.id)" />
+            </label>
+
+            <button class="session-body" @click="onPick(s.id)">
+              <div class="session-title">{{ s.title }}</div>
+              <div v-if="s.summary" class="session-summary">{{ s.summary }}</div>
+              <div class="session-meta">
+                <span>{{ s.msgCount }} 条消息</span>
+                <span>{{ fmtTime(s.updatedAt) }}</span>
+              </div>
+            </button>
+
+            <!-- 单个删除按钮（hover 显示；选择模式始终显示） -->
+            <button
+              class="item-del"
+              :class="{ show: selecting || s.id === hoverId }"
+              @click.stop="handleDeleteOne(s.id)"
+              @mouseenter="hoverId = s.id"
+              @mouseleave="hoverId = null"
+              title="删除此会话"
+            >
+              <Icon name="trash" :size="13" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -132,6 +238,10 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   overflow-y: auto;
 }
 
+.toolbar-row {
+  flex-shrink: 0;
+}
+
 .new-btn {
   display: inline-flex;
   align-items: center;
@@ -148,6 +258,77 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   background: var(--brand-hover);
 }
 
+.sel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.sel-btn:hover {
+  color: var(--brand);
+  border-color: var(--brand);
+}
+
+.sel-toggle {
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.sel-toggle:hover {
+  color: var(--brand);
+  border-color: var(--brand);
+}
+
+.del-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 14px;
+  background: #dc2626;
+  color: #fff;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.del-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+.del-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.cancel-btn {
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.cancel-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-placeholder);
+}
+
+/* ── 会话列表项 ── */
 .session-list {
   display: flex;
   flex-direction: column;
@@ -156,6 +337,9 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 }
 
 .session-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   text-align: left;
   padding: 11px 14px;
   background: var(--bg-surface);
@@ -172,6 +356,41 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 .session-item.active {
   border-color: var(--brand);
   background: var(--brand-soft);
+}
+.session-item.sel {
+  padding-left: 8px;
+}
+.session-item.checked {
+  border-color: var(--brand);
+  background: rgba(99, 102, 241, 0.06);
+}
+
+/* 复选框 */
+.check-wrap {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.check-wrap input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+/* 主体区域 */
+.session-body {
+  flex: 1;
+  display: block;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  min-width: 0;
+  cursor: pointer;
+  color: inherit;
 }
 
 .session-title {
@@ -200,6 +419,30 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   color: var(--text-placeholder);
 }
 
+/* 单条删除按钮 */
+.item-del {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-placeholder);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.item-del.show {
+  opacity: 1;
+}
+.item-del:hover {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.08);
+}
+
 .empty {
   padding: 60px 16px;
   text-align: center;
@@ -218,8 +461,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 
 /* 移动端顶栏 */
 .m-top {
-  position: fixed;
-  top: 0; left: 0; right: 0;
+  position: fixed; top: 0; left: 0; right: 0;
   height: var(--mobile-topbar-h);
   display: flex;
   align-items: center;
@@ -257,12 +499,22 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   background: none; border: none;
   cursor: pointer;
 }
+.m-act-btn {
+  width: 32px; height: 32px;
+  border-radius: var(--radius-pill);
+  display: flex; align-items: center; justify-content: center;
+  color: #dc2626;
+  background: none; border: none;
+  cursor: pointer;
+}
+.m-cancel {
+  font-size: 13px; color: var(--text-secondary);
+  background: none; border: none;
+  cursor: pointer;
+}
 .overlay {
   position: fixed; inset: 0;
   background: rgba(0, 0, 0, 0.4);
   z-index: 35;
-}
-.m-action {
-  padding: calc(var(--mobile-topbar-h) + 8px) 16px 8px;
 }
 </style>

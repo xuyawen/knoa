@@ -8,6 +8,8 @@ import {
   getSessions,
   getSession,
   createSession,
+  deleteSession,
+  batchDeleteSessions,
 } from '@/api'
 import type { ChatMessage, ChatAttachment, SourceItem, SourceDetail, ChatSession } from '@/types/api'
 
@@ -165,6 +167,35 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /** 删除单个会话（本地移除 + 远端删除）。 */
+  async function removeSession(id: string) {
+    try {
+      await deleteSession(id)
+      sessions.value = sessions.value.filter((s) => s.id !== id)
+      // 若删的是当前活跃会话，重置到空白
+      if (sessionId.value === id) {
+        startNewChat()
+      }
+    } catch (e) {
+      console.error('删除会话失败', e)
+      throw e
+    }
+  }
+
+  /** 批量删除会话。 */
+  async function removeSessions(ids: string[]) {
+    try {
+      await batchDeleteSessions(ids)
+      sessions.value = sessions.value.filter((s) => !ids.includes(s.id))
+      if (ids.includes(sessionId.value!)) {
+        startNewChat()
+      }
+    } catch (e) {
+      console.error('批量删除会话失败', e)
+      throw e
+    }
+  }
+
   // 反馈闭环：乐观更新本地状态 + 调接口（upsert / 取消）
   async function rateMessage(messageId: string | undefined, rating: 'up' | 'down') {
     if (!messageId) return
@@ -187,6 +218,7 @@ export const useChatStore = defineStore('chat', () => {
     filterKb,
     ask, locateSource, clearActiveSource, openSource, closeSourceDetail,
     loadSessions, toggleHistory, closeHistory, startNewChat, switchSession,
+    removeSession, removeSessions,
     rateMessage }
 })
 

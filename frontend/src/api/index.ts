@@ -165,6 +165,31 @@ export async function getSession(id: string): Promise<SessionDetail> {
   return resp.json()
 }
 
+/** 删除单个会话（级联删除消息）。 */
+export async function deleteSession(id: string): Promise<void> {
+  const resp = await fetch(`/api/sessions/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+}
+
+/** 批量删除会话。 */
+export async function batchDeleteSessions(ids: string[]): Promise<void> {
+  const resp = await fetch('/api/sessions/batch-delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ ids }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+}
+
 /** 提交/更新对某条回答的反馈（👍/👎）。 */
 export async function submitFeedback(messageId: string, rating: 'up' | 'down') {
   const resp = await fetch('/api/feedback', {
