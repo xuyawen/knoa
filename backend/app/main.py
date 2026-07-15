@@ -1,11 +1,12 @@
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.config import settings
+from app.core.security import create_access_token, decode_access_token
 from app.database import AsyncSessionLocal
 from app.db import User
 from app.routers import (
@@ -54,7 +55,35 @@ app.add_middleware(
     allow_origins=settings.CORS_ORIGINS.split(","),
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Access-Token"],
 )
+
+# 滑动过期中间件：每次携带有效令牌的认证请求，都重新签发一个
+# 全新 24h 有效期的令牌，并通过 X-Access-Token 响应头下发。
+# 效果：只要用户持续使用，令牌就不会过期；闲置超过 24h 才失效。
+SLIDING_TOKEN_HEADER = "X-Access-Token"
+
+
+@app.middleware("http")
+async def sliding_session(request: Request, call_next):
+    auth = request.headers.get("Authorization", "")
+    new_token: str | None = None
+    if auth.startswith("Bearer "):
+        raw = auth[len("Bearer "):].strip()
+        try:
+            payload = decode_access_token(raw)
+            new_token = create_access_token(
+                payload["sub"], payload["username"], payload["role"]
+            )
+        except Exception:
+            # 令牌无效/已过期：不重新签发，交由路由自身按原逻辑 401。
+            new_token = None
+    response = await call_next(request)
+    if new_token:
+        response.headers[SLIDING_TOKEN_HEADER] = new_token
+    return response
+
+
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
