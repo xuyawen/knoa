@@ -78,7 +78,7 @@ defineProps<{ name: string; size?: number }>()
       <path d="M21 11l-9 9a4 4 0 01-6-6l9-9a3 3 0 014.2 0l-9 9a1.5 1.5 0 01-2.2 0 1.5 1.5 0 010-2.2l9-9" />
     </template>
     <template v-else-if="name === 'sparkle'">
-      <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z" />
+      <path d="M12 5l1.8 5.2L19 12l-5.2 1.8L12 19l-1.8-5.2L5 12l5.2-1.8L12 5z" />
     </template>
     <template v-else-if="name === 'copy'">
       <rect x="9" y="9" width="11" height="11" rx="2" />
