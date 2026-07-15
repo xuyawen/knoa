@@ -158,27 +158,31 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
       <!-- 桌面端顶栏 -->
       <div v-if="!isMobile" class="toolbar-row">
         <TopBar title="问答记录">
-          <template v-if="!selecting" #actions-extra>
-            <button class="new-btn" @click="onNew">
+          <template #actions-extra>
+            <button class="new-btn" @click="onNew" v-if="!selecting">
               <Icon name="plus" :size="15" /> 新建对话
             </button>
-            <button class="sel-btn" @click="startSelection" title="管理/批量操作">
+            <button class="sel-btn" @click="startSelection" v-if="!selecting" title="管理/批量操作">
               <Icon name="check-square" :size="15" /> 管理
             </button>
-          </template>
-          <template v-else #actions-extra>
-            <button class="sel-toggle" @click="toggleSelectAll">
-              {{ allSelected ? '取消全选' : '全选' }}
-            </button>
-            <button class="del-btn" @click="handleBatchDelete" :disabled="selectedIds.size === 0">
-              <Icon name="trash" :size="14" /> 删除选中（{{ selectedIds.size }}）
-            </button>
-            <button class="cancel-btn" @click="cancelSelection">取消</button>
           </template>
         </TopBar>
       </div>
 
       <div class="body">
+        <!-- 选择模式工具栏（列表内，紧贴列表上方） -->
+        <div v-if="selecting && !isMobile" class="sel-toolbar">
+          <button class="sel-toggle" @click="toggleSelectAll">
+            {{ allSelected ? '取消全选' : '全选' }}
+          </button>
+          <div class="sel-toolbar-right">
+            <button class="del-btn" @click="handleBatchDelete" :disabled="selectedIds.size === 0">
+              <Icon name="trash" :size="14" /> 删除选中（{{ selectedIds.size }}）
+            </button>
+            <button class="cancel-btn" @click="cancelSelection">取消</button>
+          </div>
+        </div>
+
         <div v-if="chat.loadingHistory" class="empty">加载中…</div>
         <div v-else-if="chat.sessions.length === 0" class="empty">还没有对话记录</div>
         <div v-else class="session-list">
@@ -326,6 +330,20 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 .cancel-btn:hover {
   color: var(--text-primary);
   border-color: var(--text-placeholder);
+}
+
+/* ── 选择模式工具栏（列表内） ── */
+.sel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px;
+  margin-bottom: 4px;
+}
+.sel-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* ── 会话列表项 ── */
