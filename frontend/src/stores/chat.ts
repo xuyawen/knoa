@@ -23,6 +23,11 @@ export const useChatStore = defineStore('chat', () => {
   const historyOpen = ref(false)
   const loadingHistory = ref(false)
 
+  // 独立的知识域筛选（聊天头部下拉选择器控制）。
+  // 与 knowledge.activeBase（侧边栏选中/页面上下文库）解耦，
+  // 这样切筛选不会改变 TopBar 标题。
+  const filterKb = ref<string | null>(null)
+
   async function ask(question: string, knowledgeBase?: string | null) {
     if (streaming.value || !question.trim()) return
 
@@ -178,6 +183,7 @@ export const useChatStore = defineStore('chat', () => {
   return { messages, sources, streaming, sessionId, activeSourceId,
     activeSourceDetail, loadingSource,
     sessions, historyOpen, loadingHistory,
+    filterKb,
     ask, locateSource, clearActiveSource, openSource, closeSourceDetail,
     loadSessions, toggleHistory, closeHistory, startNewChat, switchSession,
     rateMessage }

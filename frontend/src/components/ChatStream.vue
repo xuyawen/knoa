@@ -20,7 +20,7 @@ const options = computed(() => [
 ])
 
 const currentLabel = computed(() => {
-  const found = options.value.find((o) => o.key === knowledge.activeBase)
+  const found = options.value.find((o) => o.key === chat.filterKb)
   return found?.label || '全部知识库'
 })
 
@@ -29,7 +29,7 @@ function toggleDropdown() {
 }
 
 function selectOption(key: string | null) {
-  knowledge.selectBase(key)
+  chat.filterKb = key
   dropdownOpen.value = false
 }
 
@@ -58,7 +58,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
             v-for="o in options"
             :key="o.key ?? '__all__'"
             class="dropdown-item"
-            :class="{ active: o.key === knowledge.activeBase }"
+            :class="{ active: o.key === chat.filterKb }"
             @click="selectOption(o.key)"
           >
             {{ o.label }}

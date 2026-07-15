@@ -29,11 +29,11 @@ function syncMobile() {
 }
 
 function onAsk(q: string) {
-  if (q.trim()) chat.ask(q, knowledge.activeBase)
+  if (q.trim()) chat.ask(q, chat.filterKb ?? knowledge.activeBase)
 }
 
 function onSend(q: string) {
-  chat.ask(q, knowledge.activeBase)
+  chat.ask(q, chat.filterKb ?? knowledge.activeBase)
 }
 
 function onCite(id: number) {
