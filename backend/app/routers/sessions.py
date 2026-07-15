@@ -24,18 +24,19 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
 
     out = []
     for s in sessions:
-        msg_count = await db.scalar(
-            select(func.count(ChatMessage.id)).where(ChatMessage.session_id == s.id)
-        )
-        title = s.title
-        if not title:
-            first_user = await db.scalar(
-                select(ChatMessage.content)
-                .where(ChatMessage.session_id == s.id, ChatMessage.role == "user")
-                .order_by(ChatMessage.created_at)
-                .limit(1)
+        try:
+            msg_count = await db.scalar(
+                select(func.count(ChatMessage.id)).where(ChatMessage.session_id == s.id)
             )
-            title = (first_user[:24] + "…") if first_user else "新对话"
+            title = s.title
+            if not title:
+                first_user = await db.scalar(
+                    select(ChatMessage.content)
+                    .where(ChatMessage.session_id == s.id, ChatMessage.role == "user")
+                    .order_by(ChatMessage.created_at)
+                    .limit(1)
+                )
+                title = (first_user[:24] + "…") if first_user else "新对话"
             out.append(
                 SessionOut(
                     id=str(s.id),
@@ -45,6 +46,8 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
                     summary=s.summary,
                 )
             )
+        except Exception:
+            pass  # 单个会话构建失败不阻塞整体列表
     return out
 
 
