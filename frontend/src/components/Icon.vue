@@ -68,6 +68,9 @@ defineProps<{ name: string; size?: number }>()
       <circle cx="12" cy="8" r="3.5" />
       <path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6" />
     </template>
+    <template v-else-if="name === 'chat'">
+      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2v10z" />
+    </template>
     <template v-else-if="name === 'send'">
       <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
     </template>
