@@ -1,6 +1,6 @@
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -29,6 +29,15 @@ async def ask(
     redis: RedisStore = Depends(get_redis),
     user: User = Depends(get_current_user),
 ):
+    # 多模态能力校验：当前模型不支持的模态（audio/video）直接 400 中文报错
+    for f in req.files:
+        if not settings.MODEL_CAPABILITIES.get(f.kind, False):
+            kind_cn = {"audio": "音频", "video": "视频", "image": "图片"}.get(f.kind, f.kind)
+            raise HTTPException(
+                status_code=400,
+                detail=f"当前模型暂不支持{kind_cn}输入，请移除后重试（仅支持图片）",
+            )
+
     # 库级权限：问答目标 KB 必须对该用户可见
     if req.knowledge_base:
         level = await get_kb_permission_level(db, req.knowledge_base, user)
@@ -53,6 +62,7 @@ async def ask(
             question=req.question,
             kb_id=req.knowledge_base,
             session_id=req.session_id,
+            files=[f.model_dump(by_alias=False) for f in req.files] or None,
         ):
             yield {
                 "event": event["event"],

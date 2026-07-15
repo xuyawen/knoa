@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "deepseek-chat"
     LLM_TEMPERATURE: float = 0.3
     LLM_MAX_TOKENS: int = 2000
+    # 模型多模态能力开关（一期只开 image；audio/video 预留，
+    # 切换不支持的模型时在 ask 路由层给清晰中文报错）。
+    # Agnes agnes-2.0-flash 当前仅支持图片输入（image_url + base64 data URI）。
+    MODEL_CAPABILITIES: dict = {"image": True, "audio": False, "video": False}
     # 联网搜索（web_search 工具）：优先 BoCha（中文检索更准），其次 Tavily，
     # 二者均留空则走无 key 的 DuckDuckGo HTML 兜底
     BOCHA_API_KEY: str = ""

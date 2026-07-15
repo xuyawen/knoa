@@ -9,6 +9,7 @@ import MobileWorkbench from '@/views/MobileWorkbench.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useChatStore } from '@/stores/chat'
 import { useSidebarCollapsed } from '@/composables/useSidebarCollapsed'
+import type { ChatAttachment } from '@/types/api'
 
 const knowledge = useKnowledgeStore()
 const chat = useChatStore()
@@ -32,8 +33,8 @@ function onAsk(q: string) {
   if (q.trim()) chat.ask(q, chat.filterKb ?? knowledge.activeBase)
 }
 
-function onSend(q: string) {
-  chat.ask(q, chat.filterKb ?? knowledge.activeBase)
+function onSend(payload: { text: string; files: ChatAttachment[] }) {
+  chat.ask(payload.text, chat.filterKb ?? knowledge.activeBase, payload.files)
 }
 
 function onCite(id: number) {

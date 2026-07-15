@@ -60,6 +60,7 @@ class RAGPipeline:
         question: str,
         kb_id: str | None = None,
         session_id: str | None = None,
+        files: "list[dict] | None" = None,
     ) -> AsyncIterator[dict]:
         """流式回答 — 事件格式与前端 SSE 消费端兼容。
 
@@ -70,5 +71,5 @@ class RAGPipeline:
           done       — 完成（含 messageId / citations / sessionId）
           error      — 错误信息
         """
-        async for event in self._agent.stream_answer(question, kb_id, session_id):
+        async for event in self._agent.stream_answer(question, kb_id, session_id, files=files):
             yield event

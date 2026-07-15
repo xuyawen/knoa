@@ -117,6 +117,7 @@ export interface SessionMessage {
   content: string
   citations?: number[] | null
   sources?: SourceItem[] | null
+  attachments?: ChatAttachment[] | null
 }
 
 export interface SessionDetail {
@@ -133,12 +134,20 @@ export interface ThinkingStep {
   rawReasoning?: string // LLM 原始推理文字（截断）
 }
 
+export interface ChatAttachment {
+  kind: 'image' | 'audio' | 'video'
+  mimeType: string
+  dataB64?: string              // 纯 base64（无 `data:` 前缀）；发送与历史回显都用它
+  name?: string | null
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
   citations?: number[]
   sources?: SourceItem[]
+  attachments?: ChatAttachment[] | null  // 用户提问附带的图片等多模态
   thinkingSteps?: ThinkingStep[]  // Agentic RAG 决策链（仅 assistant）
   messageId?: string            // 服务端真实消息 id（来自 done 事件）
   feedback?: 'up' | 'down' | null  // 本地/服务端反馈状态

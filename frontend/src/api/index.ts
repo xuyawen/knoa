@@ -10,6 +10,7 @@ import type {
   KBUpdate,
   KnowledgeBase,
   AIReview,
+  ChatAttachment,
 } from '@/types/api'
 import { authHeaders } from './http'
 
@@ -245,6 +246,7 @@ export async function* streamAsk(
   question: string,
   knowledgeBase?: string | null,
   sessionId?: string | null,
+  files?: ChatAttachment[],
   opts?: { timeoutMs?: number },
 ): AsyncGenerator<SSEEvent> {
   // 客户端超时保护：Agentic RAG 多步决策链可能需要多次 LLM 调用（每轮 15~40s），
@@ -257,7 +259,7 @@ export async function* streamAsk(
     const resp = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ question, knowledgeBase, sessionId }),
+      body: JSON.stringify({ question, knowledgeBase, sessionId, files: files ?? [] }),
       signal: controller.signal,
     })
 

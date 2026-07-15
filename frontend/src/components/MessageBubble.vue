@@ -99,7 +99,18 @@ async function onCopy() {
 <template>
   <!-- 用户提问：右对齐蓝色气泡 -->
   <div v-if="message.role === 'user'" class="msg user">
-    <div class="bubble user-bubble">{{ message.content }}</div>
+    <div class="bubble user-bubble">
+      <template v-if="message.content">{{ message.content }}</template>
+      <div v-if="message.attachments?.length" class="att-previews">
+        <img
+          v-for="(a, i) in message.attachments"
+          :key="i"
+          :src="`data:${a.mimeType};base64,${a.dataB64}`"
+          class="att-preview"
+          alt=""
+        />
+      </div>
+    </div>
   </div>
 
   <!-- AI 回答：白色卡片 + 头像 + 引用 + 反馈 -->
@@ -186,6 +197,19 @@ async function onCopy() {
   white-space: pre-wrap;
   word-break: break-word;
   box-shadow: var(--shadow-card);
+}
+.att-previews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.att-preview {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
 }
 
 /* 渐变描边 + 微弱悬浮 + 阴影，拉开与背景的层次 */

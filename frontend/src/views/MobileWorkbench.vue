@@ -12,6 +12,7 @@ import MobileNav from '@/components/MobileNav.vue'
 import ChatStream from '@/components/ChatStream.vue'
 import Composer from '@/components/Composer.vue'
 import SourcePanel from '@/components/SourcePanel.vue'
+import type { ChatAttachment } from '@/types/api'
 
 const knowledge = useKnowledgeStore()
 const chat = useChatStore()
@@ -58,7 +59,7 @@ async function submit() {
   if (!q) return
   question.value = ''
   await knowledge.load()
-  send(q)
+  send({ text: q, files: [] })
 }
 
 function onLogout() {
@@ -76,10 +77,15 @@ function onCardSelect(id: string | null) {
   }
 }
 
-function send(q: string) {
-  chat.ask(q, knowledge.activeBase)
+function send(payload: { text: string; files: ChatAttachment[] }) {
+  chat.ask(payload.text, knowledge.activeBase, payload.files)
   tab.value = 'chat'
   showSources.value = false
+}
+
+// 溯源卡片「追问」：纯文本，无附件
+function onAsk(q: string) {
+  chat.ask(q, knowledge.activeBase)
 }
 
 function onCite(id: number) {
@@ -301,7 +307,7 @@ onMounted(() => {
           </button>
         </div>
         <div class="sheet-body">
-          <SourcePanel @locate="onCite" @ask="send" />
+          <SourcePanel @locate="onCite" @ask="onAsk" />
         </div>
       </div>
     </div>

@@ -266,12 +266,20 @@ class AgenticRAGAgent:
         question: str,
         kb_id: str | None = None,
         session_id: str | None = None,
+        files: "list[dict] | None" = None,
     ) -> AsyncIterator[dict]:
         """主入口：返回 SSE 兼容的事件流。"""
         try:
             # ---- 会话 & 持久化 ----
             session = await self._get_or_create_session(session_id, question)
-            self.db.add(ChatMessage(session_id=session.id, role="user", content=question))
+            self.db.add(
+                ChatMessage(
+                    session_id=session.id,
+                    role="user",
+                    content=question,
+                    attachments=files,  # 多模态:图片 base64 等存 JSONB,供历史回显
+                )
+            )
             await self.db.flush()
 
             # ponytail: 只统计真实业务提问，过滤打招呼/闲聊/天气等，避免污染"高频问题"
@@ -314,13 +322,19 @@ class AgenticRAGAgent:
                     logger.warning("graph retrieve failed (skip inject): %s", e)
 
             # ── 构造共享状态 + 选择入口节点（LangGraph 的 start 边）──
+            # 多模态:把文本 + 图片拼成 OpenAI 多模态 content blocks
+            # (纯文本 → str;带图 → list)。agent 决策(tool_call)也能看到图。
+            user_content = self._build_user_content(question, files)
             st = _AgentState(question, kb_id)
             st.all_sources = all_sources
             st.messages = [
                 {"role": "system", "content": AGENT_SYSTEM_PROMPT + self._memory_section()},
-                {"role": "user", "content": question},
+                {"role": "user", "content": user_content},
             ]
-            if _should_skip_retrieval(question):
+            if files:
+                # 带图必须让 LLM 亲眼看,不走问候/常识快路(即使问题像打招呼)
+                st.next = "_n_route"
+            elif _should_skip_retrieval(question):
                 st.next = "_n_start_skip"          # 问候/常识 → 直接友好回答
             elif _should_web_search(question):
                 st.web_loop = False
@@ -653,6 +667,27 @@ class AgenticRAGAgent:
                     await self.memory.save(self.user_id, memories, s)
         except Exception as e:
             logger.warning("memory save failed (skipped): %s", e)
+
+    @staticmethod
+    def _build_user_content(question: str, files: "list[dict] | None") -> "str | list[dict]":
+        """把文本 + 多模态文件拼成 OpenAI 多模态 content。
+
+        纯文本问题 → 返回 str;带图 → 返回 content blocks list
+        （text + image_url/data URI）。audio/video 由 ask 路由层在入口拦截，
+        这里只处理 image。
+        """
+        if not files:
+            return question
+        blocks: list[dict] = []
+        if question.strip():
+            blocks.append({"type": "text", "text": question})
+        for f in files:
+            if f.get("kind") == "image":
+                blocks.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{f['mime_type']};base64,{f['data_b64']}"},
+                })
+        return blocks if blocks else question
 
     async def _get_or_create_session(self, session_id: str | None, question: str) -> ChatSession:
         if session_id:

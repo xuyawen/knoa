@@ -9,7 +9,7 @@ import {
   getSession,
   createSession,
 } from '@/api'
-import type { ChatMessage, SourceItem, SourceDetail, ChatSession } from '@/types/api'
+import type { ChatMessage, ChatAttachment, SourceItem, SourceDetail, ChatSession } from '@/types/api'
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
@@ -28,11 +28,11 @@ export const useChatStore = defineStore('chat', () => {
   // 这样切筛选不会改变 TopBar 标题。
   const filterKb = ref<string | null>(null)
 
-  async function ask(question: string, knowledgeBase?: string | null) {
-    if (streaming.value || !question.trim()) return
+  async function ask(question: string, knowledgeBase?: string | null, files?: ChatAttachment[]) {
+    if (streaming.value || (!question.trim() && !files?.length)) return
 
-    // 立即显示用户消息
-    messages.value.push({ id: `u-${Date.now()}`, role: 'user', content: question })
+    // 立即显示用户消息（含多模态附件）
+    messages.value.push({ id: `u-${Date.now()}`, role: 'user', content: question, attachments: files ?? [] })
     streaming.value = true
     sources.value = []
 
@@ -50,7 +50,7 @@ export const useChatStore = defineStore('chat', () => {
     const lastMsg = () => messages.value[messages.value.length - 1]
 
     try {
-      for await (const event of streamAsk(question, knowledgeBase, sessionId.value)) {
+      for await (const event of streamAsk(question, knowledgeBase, sessionId.value, files)) {
         const m = lastMsg()
         if (event.event === 'thinking') {
           // Agent 决策步骤：追加到当前消息的思考链
@@ -147,6 +147,7 @@ export const useChatStore = defineStore('chat', () => {
         content: m.content,
         citations: m.citations ?? [],
         sources: m.sources ?? [],
+        attachments: (m.attachments ?? []) as ChatAttachment[],
         thinkingSteps: [],
         feedback: null,
       }))

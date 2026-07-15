@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from typing import Any
 
 from openai import AsyncOpenAI
 
@@ -29,7 +30,7 @@ class OpenAICompatProvider:
 
     @traceable(name="llm_stream", tags=["llm"])
     async def stream_chat(
-        self, messages: list[dict[str, str]], temperature: float | None = None
+        self, messages: list[dict[str, Any]], temperature: float | None = None
     ) -> AsyncIterator[str]:
         """兼容多提供商流式输出，安全地提取 content + reasoning_content"""
         try:
@@ -67,7 +68,7 @@ class OpenAICompatProvider:
                 yield content
 
     async def chat(
-        self, messages: list[dict[str, str]], temperature: float | None = None
+        self, messages: list[dict[str, Any]], temperature: float | None = None
     ) -> str:
         """非流式调用"""
         response = await self.client.chat.completions.create(

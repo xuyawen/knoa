@@ -90,6 +90,7 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
                 content=m.content,
                 citations=m.citations,
                 sources=m.sources,
+                attachments=m.attachments,
             )
             for m in msgs
         ],
