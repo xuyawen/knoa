@@ -419,7 +419,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   color: var(--text-placeholder);
 }
 
-/* 单条删除按钮 */
+/* 单条删除按钮 — 常驻可见（低调），hover 加深 */
 .item-del {
   flex-shrink: 0;
   width: 28px;
@@ -427,14 +427,15 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   border-radius: var(--radius-sm);
   border: none;
   background: transparent;
-  color: var(--text-placeholder);
+  color: var(--text-tertiary, var(--text-placeholder));
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  opacity: 0;
+  opacity: 0.4;
   transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
+.item-del:hover,
 .item-del.show {
   opacity: 1;
 }
