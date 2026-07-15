@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import MessageBubble from './MessageBubble.vue'
@@ -9,14 +10,13 @@ const knowledge = useKnowledgeStore()
 
 const emit = defineEmits<{ (e: 'cite', id: number): void }>()
 
-// 知识域药丸：点击切换 knowledge.activeBase，与左侧边栏选库同源，
-// 真正影响 /api/ask 的检索范围（之前只是本地变量 activeFilter，不生效）
-const filters: { label: string; key: string | null }[] = [
-  { label: '全部', key: null },
-  { label: '合规库', key: 'compliance' },
-  { label: '广告投放', key: 'ads' },
-  { label: '物流仓储', key: 'logistics' },
-]
+// 知识域药丸：从 knowledge.bases 动态生成（与左侧边栏同源），
+// 点击切换 knowledge.activeBase，真正影响 /api/ask 的检索范围。
+// 之前写死 3 个域名，导致其它库（选品/客服/自建库）在聊天头部筛不到。
+const filters = computed(() => [
+  { label: '全部', key: null as string | null },
+  ...knowledge.bases.map((b) => ({ label: b.name, key: b.id })),
+])
 </script>
 
 <template>
@@ -63,6 +63,7 @@ const filters: { label: string; key: string | null }[] = [
 .filter-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 16px 24px;
   flex-shrink: 0;
