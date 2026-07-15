@@ -324,7 +324,8 @@ onUnmounted(() => {
         <p v-if="error" class="err">{{ error }}</p>
         <p v-else-if="loading" class="muted">加载中…</p>
         <template v-else>
-          <table class="tbl">
+          <!-- 桌面端：表格 -->
+          <table v-if="!isMobile" class="tbl">
             <thead>
               <tr>
                 <th>用户名</th>
@@ -380,6 +381,39 @@ onUnmounted(() => {
               </tr>
             </tbody>
           </table>
+
+          <!-- 移动端：卡片列表 -->
+          <div v-else class="m-user-list">
+            <div
+              v-for="u in filtered"
+              :key="u.id"
+              class="m-user-card"
+              :class="{ busy: rowBusy === u.id }"
+            >
+              <div class="m-card-head">
+                <span class="m-card-name">{{ u.displayName || u.username }}</span>
+                <span class="status" :class="u.isActive ? 'on' : 'off'">
+                  {{ u.isActive ? '启用' : '停用' }}
+                </span>
+              </div>
+              <div class="m-card-sub">{{ u.username }} · {{ ROLE_LABEL[u.role] || u.role }}</div>
+              <div class="m-card-time muted">{{ u.createdAt ? new Date(u.createdAt).toLocaleString() : '—' }}</div>
+              <div class="m-card-actions">
+                <button class="link-btn" :disabled="rowBusy === u.id" @click="startPwd(u)">重置密码</button>
+                <button
+                  class="link-btn"
+                  :disabled="rowBusy === u.id || auth.user?.id === u.id"
+                  @click="toggleActive(u)"
+                >{{ u.isActive ? '停用' : '启用' }}</button>
+                <button
+                  class="link-btn danger"
+                  :disabled="rowBusy === u.id || auth.user?.id === u.id"
+                  @click="startDel(u)"
+                >删除</button>
+              </div>
+            </div>
+          </div>
+
           <p v-if="!filtered.length" class="empty">
             {{ users.length ? '没有匹配的用户' : '暂无用户' }}
           </p>
@@ -810,8 +844,47 @@ onUnmounted(() => {
     flex-wrap: wrap;
   }
   .sf-input { width: 100%; }
-  .tbl { font-size: 12px; }
-  .tbl th, .tbl td { padding: 7px 6px; }
+  .tbl { display: none; }
+}
+
+/* 移动端用户卡片 */
+.m-user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.m-user-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+.m-user-card.busy { opacity: 0.6; }
+.m-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.m-card-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.m-card-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+.m-card-time {
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.m-card-actions {
+  display: flex;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 /* 移动端顶栏 */
