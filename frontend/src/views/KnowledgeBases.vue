@@ -228,7 +228,7 @@ function goDetail(id: string) {
         </div>
 
         <label v-if="kbList.length" class="select-all">
-          <input type="checkbox" :checked="allSelected" @change="toggleAll" />
+          <input type="checkbox" class="app-checkbox" :checked="allSelected" @change="toggleAll" />
           全选
         </label>
 
@@ -246,7 +246,7 @@ function goDetail(id: string) {
             <span class="kb-drag" title="拖拽排序">⠿</span>
             <input
               type="checkbox"
-              class="kb-check"
+              class="app-checkbox"
               :checked="!!selected[kb.id]"
               @click.stop
               @change="onCheck(kb.id, $event)"
@@ -440,12 +440,6 @@ function goDetail(id: string) {
 }
 .kb-drag:active {
   cursor: grabbing;
-}
-.kb-check {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  cursor: pointer;
 }
 .kb-info {
   flex: 1;

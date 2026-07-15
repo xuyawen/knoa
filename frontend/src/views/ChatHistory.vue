@@ -38,6 +38,24 @@ function toggleSelect(id: string) {
   selectedIds.value = s
 }
 
+/** 勾选框点击：非选择模式先进入，再切换选中状态 */
+function onCheckItem(id: string, e: Event) {
+  const checked = (e.target as HTMLInputElement).checked
+  if (!selecting.value) {
+    startSelection()
+  }
+  // 延迟一 tick 确保 selecting 已更新、selectedIds 已初始化
+  requestAnimationFrame(() => {
+    if (checked) {
+      selectedIds.value = new Set([...selectedIds.value, id])
+    } else {
+      const next = new Set(selectedIds.value)
+      next.delete(id)
+      selectedIds.value = next
+    }
+  })
+}
+
 function toggleSelectAll() {
   if (allSelected.value) {
     selectedIds.value = new Set()
@@ -174,8 +192,8 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
             <button class="new-btn" @click="onNew">
               <Icon name="plus" :size="15" /> 新建对话
             </button>
-            <button class="sel-btn" @click="startSelection" title="管理/批量操作">
-              <Icon name="check-square" :size="15" /> 管理
+            <button class="sel-btn" @click="startSelection" title="批量删除">
+              <Icon name="check-square" :size="15" /> 批量删除
             </button>
           </div>
           <!-- 选择模式工具栏 -->
@@ -201,9 +219,14 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
             class="session-item"
             :class="{ active: s.id === chat.sessionId, sel: selecting, checked: selectedIds.has(s.id) }"
           >
-            <!-- 选择模式下：左侧复选框 -->
-            <label v-if="selecting" class="check-wrap" @click.stop>
-              <input type="checkbox" :checked="selectedIds.has(s.id)" @change="toggleSelect(s.id)" />
+            <!-- 勾选框始终显示；非选择模式下点击自动进入选择模式 -->
+            <label class="check-wrap" @click.stop>
+              <input
+                type="checkbox"
+                class="app-checkbox"
+                :checked="selecting ? selectedIds.has(s.id) : false"
+                @change="onCheckItem(s.id, $event)"
+              />
             </label>
 
             <button class="session-body" @click="onPick(s.id)">
@@ -406,12 +429,6 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   justify-content: center;
   cursor: pointer;
 }
-.check-wrap input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--brand);
-  cursor: pointer;
-}
 
 /* 主体区域 */
 .session-body {
@@ -452,7 +469,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   color: var(--text-placeholder);
 }
 
-/* 单条删除按钮 — 常驻可见（低调），hover 加深 */
+/* 单条删除按钮 — 默认红色，低调显示；hover 加深 */
 .item-del {
   flex-shrink: 0;
   width: 28px;
@@ -460,20 +477,19 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   border-radius: var(--radius-sm);
   border: none;
   background: transparent;
-  color: var(--text-tertiary, var(--text-placeholder));
+  color: #dc2626;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  opacity: 0.4;
-  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+  opacity: 0.45;
+  transition: opacity 0.15s ease, background 0.15s ease;
 }
 .item-del:hover,
 .item-del.show {
   opacity: 1;
 }
 .item-del:hover {
-  color: #dc2626;
   background: rgba(220, 38, 38, 0.08);
 }
 
