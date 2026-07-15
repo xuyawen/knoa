@@ -101,6 +101,8 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 .new-chat-btn {
   width: 36px;

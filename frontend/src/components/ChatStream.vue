@@ -95,7 +95,8 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
   display: flex;
   flex-direction: column;
   min-width: 0;
-  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg-page);
 }
 .filter-bar {
