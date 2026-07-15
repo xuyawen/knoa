@@ -260,13 +260,13 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 7px 14px;
+  padding: var(--btn-padding-md);
   background: var(--brand);
   color: #fff;
   border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
-  transition: background 0.15s ease;
+  font-size: var(--btn-font-size);
+  font-weight: var(--btn-font-weight);
+  transition: background 0.15s ease, transform 0.15s ease;
 }
 .new-btn:hover {
   background: var(--brand-hover);
@@ -276,12 +276,12 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 7px 12px;
+  padding: var(--btn-padding-sm);
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-size: 13px;
+  font-size: var(--btn-font-size);
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -291,12 +291,12 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 }
 
 .sel-toggle {
-  padding: 7px 10px;
+  padding: var(--btn-padding-sm);
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-size: 13px;
+  font-size: var(--btn-font-size);
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -309,12 +309,12 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 7px 14px;
+  padding: var(--btn-padding-md);
   background: #dc2626;
   color: #fff;
   border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--btn-font-size);
+  font-weight: var(--btn-font-weight);
   border: none;
   cursor: pointer;
   transition: background 0.15s ease;
@@ -328,12 +328,12 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 }
 
 .cancel-btn {
-  padding: 7px 12px;
+  padding: var(--btn-padding-sm);
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-size: 13px;
+  font-size: var(--btn-font-size);
   cursor: pointer;
   transition: all 0.15s ease;
 }

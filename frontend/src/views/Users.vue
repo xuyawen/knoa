@@ -699,18 +699,20 @@ onUnmounted(() => {
 }
 .add-btn {
   flex-shrink: 0;
-  height: 40px;
-  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--btn-padding-md);
   border: none;
   border-radius: var(--radius-md);
   background: var(--brand);
   color: #fff;
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: var(--btn-font-weight);
+  font-size: var(--btn-font-size);
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  transition: background 0.15s ease;
 }
-.add-btn:hover { opacity: 0.9; }
+.add-btn:hover { background: var(--brand-hover); }
 
 .tbl {
   width: 100%;

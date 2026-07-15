@@ -108,13 +108,13 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 7px 14px;
+  padding: var(--btn-padding-md);
   border-radius: var(--radius-md);
   border: none;
   background: var(--brand);
   color: #fff;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--btn-font-size);
+  font-weight: var(--btn-font-weight);
   cursor: pointer;
   transition: background 0.15s ease, transform 0.15s ease;
 }

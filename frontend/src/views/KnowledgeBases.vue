@@ -357,12 +357,12 @@ function goDetail(id: string) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 9px 18px;
+  padding: var(--btn-padding-md);
   background: var(--brand);
   color: #fff;
   border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--btn-font-size);
+  font-weight: var(--btn-font-weight);
   transition: background 0.15s ease, transform 0.15s ease;
 }
 .btn-primary:hover {

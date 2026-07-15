@@ -29,6 +29,13 @@
   --radius-lg: 14px;
   --radius-pill: 999px;
 
+  /* 按钮统一尺寸 */
+  --btn-padding-sm: 6px 14px;   /* 次要按钮 / 线框 */
+  --btn-padding-md: 8px 16px;   /* 主要按钮 / 填充 */
+  --btn-font-size: 13px;
+  --btn-font-weight: 500;
+  --btn-height: 36px;
+
   /* 布局尺寸（SVG 实测，非 spec 文字） */
   --sidebar-w: 256px;
   --rightpanel-w: 360px;
