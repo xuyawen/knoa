@@ -2,7 +2,7 @@
 import type { SourceItem } from '@/types/api'
 import Icon from './Icon.vue'
 
-const props = defineProps<{ source: SourceItem }>()
+const props = defineProps<{ source: SourceItem; active?: boolean }>()
 const emit = defineEmits<{
   (e: 'locate', id: number): void
   (e: 'open', chunkId: string): void
@@ -35,7 +35,7 @@ function onFootClick() {
 </script>
 
 <template>
-  <button class="card" :class="{ web: isWeb(), graph: isGraph() }" @click="onCardClick">
+  <button class="card" :class="{ web: isWeb(), graph: isGraph(), active: props.active }" @click="onCardClick">
     <div class="head">
       <span class="tag" :class="isWeb() ? 'web' : (isGraph() ? 'graph' : 'kb')">
         <Icon :name="isWeb() ? 'external' : (isGraph() ? 'graph' : 'library')" :size="12" />
@@ -69,6 +69,11 @@ function onFootClick() {
 .card:hover {
   border-color: var(--brand);
   transform: translateY(-1px);
+}
+.card.active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.12);
 }
 .head {
   display: flex;

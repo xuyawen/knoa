@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import SourceCard from './SourceCard.vue'
@@ -15,6 +15,18 @@ const knowledge = useKnowledgeStore()
 const srcOpen = ref(false)
 const healthOpen = ref(false)
 const trendOpen = ref(false)
+const srcBodyRef = ref<HTMLElement | null>(null)
+
+// 点击引用角标时自动展开溯源区 + 滚动到对应卡片
+watch(() => chat.activeSourceId, (id) => {
+  if (id != null) {
+    srcOpen.value = true
+    nextTick(() => {
+      const el = srcBodyRef.value?.querySelector('.card.active')
+      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  }
+})
 
 const avgHealth = computed(() => {
   const list = knowledge.health
@@ -40,7 +52,7 @@ const emit = defineEmits<{
         </span>
         <Icon name="chevron-down" :size="14" class="section-caret" :class="{ closed: !srcOpen }" />
       </button>
-      <div v-show="srcOpen" class="section-body">
+      <div v-show="srcOpen" ref="srcBodyRef" class="section-body">
         <div v-if="chat.sources.length === 0" class="empty">
           提问后这里会显示答案来源
         </div>
