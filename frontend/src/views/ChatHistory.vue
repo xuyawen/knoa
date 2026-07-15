@@ -76,7 +76,12 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
         <Icon name="menu" :size="20" />
       </button>
       <span class="m-title">问答记录</span>
-      <button class="m-back" @click="router.push('/')">返回</button>
+      <div class="m-top-right">
+        <button class="m-new-btn" @click="onNew" title="新建对话">
+          <Icon name="plus" :size="16" />
+        </button>
+        <button class="m-back" @click="router.push('/')">返回</button>
+      </div>
     </header>
 
     <div class="main">
@@ -85,12 +90,6 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
           <Icon name="plus" :size="15" /> 新建对话
         </button>
       </TopBar>
-      <!-- 移动端新建按钮内嵌 -->
-      <div v-if="isMobile" class="m-action">
-        <button class="new-btn" @click="onNew">
-          <Icon name="plus" :size="15" /> 新建对话
-        </button>
-      </div>
       <div class="body">
         <div v-if="chat.loadingHistory" class="empty">加载中…</div>
         <div v-else-if="chat.sessions.length === 0" class="empty">还没有对话记录</div>
@@ -229,8 +228,21 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   font-family: var(--font-display); font-size: 16px; font-weight: 600;
 }
 .m-back {
-  margin-left: auto;
   font-size: 13px; color: var(--brand); font-weight: 500;
+  background: none; border: none;
+  cursor: pointer;
+}
+.m-top-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.m-new-btn {
+  width: 32px; height: 32px;
+  border-radius: var(--radius-pill);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--brand);
   background: none; border: none;
   cursor: pointer;
 }
