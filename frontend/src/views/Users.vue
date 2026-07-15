@@ -897,8 +897,6 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 14px;
   padding: 20px;
-  overflow-y: auto;
-  min-height: 0;
 }
 .m-field {
   display: flex;
