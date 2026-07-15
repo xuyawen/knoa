@@ -84,7 +84,7 @@ function onKey(e: KeyboardEvent) {
         title="上传图片"
         :disabled="attachments.length >= MAX_FILES"
       >
-        <Icon name="paper-clip" :size="18" />
+        <Icon name="paperclip" :size="18" />
       </button>
       <input
         ref="fileInput"
