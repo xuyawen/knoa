@@ -10,6 +10,11 @@ const knowledge = useKnowledgeStore()
 
 const emit = defineEmits(['cite'])
 
+defineProps<{
+  /** 移动端已在外层有 KB 下拉时，隐藏内置的 filter-bar */
+  hideFilter?: boolean
+}>()
+
 // 知识域下拉选择器（替代之前的一排药丸，解决 KB 多时两行挤的问题）
 const dropdownOpen = ref(false)
 const triggerRef = ref<HTMLElement | null>(null)
@@ -46,8 +51,8 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
 
 <template>
   <div class="chat-col">
-    <!-- 知识域下拉选择器 -->
-    <div class="filter-bar" ref="triggerRef">
+    <!-- 知识域下拉选择器（桌面端；移动端由外层 MobileWorkbench 提供） -->
+    <div v-if="!hideFilter" class="filter-bar" ref="triggerRef">
       <button class="dropdown-trigger" @click.stop="toggleDropdown">
         <span class="trigger-label">{{ currentLabel }}</span>
         <Icon name="chevron-down" :size="14" :class="{ rotated: dropdownOpen }" />

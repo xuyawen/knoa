@@ -240,7 +240,7 @@ onMounted(() => {
             </button>
           </div>
 
-          <ChatStream class="chat-flex" @cite="onCite" />
+          <ChatStream class="chat-flex" :hide-filter="true" @cite="onCite" />
 
           <Composer class="m-composer" @send="send" />
         </template>
