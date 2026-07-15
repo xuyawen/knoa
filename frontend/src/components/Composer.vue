@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import Icon from './Icon.vue'
 
 const text = ref('')
 const emit = defineEmits<{ (e: 'send', q: string): void }>()
+
+const placeholder = computed(() =>
+  window.innerWidth < 640 ? '向知海提问…' : '向知海提问…（Enter 发送，Shift+Enter 换行）'
+)
 
 function send() {
   const q = text.value.trim()
@@ -25,15 +29,13 @@ function onKey(e: KeyboardEvent) {
     <div class="box">
       <textarea
         v-model="text"
-        placeholder="向知海提问…（Enter 发送，Shift+Enter 换行）"
+        :placeholder="placeholder"
         @keydown="onKey"
         rows="1"
       />
-      <div class="row">
-        <button class="send" @click="send" title="发送">
-          <Icon name="send" :size="18" />
-        </button>
-      </div>
+      <button class="send" @click="send" title="发送" :disabled="!text.trim()">
+        <Icon name="send" :size="18" />
+      </button>
     </div>
   </div>
 </template>
@@ -41,14 +43,17 @@ function onKey(e: KeyboardEvent) {
 <style scoped>
 .composer {
   flex-shrink: 0;
-  padding: 16px 24px 20px;
+  padding: 12px 16px 16px;
   background: var(--bg-page);
 }
 .box {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 12px 14px 10px;
+  padding: 10px 10px 10px 14px;
   box-shadow: var(--shadow-card);
   transition: border-color 0.15s ease;
 }
@@ -56,7 +61,8 @@ function onKey(e: KeyboardEvent) {
   border-color: var(--brand);
 }
 textarea {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: block;
   resize: none;
   border: none;
@@ -65,19 +71,14 @@ textarea {
   color: var(--text-primary);
   font-family: inherit;
   font-size: 14px;
-  line-height: 1.6;
-  max-height: 120px;
+  line-height: 1.5;
+  max-height: 100px;
 }
 textarea::placeholder {
   color: var(--text-placeholder);
 }
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  margin-top: 6px;
-}
 .send {
+  flex-shrink: 0;
   width: 36px;
   height: 36px;
   border-radius: 10px;
@@ -86,12 +87,18 @@ textarea::placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s ease, transform 0.12s ease;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease, opacity 0.15s ease;
 }
-.send:hover {
+.send:hover:not(:disabled) {
   background: var(--brand-hover);
 }
-.send:active {
+.send:active:not(:disabled) {
   transform: scale(0.94);
+}
+.send:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 </style>
