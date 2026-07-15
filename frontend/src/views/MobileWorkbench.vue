@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useChatStore } from '@/stores/chat'
@@ -22,8 +22,15 @@ const drawer = ref(false)
 const tab = ref('home')
 const question = ref('')
 const showSources = ref(false)
+const kbDropdownOpen = ref(false)
 
 const sourceCount = computed(() => chat.sources.length)
+
+const kbLabel = computed(() => {
+  if (!chat.filterKb) return '全部知识库'
+  const kb = knowledge.bases.find(b => b.id === chat.filterKb)
+  return kb?.name || '全部知识库'
+})
 
 const roleLabel = computed(() => {
   const r = auth.user?.role
@@ -98,6 +105,13 @@ const kbCards = computed(() => {
     meta: '快捷入口',
   }))
   return [...fromKb, ...fromWs]
+})
+
+onMounted(() => {
+  document.addEventListener('click', (e: MouseEvent) => {
+    const t = e.target as HTMLElement
+    if (!t.closest('.kb-dropdown')) kbDropdownOpen.value = false
+  })
 })
 </script>
 
@@ -189,7 +203,28 @@ const kbCards = computed(() => {
         <!-- 问答 -->
         <template v-else-if="tab === 'chat'">
           <div class="chat-bar">
-            <span class="chat-title">知海问答</span>
+            <!-- 知识库下拉 -->
+            <div class="kb-dropdown" :class="{ open: kbDropdownOpen }">
+              <button type="button" class="kb-trigger" @click="kbDropdownOpen = !kbDropdownOpen">
+                <span>{{ kbLabel }}</span>
+                <Icon name="chevron-down" :size="14" />
+              </button>
+              <transition name="dropdown">
+                <ul v-if="kbDropdownOpen" class="kb-menu">
+                  <li
+                    :class="{ active: !chat.filterKb }"
+                    @click="chat.filterKb = null; kbDropdownOpen = false"
+                  >全部知识库</li>
+                  <li
+                    v-for="kb in knowledge.bases"
+                    :key="kb.id"
+                    :class="{ active: chat.filterKb === kb.id }"
+                    @click="chat.filterKb = kb.id; kbDropdownOpen = false"
+                  >{{ kb.name }}</li>
+                </ul>
+              </transition>
+            </div>
+
             <button
               class="src-btn"
               :class="{ on: sourceCount > 0 }"
@@ -579,10 +614,61 @@ const kbCards = computed(() => {
   border-bottom: 1px solid var(--border);
   background: var(--bg-surface);
 }
-.chat-title {
+/* 移动端知识库下拉（chat-bar 内） */
+.kb-dropdown {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.kb-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-primary);
   font-size: 14px;
   font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
+.kb-trigger:hover { border-color: var(--brand); }
+.kb-dropdown.open .kb-trigger {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.12);
+}
+.kb-dropdown.open .kb-trigger svg { transform: rotate(180deg); }
+.kb-trigger svg { transition: transform 0.2s; flex-shrink: 0; }
+.kb-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 25;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+  padding: 4px 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.kb-menu li {
+  padding: 8px 14px;
+  font-size: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s, color 0.12s;
+}
+.kb-menu li:hover { background: var(--bg-subtle); }
+.kb-menu li.active { color: var(--brand); font-weight: 600; }
 .src-btn {
   display: inline-flex;
   align-items: center;
@@ -692,5 +778,16 @@ const kbCards = computed(() => {
 .tab-leave-to {
   opacity: 0;
   transform: translateY(-10px);
+}
+
+/* 下拉菜单过渡 */
+.dropdown-enter-active,
+.dropdown-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.dropdown-enter-from,
+.dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
 }
 </style>
