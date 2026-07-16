@@ -10,6 +10,9 @@ export function setToken(token: string | null) {
   else localStorage.removeItem(TOKEN_KEY)
 }
 
+// 前端可观测：非 401 的接口异常上报后端 /api/events（401 由 token 失效逻辑单独处理）
+import { report } from '../lib/monitor'
+
 export function authHeaders(): Record<string, string> {
   const token = getToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
@@ -100,10 +103,19 @@ async function trackedFetch(
       triggerTokenExpired()
       throw new TokenExpiredError()
     }
+    // 5xx 服务端错误：上报，便于 /api/metrics 看到前端视角的服务端异常
+    if (resp.status >= 500) {
+      report({ type: 'http.server_error', message: `${reqUrl(input)} -> ${resp.status}`, level: 'error' })
+    }
     // 后端每次有效认证请求都会重签 24h 令牌（滑动令牌），回写即可
     const sliding = resp.headers.get('X-Access-Token')
     if (sliding) setToken(sliding)
     return resp
+  } catch (err) {
+    if (err instanceof TokenExpiredError) throw err
+    // 网络层失败（断网/超时/CORS）fetch 会抛到这
+    report({ type: 'http.network', message: `${reqUrl(input)} -> ${String(err)}`, level: 'error' })
+    throw err
   } finally {
     inFlight.delete(ctrl)
   }

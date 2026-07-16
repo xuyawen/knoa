@@ -22,6 +22,7 @@ from app.db import User
 from app.routers import (
     ask,
     auth,
+    events,
     feedback,
     health,
     knowledge,
@@ -145,3 +146,4 @@ app.include_router(sources.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
 app.include_router(metrics.router, prefix="/api")
+app.include_router(events.router, prefix="/api")
