@@ -22,6 +22,14 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
+# 压测工具：放进 optional extra。CI 的 `uv sync --frozen` 默认不装
+# extra（除非 --extra load），不影响生产构建与测试；本地
+# `uv sync --extra load` 安装后 `uv run --extra load locust` 启动。
+[project.optional-dependencies]
+load = [
+    "locust>=2.31.0",
+]
+
 [dependency-groups]
 dev = [
     "ruff>=0.8.0",

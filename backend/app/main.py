@@ -1,3 +1,4 @@
+import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -7,6 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.config import settings
+from app.core.logging_config import request_id_var, setup_logging
+from app.core.metrics import (
+    dec_active,
+    get_slow_threshold,
+    inc_active,
+    normalize_path,
+    record,
+)
 from app.core.security import create_access_token, decode_access_token
 from app.database import AsyncSessionLocal
 from app.db import User
@@ -17,6 +26,7 @@ from app.routers import (
     health,
     knowledge,
     memory,
+    metrics,
     sessions,
     sources,
     trending,
@@ -51,6 +61,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="知海 Knoa API", version="0.1.0", lifespan=lifespan)
+setup_logging()
+logger = logging.getLogger("knoa")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS.split(","),
@@ -95,6 +108,33 @@ async def sliding_session(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def observability(request: Request, call_next):
+    rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16]
+    request.state.request_id = rid
+    ctx = request_id_var.set(rid)
+    start = time.perf_counter()
+    inc_active()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    except Exception:
+        logger.exception("unhandled %s %s", request.method, request.url.path)
+        raise
+    finally:
+        elapsed = time.perf_counter() - start
+        dec_active()
+        record(normalize_path(request.url.path), elapsed, status, status >= 500)
+        request_id_var.reset(ctx)
+        if elapsed >= get_slow_threshold():
+            logger.warning(
+                "slow %0.2fs %s %s -> %d",
+                elapsed, request.method, request.url.path, status,
+            )
+
+
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
@@ -104,3 +144,4 @@ app.include_router(feedback.router, prefix="/api")
 app.include_router(sources.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
+app.include_router(metrics.router, prefix="/api")

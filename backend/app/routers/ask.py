@@ -1,6 +1,7 @@
 import json
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -18,17 +19,26 @@ from app.deps import get_db, get_embedder, get_llm, get_redis
 from app.models.chat import AskRequest
 
 router = APIRouter()
+logger = logging.getLogger("knoa.ask")
 
 
 @router.post("/ask")
 async def ask(
     req: AskRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     embedder: EmbeddingModel = Depends(get_embedder),
     llm: OpenAICompatProvider = Depends(get_llm),
     redis: RedisStore = Depends(get_redis),
     user: User = Depends(get_current_user),
 ):
+    # 显式取 rid（sse-starlette 在独立 task 跑生成器，contextvars 可能不传播）
+    rid = getattr(request.state, "request_id", "-")
+    logger.info(
+        "ask recv kb=%s q=%s files=%d",
+        req.knowledge_base, req.question[:80], len(req.files),
+        extra={"request_id": rid},
+    )
     # 多模态能力校验：当前模型不支持的模态（audio/video）直接 400 中文报错
     for f in req.files:
         if not settings.MODEL_CAPABILITIES.get(f.kind, False):
@@ -58,15 +68,19 @@ async def ask(
     )
 
     async def event_generator():
+        logger.info("ask stream start", extra={"request_id": rid})
+        n = 0
         async for event in pipeline.stream_answer(
             question=req.question,
             kb_id=req.knowledge_base,
             session_id=req.session_id,
             files=[f.model_dump(by_alias=False) for f in req.files] or None,
         ):
+            n += 1
             yield {
                 "event": event["event"],
                 "data": json.dumps(event["data"], ensure_ascii=False),
             }
+        logger.info("ask stream done events=%d", n, extra={"request_id": rid})
 
     return EventSourceResponse(event_generator())
