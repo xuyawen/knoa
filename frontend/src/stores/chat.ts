@@ -7,7 +7,6 @@ import {
   getSourceDetail,
   getSessions,
   getSession,
-  createSession,
   deleteSession,
   batchDeleteSessions,
 } from '@/api'
@@ -52,7 +51,7 @@ export const useChatStore = defineStore('chat', () => {
     const lastMsg = () => messages.value[messages.value.length - 1]
 
     try {
-      for await (const event of streamAsk(question, knowledgeBase, sessionId.value, files)) {
+      for await (const event of streamAsk(question, knowledgeBase, sessionId.value || undefined, files)) {
         const m = lastMsg()
         if (event.event === 'thinking') {
           // Agent 决策步骤：追加到当前消息的思考链
@@ -126,13 +125,9 @@ export const useChatStore = defineStore('chat', () => {
     historyOpen.value = false
   }
 
-  async function startNewChat() {
-    try {
-      const s = await createSession()
-      sessionId.value = s.id
-    } catch (e) {
-      console.error('新建会话失败', e)
-    }
+  function startNewChat() {
+    // 不再立即调用 createSession() 创建空记录；等用户发首条消息时由后端自动创建
+    sessionId.value = ''
     messages.value = []
     sources.value = []
     historyOpen.value = false
