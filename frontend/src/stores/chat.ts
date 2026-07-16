@@ -144,7 +144,14 @@ export const useChatStore = defineStore('chat', () => {
         content: m.content,
         citations: m.citations ?? [],
         sources: m.sources ?? [],
-        attachments: (m.attachments ?? []) as ChatAttachment[],
+        // 后端存 DB 用 snake_case(mime_type/data_b64)，前端类型用 camelCase；
+        // 这里归一化，兼容两种命名，避免历史图片回显读不到字段
+        attachments: ((m.attachments ?? []) as any[]).map((a) => ({
+          kind: a.kind,
+          mimeType: a.mimeType ?? a.mime_type,
+          dataB64: a.dataB64 ?? a.data_b64,
+          name: a.name,
+        })) as ChatAttachment[],
         thinkingSteps: [],
         feedback: null,
       }))
