@@ -73,10 +73,10 @@ const emit = defineEmits<{ (e: 'confirm'): void }>()
   margin: 0 0 22px;
   word-break: break-word;
 }
-/* 仅一个「确定」按钮，靠右 */
+/* 仅一个「确定」按钮，居中 */
 .aem-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
 }
 .aem-btn {
   height: 38px;

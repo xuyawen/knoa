@@ -19,6 +19,7 @@ onTokenExpired(() => {
 })
 
 function onAuthExpiredConfirm() {
+  authExpiredOpen.value = false
   auth.logout()
   router.replace('/login')
 }
