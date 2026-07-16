@@ -217,7 +217,8 @@ function healthColor(kb: KnowledgeBase): string {
 .brand-text {
   display: flex;
   flex-direction: column;
-  line-height: 1.2;
+  gap: 5px;
+  line-height: 1.3;
   min-width: 0;
 }
 .brand-name {
