@@ -199,7 +199,8 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 .title-block {
   display: flex;
   flex-direction: column;
-  line-height: 1.25;
+  gap: 4px;
+  line-height: 1.3;
   min-width: 0;
   justify-self: start;
 }

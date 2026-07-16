@@ -287,7 +287,7 @@ function healthColor(kb: KnowledgeBase): string {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 40px;
+  height: 44px;
   padding: 0 12px 0 16px;
   border-radius: var(--radius-md);
   color: var(--text-primary);
