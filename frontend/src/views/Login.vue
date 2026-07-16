@@ -107,7 +107,7 @@ async function onSubmit() {
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-display); font-weight: 600; font-size: 22px;
 }
-.brand-text { display: flex; flex-direction: column; line-height: 1.25; }
+.brand-text { display: flex; flex-direction: column; gap: 5px; line-height: 1.3; }
 .brand-name { font-family: var(--font-display); font-weight: 600; font-size: 18px; }
 .brand-sub { font-size: 12px; color: var(--text-secondary); }
 
