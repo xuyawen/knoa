@@ -674,7 +674,7 @@ onMounted(() => {
   left: 0;
   right: 0;
   z-index: 25;
-  background: var(--bg-primary);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: 0 4px 16px rgba(0,0,0,0.10);

@@ -711,7 +711,7 @@ onUnmounted(() => {
   left: 0;
   z-index: 20;
   min-width: 100px;
-  background: var(--bg-primary);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: 0 4px 16px rgba(0,0,0,0.10);
@@ -763,10 +763,10 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   z-index: 30;
-  background: var(--bg-primary);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
   padding: 4px 0;
   list-style: none;
 }
