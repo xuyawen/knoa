@@ -44,7 +44,10 @@ class KnoaUser(HttpUser):
             catch_response=True,
         ) as r:
             if r.status_code == 200:
-                self.token = r.json().get("access_token")
+                # 登录返回 camelCase 字段 accessToken
+                self.token = r.json().get("accessToken") or r.json().get(
+                    "access_token"
+                )
                 r.success()
             else:
                 r.failure(f"login {r.status_code}")
@@ -56,10 +59,11 @@ class KnoaUser(HttpUser):
         if not token:
             return
         # 用通用问题，避免依赖具体 KB 内容；不带 KB 走全局检索
+        # 注意：AskRequest 是 CamelModel，请求体字段必须 camelCase
         payload = {
             "question": "请介绍一下退货政策的主要内容",
-            "knowledge_base": None,
-            "session_id": None,
+            "knowledgeBase": None,
+            "sessionId": None,
             "files": [],
         }
         headers = {"Authorization": f"Bearer {token}"}
