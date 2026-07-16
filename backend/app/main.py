@@ -53,11 +53,6 @@ async def lifespan(app: FastAPI):
             )
             session.add(admin)
             await session.commit()
-            print(
-                f"[bootstrap] 已创建初始管理员账号: {settings.ADMIN_USERNAME} "
-                f"(请尽快在 .env 修改 ADMIN_PASSWORD)",
-                flush=True,
-            )
     yield
 
 
