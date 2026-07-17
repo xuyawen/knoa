@@ -39,6 +39,11 @@ export function isTokenExpired(): boolean {
   return tokenExpired
 }
 
+/** 重置 token 失效状态（用户确认重登录弹窗后调用，允许重新登录）。 */
+export function resetTokenExpired(): void {
+  tokenExpired = false
+}
+
 /** 注册 token 失效回调（由 App 注册，用于弹出重登录框）。 */
 export function onTokenExpired(fn: () => void): void {
   expiredHandler = fn
@@ -83,8 +88,9 @@ async function trackedFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
-  // 已经失效则快速失败，不再发起任何网络请求
-  if (tokenExpired) throw new TokenExpiredError()
+  // 已经失效则快速失败，不再发起任何网络请求（登录接口例外）
+  const url = reqUrl(input)
+  if (tokenExpired && !url.includes('/api/auth/login')) throw new TokenExpiredError()
 
   const ctrl = new AbortController()
   const signals: AbortSignal[] = [ctrl.signal]

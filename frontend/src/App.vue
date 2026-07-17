@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { onTokenExpired } from '@/api/http'
+import { onTokenExpired, resetTokenExpired } from '@/api/http'
 import CommandPalette from '@/components/CommandPalette.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import Toast from '@/components/Toast.vue'
@@ -21,6 +21,7 @@ onTokenExpired(() => {
 function onAuthExpiredConfirm() {
   authExpiredOpen.value = false
   auth.logout()
+  resetTokenExpired() // 允许后续 login 请求正常发出
   router.replace('/login')
 }
 
