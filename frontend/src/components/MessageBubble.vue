@@ -120,9 +120,15 @@ async function onCopy() {
       <div class="head">
         <span class="avatar"><Icon name="sparkle" :size="15" /></span>
         <span class="name">知海 · 运营知识助手</span>
+          <!-- 有来源：显示 RAG/联网标签 -->
           <span v-if="(message as any).sources?.length" class="tag" :class="{ web: hasWebSource }">
             <span class="tag-dot" />
             {{ hasWebSource ? '联网参考' : 'RAG 溯源' }}
+          </span>
+          <!-- 无来源：显示未验证警告 -->
+          <span v-else-if="!isThinking && message.content.trim()" class="tag unverified">
+            <Icon name="alert-circle" :size="11" />
+            未溯源验证
           </span>
       </div>
 
@@ -272,6 +278,11 @@ async function onCopy() {
 .tag.web {
   color: var(--warning, #f59e0b);
   background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
+}
+.tag.unverified {
+  color: var(--danger, #ef4444);
+  background: color-mix(in srgb, var(--danger, #ef4444) 10%, transparent);
+  gap: 4px;
 }
 .tag-dot {
   width: 5px;
