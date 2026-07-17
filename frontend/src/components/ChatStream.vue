@@ -47,6 +47,18 @@ function onClickOutside(e: MouseEvent) {
 
 onMounted(() => document.addEventListener('click', onClickOutside))
 onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
+
+// 新对话示例建议
+const suggestions = [
+  '知识库的核心内容有哪些？',
+  '帮我总结一下最近的重要更新',
+  '遇到问题时该如何排查？',
+  '解释一下关键概念和术语',
+]
+
+function handleSuggest(question: string) {
+  chat.ask(question, chat.filterKb)
+}
 </script>
 
 <template>
@@ -74,16 +86,37 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
 
     <!-- 对话流 -->
     <div class="chat-scroll">
-      <MessageBubble
-        v-for="m in chat.messages"
-        :key="m.id"
-        :message="m"
-        @cite="emit('cite', $event)"
-      />
-      <div v-if="chat.sources.length" class="hint">
-        <Icon name="sparkle" :size="14" />
-        <span>答案由知海基于知识库检索生成，点击角标可查看溯源</span>
+      <!-- 空状态：新对话引导 -->
+      <div v-if="chat.messages.length === 0" class="empty-state">
+        <div class="empty-icon">
+          <Icon name="sparkle" :size="28" />
+        </div>
+        <p class="empty-title">有什么想了解的？</p>
+        <p class="empty-sub">选择下方示例开始对话，或直接输入你的问题</p>
+        <div class="suggestion-grid">
+          <button
+            v-for="(q, i) in suggestions"
+            :key="i"
+            class="suggestion-chip"
+            @click="handleSuggest(q)"
+          >
+            {{ q }}
+          </button>
+        </div>
       </div>
+
+      <template v-else>
+        <MessageBubble
+          v-for="m in chat.messages"
+          :key="m.id"
+          :message="m"
+          @cite="emit('cite', $event)"
+        />
+        <div v-if="chat.sources.length" class="hint">
+          <Icon name="sparkle" :size="14" />
+          <span>答案由知海基于知识库检索生成，点击角标可查看溯源</span>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -200,5 +233,64 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
 }
 .hint :deep(svg) {
   color: var(--brand);
+}
+
+/* 空状态：新对话引导 */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  text-align: center;
+}
+.empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--brand-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  color: var(--brand);
+}
+.empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.empty-sub {
+  font-size: 13px;
+  color: var(--text-placeholder);
+  margin: 0 0 28px;
+}
+.suggestion-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  max-width: 520px;
+  width: 100%;
+}
+.suggestion-chip {
+  display: block;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.suggestion-chip:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+  background: var(--brand-soft);
+  transform: translateY(-1px);
 }
 </style>
