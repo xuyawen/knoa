@@ -134,10 +134,8 @@ defineProps<{ name: string; size?: number }>()
       <path d="M6 12h11" />
     </template>
     <template v-else-if="name === 'key'">
-      <!-- 钥匙：圆环(头部) + 柄 + 齿 -->
-      <circle cx="8.5" cy="12.5" r="4.5" />
-      <path d="M13 14l2 2h4v-3l-2-2" />
-      <path d="M15 13l3 3M17 11l-2 2" />
+      <circle cx="9" cy="12" r="4" />
+      <path d="M13 12h8M17 12v3M19.5 12v4" />
     </template>
     <template v-else-if="name === 'inbox'">
       <path d="M4 13l3-8h10l3 8M4 13v6h16v-6M4 13h5l1 2h4l1-2h5" />
