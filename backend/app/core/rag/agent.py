@@ -462,8 +462,32 @@ class AgenticRAGAgent:
         }
 
         if name == "direct_answer":
-            st.candidate = result.arguments.get("content", "").strip()
-            st.next = "_n_finish"
+            # 硬拦截：第一步路由禁止 direct_answer（除非是纯闲聊/数学/时间类）。
+            # LLM 经常对自己的知识过度自信，对知识库内容问题也选 direct_answer → 纯属幻觉。
+            # 代码层必须拦住，不能只靠 prompt 劝导。
+            is_trivial = (
+                st.step > 1  # 非第一步（已经检索过，允许基于已有信息直接答）
+                or _should_skip_retrieval(st.question)  # 纯数学/时间等无需检索
+                or bool(re.match(r'^[你好嗨嘿哈哟哇噢唉哼啊嗯哦\s\,\.\!\?\~\@\#\$\%\^\&\*\(\)]+$', st.question.strip()))  # 纯问候
+            )
+            if not is_trivial:
+                name = "retrieve"
+                result = ToolCallResult(
+                    name="retrieve",
+                    arguments={"query": st.question},
+                    raw_text=result.raw_text,
+                )
+                st.route_result = result
+                st.action = "retrieve"
+                yield {
+                    "event": "thinking",
+                    "data": {"step": st.step, "action": "retrieve",
+                             "detail": f"系统拦截：原计划直接回答，已强制改为检索（问题: {st.question[:40]}）",
+                             "raw_reasoning": (result.raw_text or "")[:500]},
+                }
+            else:
+                st.candidate = result.arguments.get("content", "").strip()
+                st.next = "_n_finish"
         elif name == "retrieve":
             st.next = "_n_retrieve"
         elif name == "supplement_search":
