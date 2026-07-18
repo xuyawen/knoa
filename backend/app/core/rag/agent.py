@@ -462,29 +462,50 @@ class AgenticRAGAgent:
         }
 
         if name == "direct_answer":
-            # 硬拦截：第一步路由禁止 direct_answer（除非是纯闲聊/数学/时间类）。
-            # LLM 经常对自己的知识过度自信，对知识库内容问题也选 direct_answer → 纯属幻觉。
-            # 代码层必须拦住，不能只靠 prompt 劝导。
+            # 硬拦截：禁止 LLM 在不该直接答的时候瞎编。
+            # 场景A：第一步还没检索过 → 强制 retrieve（除非纯闲聊/数学/时间）
+            # 场景B：已检索过但 LLM 还想跳过 generate 直接编 → 强制 generate，
+            #         否则 candidate=result.arguments["content"] 是纯幻觉，检索白做。
+            has_retrieved = bool(st.all_sources)
             is_trivial = (
-                st.step > 1  # 非第一步（已经检索过，允许基于已有信息直接答）
-                or _should_skip_retrieval(st.question)  # 纯数学/时间等无需检索
-                or bool(re.match(r'^[你好嗨嘿哈哟哇噢唉哼啊嗯哦\s\,\.\!\?\~\@\#\$\%\^\&\*\(\)]+$', st.question.strip()))  # 纯问候
+                (st.step > 1 and not has_retrieved)
+                # 已检索但还想 direct_answer → 不算 trivial，必须走 generate
+                or _should_skip_retrieval(st.question)
+                or bool(re.match(r'^[你好嗨嘿哈哟哇噢唉哼啊嗯哦\s\,\.\!\?\~\@\#\$\%\^\&\*\(\)]+$', st.question.strip()))
             )
             if not is_trivial:
-                name = "retrieve"
-                result = ToolCallResult(
-                    name="retrieve",
-                    arguments={"query": st.question},
-                    raw_text=result.raw_text,
-                )
-                st.route_result = result
-                st.action = "retrieve"
-                yield {
-                    "event": "thinking",
-                    "data": {"step": st.step, "action": "retrieve",
-                             "detail": f"系统拦截：原计划直接回答，已强制改为检索（问题: {st.question[:40]}）",
-                             "raw_reasoning": (result.raw_text or "")[:500]},
-                }
+                if has_retrieved:
+                    # 已有检索结果，别让 LLM 编 content 了 → 强制走 _n_generate
+                    name = "generate"
+                    result = ToolCallResult(
+                        name="generate",
+                        arguments={},
+                        raw_text=result.raw_text,
+                    )
+                    st.route_result = result
+                    st.action = "generate"
+                    yield {
+                        "event": "thinking",
+                        "data": {"step": st.step, "action": "generate",
+                                 "detail": f"系统拦截：已有 {len(st.all_sources)} 条检索结果，必须基于结果生成（拒绝直接编造）",
+                                 "raw_reasoning": (result.raw_text or "")[:500]},
+                    }
+                    st.next = "_n_generate"
+                else:
+                    name = "retrieve"
+                    result = ToolCallResult(
+                        name="retrieve",
+                        arguments={"query": st.question},
+                        raw_text=result.raw_text,
+                    )
+                    st.route_result = result
+                    st.action = "retrieve"
+                    yield {
+                        "event": "thinking",
+                        "data": {"step": st.step, "action": "retrieve",
+                                 "detail": f"系统拦截：原计划直接回答，已强制改为检索（问题: {st.question[:40]}）",
+                                 "raw_reasoning": (result.raw_text or "")[:500]},
+                    }
             else:
                 st.candidate = result.arguments.get("content", "").strip()
                 st.next = "_n_finish"
