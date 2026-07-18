@@ -178,6 +178,7 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
               <div v-if="s.summary" class="session-summary">{{ s.summary }}</div>
               <div v-if="s.msgCount > 0" class="session-meta">
                 <span>{{ s.msgCount }} 条消息</span>
+                <span class="dot">·</span>
                 <span>{{ fmtTime(s.updatedAt) }}</span>
               </div>
             </button>
@@ -350,9 +351,14 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 }
 .session-meta {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   color: var(--text-placeholder);
+}
+.session-meta .dot {
+  opacity: 0.5;
 }
 
 /* 单条删除按钮 — 默认亮色显示 */
