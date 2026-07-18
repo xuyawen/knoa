@@ -463,55 +463,57 @@ class AgenticRAGAgent:
         }
 
         if name == "direct_answer":
-            # 硬拦截：禁止 LLM 在不该直接答的时候瞎编。
-            # 场景A：第一步还没检索过 → 强制 retrieve（除非纯闲聊/数学/时间）
-            # 场景B：已检索过但 LLM 还想跳过 generate 直接编 → 强制 generate，
-            #         否则 candidate=result.arguments["content"] 是纯幻觉，检索白做。
-            has_sources = bool(st.all_sources)
-            retrieval_done = st.retrieval_attempted
-            # trivial = 纯闲聊/数学/时间 且 从未检索过 → 才允许 direct_answer
-            is_trivial = (
-                not retrieval_done
-                and (_should_skip_retrieval(st.question) or bool(re.match(r'^[你好嗨嘿哈哟哇噢唉哼啊嗯哦\s\,\.\!\?\~\@\#\$\%\^\&\*\(\)]+$', st.question.strip())))
+            # ── 简化确定性规则（无嵌套、无歧义）──
+            #
+            # 规则1: 纯闲聊/数学/时间 且 从未检索过 → 允许直接答，结束
+            # 规则2: 已检索过（有结果或无结果）→ 强制 _generate，绝不回路由（防死循环）
+            # 规则3: 其他情况 → 强制 _retrieve，查完再说
+            #
+            # 关键设计：一旦进入过 _n_retrieve，后续永远不再回 _n_route，
+            # 直接去 _n_generate 收尾。LLM 的路由选择只在首次生效。
+            is_greeting_or_math = (
+                _should_skip_retrieval(st.question)
+                or bool(re.match(r'^[你好嗨嘿哈哟哇噢唉哼啊嗯哦\s\,\.\!\?\~\@\#\$\%\^\&\*\(\)]+$', st.question.strip()))
             )
-            if not is_trivial:
-                if retrieval_done or has_sources:
-                    # 已检索过（有结果或无结果），一律禁止 LLM 直接编 content
-                    name = "generate"
-                    result = ToolCallResult(
-                        name="generate",
-                        arguments={},
-                        raw_text=result.raw_text,
-                    )
-                    st.route_result = result
-                    st.action = "generate"
-                    detail_text = (f"系统拦截：已检索但{'找到 ' + str(len(st.all_sources)) + ' 条结果' if has_sources else '未找到相关文档'}，必须基于现有信息生成（拒绝直接编造）")
-                    yield {
-                        "event": "thinking",
-                        "data": {"step": st.step, "action": "generate",
-                                 "detail": detail_text,
-                                 "raw_reasoning": (result.raw_text or "")[:500]},
-                    }
-                    st.next = "_n_generate"
-                else:
-                    # 从未检索过 → 先去查库
-                    name = "retrieve"
-                    result = ToolCallResult(
-                        name="retrieve",
-                        arguments={"query": st.question},
-                        raw_text=result.raw_text,
-                    )
-                    st.route_result = result
-                    st.action = "retrieve"
-                    yield {
-                        "event": "thinking",
-                        "data": {"step": st.step, "action": "retrieve",
-                                 "detail": f"系统拦截：原计划直接回答，已强制改为检索（问题: {st.question[:40]}）",
-                                 "raw_reasoning": (result.raw_text or "")[:500]},
-                    }
-            else:
+
+            if is_greeting_or_math and not st.retrieval_attempted:
+                # 规则1: 纯 trivial 且从未检索 → 放行，走 _n_finish 结束
                 st.candidate = result.arguments.get("content", "").strip()
                 st.next = "_n_finish"
+
+            elif st.retrieval_attempted:
+                # 规则2: 已经检索过了（不管有没有结果）→ 永远走 generate，不回路由
+                has_sources = bool(st.all_sources)
+                detail_text = (
+                    f"系统拦截：已找到 {len(st.all_sources)} 条检索结果，基于结果生成回答"
+                    if has_sources
+                    else "系统拦截：已检索但未找到相关文档，请如实告知用户"
+                )
+                st.route_result = ToolCallResult(name="generate", arguments={}, raw_text=result.raw_text)
+                st.action = "generate"
+                yield {
+                    "event": "thinking",
+                    "data": {"step": st.step, "action": "generate",
+                             "detail": detail_text,
+                             "raw_reasoning": (result.raw_text or "")[:500]},
+                }
+                st.next = "_n_generate"
+
+            else:
+                # 规则3: 从未检索且不是 trivial → 强制先检索
+                st.route_result = ToolCallResult(
+                    name="retrieve",
+                    arguments={"query": st.question},
+                    raw_text=result.raw_text,
+                )
+                st.action = "retrieve"
+                yield {
+                    "event": "thinking",
+                    "data": {"step": st.step, "action": "retrieve",
+                             "detail": f"系统拦截：原计划直接回答，已强制改为检索（问题: {st.question[:40]}）",
+                             "raw_reasoning": (result.raw_text or "")[:500]},
+                }
+                st.next = "_n_retrieve"
         elif name == "retrieve":
             st.next = "_n_retrieve"
         elif name == "supplement_search":
@@ -548,8 +550,9 @@ class AgenticRAGAgent:
             st.messages.append({"role": "user", "content": f"检索结果：\n{context_text}\n\n基于以上信息，请直接给出最终回答。如果信息明显不足，才调用 supplement_search（大多数情况下直接回答即可）。"})
         else:
             st.messages.append({"role": "assistant", "content": "[已调用 retrieve 工具，但未找到相关文档]"})
-            st.messages.append({"role": "user", "content": "检索未找到相关结果。请基于通用知识回答或尝试 supplement_search。"})
-        st.next = "_n_route"  # 反思：回到 route 再评估是否足够
+            st.messages.append({"role": "user", "content": "检索未找到相关结果。请基于已有信息生成回答。"})
+        # 检索完成后直接去 generate，不再回路由（防止 LLM 反复选 direct_answer 导致死循环）
+        st.next = "_n_generate"
 
     async def _n_supplement(self, st: "_AgentState") -> AsyncIterator[dict]:
         refined_query = st.route_result.arguments.get("refined_query", st.question)
