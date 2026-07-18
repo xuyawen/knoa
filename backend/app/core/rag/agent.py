@@ -239,6 +239,7 @@ class _AgentState:
         self.kb_id = kb_id
         self.messages: list[dict] = []      # route 用到的 agent 对话上下文
         self.all_sources: list[dict] = []   # 已召回的全部来源（KB/图/联网），连续编号
+        self.retrieval_attempted: bool = False  # 是否已执行过 KB 检索（无论有无结果）
         self.step = 0                         # 已执行的 route 步数（上限 MAX_STEPS）
         self.action = ""                      # 最近一次 route 决策的动作名
         self.route_result: ToolCallResult | None = None
@@ -466,16 +467,16 @@ class AgenticRAGAgent:
             # 场景A：第一步还没检索过 → 强制 retrieve（除非纯闲聊/数学/时间）
             # 场景B：已检索过但 LLM 还想跳过 generate 直接编 → 强制 generate，
             #         否则 candidate=result.arguments["content"] 是纯幻觉，检索白做。
-            has_retrieved = bool(st.all_sources)
+            has_sources = bool(st.all_sources)
+            retrieval_done = st.retrieval_attempted
+            # trivial = 纯闲聊/数学/时间 且 从未检索过 → 才允许 direct_answer
             is_trivial = (
-                (st.step > 1 and not has_retrieved)
-                # 已检索但还想 direct_answer → 不算 trivial，必须走 generate
-                or _should_skip_retrieval(st.question)
-                or bool(re.match(r'^[你好嗨嘿哈哟哇噢唉哼啊嗯哦\s\,\.\!\?\~\@\#\$\%\^\&\*\(\)]+$', st.question.strip()))
+                not retrieval_done
+                and (_should_skip_retrieval(st.question) or bool(re.match(r'^[你好嗨嘿哈哟哇噢唉哼啊嗯哦\s\,\.\!\?\~\@\#\$\%\^\&\*\(\)]+$', st.question.strip())))
             )
             if not is_trivial:
-                if has_retrieved:
-                    # 已有检索结果，别让 LLM 编 content 了 → 强制走 _n_generate
+                if retrieval_done or has_sources:
+                    # 已检索过（有结果或无结果），一律禁止 LLM 直接编 content
                     name = "generate"
                     result = ToolCallResult(
                         name="generate",
@@ -484,14 +485,16 @@ class AgenticRAGAgent:
                     )
                     st.route_result = result
                     st.action = "generate"
+                    detail_text = (f"系统拦截：已检索但{'找到 ' + str(len(st.all_sources)) + ' 条结果' if has_sources else '未找到相关文档'}，必须基于现有信息生成（拒绝直接编造）")
                     yield {
                         "event": "thinking",
                         "data": {"step": st.step, "action": "generate",
-                                 "detail": f"系统拦截：已有 {len(st.all_sources)} 条检索结果，必须基于结果生成（拒绝直接编造）",
+                                 "detail": detail_text,
                                  "raw_reasoning": (result.raw_text or "")[:500]},
                     }
                     st.next = "_n_generate"
                 else:
+                    # 从未检索过 → 先去查库
                     name = "retrieve"
                     result = ToolCallResult(
                         name="retrieve",
@@ -529,6 +532,7 @@ class AgenticRAGAgent:
             st.next = "_n_generate"
 
     async def _n_retrieve(self, st: "_AgentState") -> AsyncIterator[dict]:
+        st.retrieval_attempted = True
         query = st.route_result.arguments.get("query", st.question)
         retrieved = await self.retriever.retrieve(query, st.kb_id, top_k=5)
         if retrieved:
@@ -609,6 +613,16 @@ class AgenticRAGAgent:
                     "请基于以上对话上下文及来源资料回答用户问题。"
                     "引用时使用 [1] [2] 标注编号；若某条标记为联网来源可注明「据联网信息」；"
                     "确实无来源覆盖时再如实说明。"
+                ),
+            })
+        else:
+            # 检索已执行但无结果 → 明确禁止编造
+            final_messages.append({
+                "role": "user",
+                "content": (
+                    "注意：已在知识库中检索，但未找到与问题相关的文档。\n"
+                    "请直接告知用户「当前知识库中没有找到相关内容」，不要编造或猜测具体信息。"
+                    "如果用户的问题属于常识范畴可以简短回答，否则建议缩小范围重新提问。"
                 ),
             })
         full_answer = ""
