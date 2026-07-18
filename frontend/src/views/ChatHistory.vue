@@ -175,10 +175,10 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
 
             <button class="session-body" @click="onPick(s.id)">
               <div class="session-title">{{ s.title }}</div>
+              <div class="session-date">{{ fmtTime(s.updatedAt) }}</div>
               <div v-if="s.summary" class="session-summary">{{ s.summary }}</div>
-              <div class="session-meta">
+              <div v-if="s.msgCount > 0" class="session-meta">
                 <span>{{ s.msgCount }} 条消息</span>
-                <span>{{ fmtTime(s.updatedAt) }}</span>
               </div>
             </button>
 
@@ -336,6 +336,11 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+.session-date {
+  font-size: 12px;
+  color: var(--text-placeholder);
   margin-bottom: 4px;
 }
 .session-summary {
@@ -349,13 +354,11 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   margin-bottom: 6px;
 }
 .session-meta {
-  display: flex;
-  justify-content: space-between;
   font-size: 12px;
   color: var(--text-placeholder);
 }
 
-/* 单条删除按钮 — 默认红色，低调显示；hover 加深 */
+/* 单条删除按钮 — 默认亮色显示 */
 .item-del {
   flex-shrink: 0;
   width: 28px;
@@ -363,12 +366,12 @@ onUnmounted(() => mq?.removeEventListener('change', syncMobile))
   border-radius: var(--radius-sm);
   border: none;
   background: transparent;
-  color: #dc2626;
+  color: #ef4444;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  opacity: 0.45;
+  opacity: 0.8;
   transition: opacity 0.15s ease, background 0.15s ease;
 }
 .item-del:hover,
