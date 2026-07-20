@@ -2,7 +2,6 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.llm.openai_compat import OpenAICompatProvider
@@ -19,7 +18,8 @@ from app.core.security import (
 from app.core.store.redis_store import RedisStore
 from app.config import settings
 from app.db import User
-from app.deps import get_db, get_embedder, get_llm, get_redis, get_es
+from app.database import AsyncSessionLocal
+from app.deps import get_embedder, get_llm, get_redis, get_es
 from app.models.chat import AskRequest
 
 router = APIRouter()
@@ -30,7 +30,6 @@ logger = logging.getLogger("knoa.ask")
 async def ask(
     req: AskRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     embedder: EmbeddingModel = Depends(get_embedder),
     llm: OpenAICompatProvider = Depends(get_llm),
     redis: RedisStore = Depends(get_redis),
@@ -52,53 +51,63 @@ async def ask(
                 detail=f"当前模型暂不支持{kind_cn}输入，请移除后重试（仅支持图片）",
             )
 
-    # 库级权限：问答目标 KB 必须对该用户可见
-    accessible_kb_ids: "list[str] | None" = None
-    if req.knowledge_base:
-        level = await get_kb_permission_level(db, req.knowledge_base, user)
-        if level is None:
-            raise HTTPException(status_code=403, detail="无权访问该知识库")
-    else:
-        # 未指定 KB：将检索范围严格限定为用户有权访问的 KB 列表，
-        # 防止已登录用户跨库检索其无权查看的知识库内容（P0-2）。
-        accessible_kb_ids = await get_accessible_kb_ids(db, user)
-        if not accessible_kb_ids:
-            raise HTTPException(status_code=403, detail="无权访问任何知识库")
-
-    # 检索器选择：ES 可用且目标库已建索引 → ES 混合检索；
-    # 否则回退 pgvector HybridRetriever（ES 未启用 / 索引不存在 / 网络异常都安全降级）
-    es = get_es()
-    if es.enabled and req.knowledge_base and await es.index_exists(req.knowledge_base):
-        retriever = ESRetriever(embedder, es, settings.RRF_K)
-    else:
-        # 未指定 KB 时，注入可访问范围做库级隔离过滤
-        retriever = HybridRetriever(
-            embedder, db, settings.RRF_K, kb_ids=accessible_kb_ids
-        )
-    pipeline = RAGPipeline(
-        retriever, llm, redis, db,
-        user_id=str(user.id),
-        embedder=embedder,
-    )
+    # 库级权限：问答目标 KB 必须对该用户可见。
+    # 用一次性 DB 会话完成（流式开始前），不占用流式生成器的会话生命周期 ——
+    # 否则请求返回时 get_db 的 finally 会把还在用的会话关掉，造成事务回滚 /
+    # 会话丢失（表现为「刚问的对话从历史里凭空消失」）。
+    async with AsyncSessionLocal() as perm_db:
+        accessible_kb_ids: "list[str] | None" = None
+        if req.knowledge_base:
+            level = await get_kb_permission_level(perm_db, req.knowledge_base, user)
+            if level is None:
+                raise HTTPException(status_code=403, detail="无权访问该知识库")
+        else:
+            # 未指定 KB：将检索范围严格限定为用户有权访问的 KB 列表，
+            # 防止已登录用户跨库检索其无权查看的知识库内容（P0-2）。
+            accessible_kb_ids = await get_accessible_kb_ids(perm_db, user)
+            if not accessible_kb_ids:
+                raise HTTPException(status_code=403, detail="无权访问任何知识库")
 
     async def event_generator():
         logger.info("ask stream start", extra={"request_id": rid})
         n = 0
-        async for event in pipeline.stream_answer(
-            question=req.question,
-            kb_id=req.knowledge_base,
-            session_id=req.session_id,
-            files=[f.model_dump(by_alias=False) for f in req.files] or None,
-        ):
-            # 客户端断开（用户点了「停止」）→ 优雅退出，不再继续烧 LLM 算力
-            if await request.is_disconnected():
-                logger.info("ask stream client disconnected, stop early", extra={"request_id": rid})
-                break
-            n += 1
-            yield {
-                "event": event["event"],
-                "data": json.dumps(event["data"], ensure_ascii=False),
-            }
+        # 流式生成器自己持有 DB 会话，并在生成结束后才关闭 ——
+        # 这样事务生命周期跟随 SSE 流，而非跟随「路由返回」（sse-starlette
+        # 在后台 task 跑生成器，路由早已 return，get_db 的 finally 会提前关会话，
+        # 导致会话/消息未提交就被回滚，表现为「刚问的对话从历史里凭空消失」）。
+        gen_db = AsyncSessionLocal()
+        try:
+            es = get_es()
+            if es.enabled and req.knowledge_base and await es.index_exists(req.knowledge_base):
+                retriever = ESRetriever(embedder, es, settings.RRF_K)
+            else:
+                # 未指定 KB 时，注入可访问范围做库级隔离过滤
+                retriever = HybridRetriever(
+                    embedder, gen_db, settings.RRF_K, kb_ids=accessible_kb_ids
+                )
+            pipeline = RAGPipeline(
+                retriever, llm, redis, gen_db,
+                user_id=str(user.id),
+                embedder=embedder,
+            )
+
+            async for event in pipeline.stream_answer(
+                question=req.question,
+                kb_id=req.knowledge_base,
+                session_id=req.session_id,
+                files=[f.model_dump(by_alias=False) for f in req.files] or None,
+            ):
+                # 客户端断开（用户点了「停止」）→ 优雅退出，不再继续烧 LLM 算力
+                if await request.is_disconnected():
+                    logger.info("ask stream client disconnected, stop early", extra={"request_id": rid})
+                    break
+                n += 1
+                yield {
+                    "event": event["event"],
+                    "data": json.dumps(event["data"], ensure_ascii=False),
+                }
+        finally:
+            await gen_db.close()
         logger.info("ask stream done events=%d", n, extra={"request_id": rid})
 
     return EventSourceResponse(event_generator())
