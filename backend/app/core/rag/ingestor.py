@@ -100,11 +100,18 @@ class DocumentIngester:
         """
         # 幂等摄入：先清该文档旧 chunk（PG）+ ES + 图谱，
         # 避免「审核通过 → 驳回 → 再审核通过」路径产生重复向量块 / 脏图节点
+        # 注意：清图谱节点需按 chunk_id 定位（KGNode.chunk_id 指向 DocChunk.id），
+        # 必须在删除 DocChunk 之前先把旧 chunk id 收集出来，否则删完就查不到了。
+        old_chunk_ids = (
+            await db.execute(
+                select(DocChunk.id).where(DocChunk.document_id == doc.id)
+            )
+        ).scalars().all()
         await db.execute(delete(DocChunk).where(DocChunk.document_id == doc.id))
         if self._es is not None and self._es.enabled:
             await self._es.delete_by_doc(doc.kb_id, doc.id)
         if self._graph is not None:
-            await self._graph.delete_by_doc(doc.kb_id, doc.id)
+            await self._graph.delete_by_doc(db, doc.kb_id, list(old_chunk_ids))
 
         # 双写：确保该 KB 的 ES 索引存在（幂等；不可用时返回 False，静默跳过）。
         if self._es is not None:
