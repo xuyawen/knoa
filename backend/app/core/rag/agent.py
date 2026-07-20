@@ -301,6 +301,12 @@ class AgenticRAGAgent:
                 )
             )
             await self.db.flush()
+            # 提前提交「会话 + 用户消息」：保证「用户已提问」这一事实在 LLM 生成前就落库。
+            # 否则一旦后续检索/生成环节抛异常，整段未提交事务会在 get_db 的
+            # db.close() 时回滚（asyncpg 行为），用户刚问的对话会从历史里凭空消失——
+            # 回复靠 SSE 已推到前端内存所以「看起来完整」，但库里查无此会话。
+            # 提前提交后，即使生成失败，会话与用户问题仍在，最多只丢回答。
+            await self.db.commit()
 
             # ponytail: 只统计真实业务提问，过滤打招呼/闲聊/天气等，避免污染"高频问题"
             if not _should_skip_retrieval(question):
@@ -949,7 +955,10 @@ class AgenticRAGAgent:
             s = result.scalar_one_or_none()
             if s:
                 return s
-        s = ChatSession(title=question[:50])
+        # 隐式建会话（主聊天里直接提问、未指定 session_id 时）必须绑定
+        # user_id，否则 list_sessions 按 user_id 过滤会把该会话排除，
+        # 导致「回复能显示、sessionId 也返回了，却在历史列表里找不到」。
+        s = ChatSession(title=question[:50], user_id=self.user_id)
         self.db.add(s)
         await self.db.flush()
         return s
