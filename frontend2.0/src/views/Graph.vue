@@ -247,11 +247,6 @@ const recentNodes = [
               <text y="4" text-anchor="middle" fill="#6B21A8" font-size="10" font-weight="600">降本增效</text>
             </g>
           </g>
-
-          <!-- 边标签样式 -->
-          <style>
-            .edge-label { font-size: 10px; font-weight: 500; }
-          </style>
         </svg>
 
         <!-- 底部控制 + 图例 -->
@@ -447,6 +442,7 @@ const recentNodes = [
     radial-gradient(circle at 70% 60%, rgba(16, 185, 129, 0.02) 0%, transparent 50%);
 }
 .force-graph:active { cursor: grabbing; }
+.edge-label { font-size: 10px; font-weight: 500; pointer-events: none; }
 
 /* 画布底部 */
 .canvas-footer {
