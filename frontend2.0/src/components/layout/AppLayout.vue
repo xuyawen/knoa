@@ -162,6 +162,11 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
             <span>{{ item.label }}</span>
           </button>
         </div>
+        <div class="sub-footer">
+          <button class="sub-collapse">
+            <Icon name="collapse" :size="14" /> 收起菜单
+          </button>
+        </div>
       </aside>
 
       <!-- 主内容区 -->
@@ -440,6 +445,32 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
   font-weight: 600;
   background: var(--brand-soft);
   border-right: 3px solid var(--brand);
+}
+
+.sub-footer {
+  padding: 12px 18px;
+  margin-top: auto;
+}
+.sub-collapse {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--dur-fast) var(--ease-out);
+  width: 100%;
+  justify-content: center;
+}
+.sub-collapse:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border-color: var(--border-strong);
 }
 
 /* 主内容区 */
