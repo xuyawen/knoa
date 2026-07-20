@@ -12,6 +12,7 @@ import Search from '@/views/Search.vue'
 import Chat from '@/views/Chat.vue'
 import Graph from '@/views/Graph.vue'
 import Permission from '@/views/Permission.vue'
+import Profile from '@/views/Profile.vue'
 import NotFound from '@/views/NotFound.vue'
 
 const routes: RouteRecordRaw[] = [
@@ -27,6 +28,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'chat', name: 'chat', component: Chat, meta: { title: 'AI 智能问答', icon: 'chat' } },
       { path: 'graph', name: 'graph', component: Graph, meta: { title: '知识图谱', icon: 'graph' } },
       { path: 'permission', name: 'permission', component: Permission, meta: { title: '权限管理', icon: 'shield' } },
+      { path: 'profile', name: 'profile', component: Profile, meta: { title: '个人中心', icon: 'user' } },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFound },

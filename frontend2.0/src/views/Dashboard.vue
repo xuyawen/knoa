@@ -1,44 +1,71 @@
 <script setup lang="ts">
-// 首页大盘 — 按 640(2).png 截图 1:1 还原。
-// 5 张指标卡 + 访问趋势折线图 + 文档分类饼图 + 近期操作记录表。
+// 首页大盘 — 1:1 还原截图布局（5 指标卡 + 图表行 + 表格）。
+// 后端无访问趋势/问答次数等分析接口，故「尽力映射」真实数据：
+//   · 指标卡：知识库数 / 文档总数 / 待复核 / 平均健康分 / 热门问题
+//   · 左面板：热门搜索榜（/api/trending）
+//   · 右面板：知识库文档分布（/api/knowledge-bases）
+//   · 底部表：知识库健康概览（health）
 // 所有颜色均走 style.css 的 CSS 变量（含暗色覆盖），不写死 hex。
-
-import { ref } from 'vue'
+import { computed, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useKnowledgeStore } from '@/stores/knowledge'
 import Icon from '@/components/ui/Icon.vue'
 
-const chartTab = ref('today')
-const chartTabs = [
-  { label: '今日', key: 'today' },
-  { label: '近7日', key: 'week' },
-  { label: '近30日', key: 'month' },
-]
+const kb = useKnowledgeStore()
+const { bases, health, trending } = storeToRefs(kb)
 
-// 指标卡数据 — tone 对应 style.css 语义 token（亮/暗自动协调）
-const stats = [
-  { icon: 'doc', tone: 'blue', label: '文档总数', value: '24,567', delta: '+320', up: true },
-  { icon: 'upload', tone: 'cyan', label: '今日新增文档', value: '128', delta: '+15', up: true },
-  { icon: 'chat', tone: 'green', label: 'AI问答次数', value: '2,345', delta: '+234', up: true },
-  { icon: 'search', tone: 'orange', label: '用户搜索次数', value: '8,765', delta: '+567', up: true },
-  { icon: 'users', tone: 'purple', label: '活跃用户数', value: '1,234', delta: '+123', up: true },
-]
+onMounted(() => {
+  if (!kb.loaded) kb.load()
+})
 
-// 饼图数据 — seg 对应 --cat-1..5 调色板 token；dash/offset 为环形分段几何
-const pieData = [
-  { label: '产品文档', value: 8456, pct: '34.43%', seg: 1, dash: '100 188.5', offset: 0 },
-  { label: '技术文档', value: 6789, pct: '27.66%', seg: 2, dash: '79.7 208.8', offset: -100 },
-  { label: '培训资料', value: 4321, pct: '17.60%', seg: 3, dash: '50.7 237.8', offset: -179.7 },
-  { label: '制度流程', value: 3210, pct: '13.08%', seg: 4, dash: '37.7 250.8', offset: -230.4 },
-  { label: '市场营销', value: 1791, pct: '7.30%', seg: 5, dash: '21 262.5', offset: -268.1 },
-]
+// ── 真实指标 ──
+const totalDocs = computed(() => bases.value.reduce((s, b) => s + b.documentCount, 0))
+const pendingDocs = computed(() => bases.value.reduce((s, b) => s + b.pendingCount, 0))
+const avgHealth = computed(() => {
+  if (!health.value.length) return 0
+  return Math.round(health.value.reduce((s, h) => s + h.healthScore, 0) / health.value.length)
+})
+const lowHealth = computed(() => health.value.filter((h) => h.healthScore < 70).length)
 
-// 操作记录数据 — tone 对应语义 badge token
-const operations = [
-  { time: '2024-05-20 14:30:25', user: '张三', type: '上传文档', typeIcon: 'upload', tone: 'blue', content: '上传了文档《产品使用手册.pdf》', doc: '产品使用手册.pdf', docLink: '#' },
-  { time: '2024-05-20 14:25:10', user: '李四', type: '更新文档', typeIcon: 'edit', tone: 'orange', content: '更新了文档《企业安全管理制度.docx》', doc: '企业安全管理制度.docx', docLink: '#' },
-  { time: '2024-05-20 14:20:45', user: '王五', type: '删除文档', typeIcon: 'trash', tone: 'red', content: '删除了文档《旧版合同模板.docx》', doc: '旧版合同模板.docx', docLink: '#' },
-  { time: '2024-05-20 14:15:30', user: '赵六', type: '用户登录', typeIcon: 'user', tone: 'purple', content: '用户登录系统', doc: '', docLink: '' },
-  { time: '2024-05-20 14:10:18', user: '孙七', type: 'AI问答', typeIcon: 'chat', tone: 'cyan', content: '通过AI问答获取了答案', doc: '', docLink: '' },
-]
+const stats = computed(() => [
+  { icon: 'folder', tone: 'blue', label: '知识库数', value: String(bases.value.length), delta: '', up: true },
+  { icon: 'doc', tone: 'cyan', label: '文档总数', value: totalDocs.value.toLocaleString(), delta: '', up: true },
+  { icon: 'warning', tone: 'orange', label: '待复核文档', value: String(pendingDocs.value), delta: '', up: pendingDocs.value === 0 },
+  { icon: 'heart', tone: 'green', label: '平均健康分', value: String(avgHealth.value), delta: '', up: avgHealth.value >= 70 },
+  { icon: 'search', tone: 'purple', label: '热门问题', value: String(trending.value.length), delta: '', up: true },
+])
+
+// ── 饼图：知识库文档分布（真实）──
+const pieTotal = computed(() => totalDocs.value)
+const CIRC = 2 * Math.PI * 46 // 环形周长 ≈ 289
+const pieData = computed(() => {
+  const total = pieTotal.value || 1
+  let acc = 0
+  const palette = [1, 2, 3, 4, 5]
+  return bases.value.map((b, i) => {
+    const v = b.documentCount
+    const frac = v / total
+    const len = frac * CIRC
+    const dash = `${len.toFixed(1)} ${(CIRC - len).toFixed(1)}`
+    const offset = (-acc * CIRC).toFixed(1)
+    acc += frac
+    return { label: b.name, value: v, pct: (frac * 100).toFixed(1) + '%', seg: palette[i % 5], dash, offset }
+  })
+})
+
+// ── 热门搜索榜（真实）──
+const topTrending = computed(() => trending.value.slice(0, 8))
+
+// ── 健康概览表（真实）──
+const healthRows = computed(() =>
+  health.value.map((h) => ({
+    name: h.kb,
+    docCount: h.docCount,
+    reviewRate: Math.round(h.reviewRate * 100),
+    retrievableRate: Math.round(h.retrievableRate * 100),
+    healthScore: h.healthScore,
+  })),
+)
 </script>
 
 <template>
@@ -53,7 +80,8 @@ const operations = [
           <div class="stat-label">{{ s.label }}</div>
           <div class="stat-value">{{ s.value }}</div>
           <div class="stat-delta" :class="{ up: s.up }">
-            较昨日 {{ s.delta }} {{ s.up ? '↑' : '↓' }}
+            <template v-if="s.delta">{{ s.delta }}</template>
+            <template v-else>实时</template>
           </div>
         </div>
       </div>
@@ -61,87 +89,30 @@ const operations = [
 
     <!-- ====== Row 2: 图表区（左右分栏）====== -->
     <div class="charts-row">
-      <!-- 左：访问趋势折线图 -->
+      <!-- 左：热门搜索榜 -->
       <div class="chart-panel card">
         <div class="panel-head">
-          <span class="panel-title">访问趋势</span>
-          <Icon name="alert" :size="14" class="info-hint" />
+          <span class="panel-title">热门搜索</span>
+          <Icon name="fire" :size="14" class="info-hint" />
         </div>
-        <!-- Tab 切换 -->
-        <div class="chart-tabs">
-          <button v-for="t in chartTabs" :key="t.key"
-            class="chart-tab" :class="{ active: chartTab === t.key }"
-            @click="chartTab = t.key">{{ t.label }}</button>
+        <div v-if="topTrending.length" class="trend-list">
+          <div v-for="(t, i) in topTrending" :key="t.question" class="trend-item">
+            <span class="trend-rank" :class="'rk-' + Math.min(i + 1, 3)">{{ i + 1 }}</span>
+            <span class="trend-q">{{ t.question }}</span>
+            <span class="trend-count">{{ t.count }}</span>
+          </div>
         </div>
-        <!-- 折线图 SVG -->
-        <svg viewBox="0 0 600 220" class="line-chart" preserveAspectRatio="none">
-          <!-- Y轴网格线 -->
-          <g class="grid-lines">
-            <line x1="44" y1="16" x2="584" y2="16" stroke-width="1" />
-            <line x1="44" y1="60" x2="584" y2="60" stroke-width="1" />
-            <line x1="44" y1="104" x2="584" y2="104" stroke-width="1" />
-            <line x1="44" y1="148" x2="584" y2="148" stroke-width="1" />
-            <line x1="44" y1="192" x2="584" y2="192" stroke-width="1" />
-          </g>
-          <!-- Y轴标签 -->
-          <g class="axis-labels" font-size="11">
-            <text x="36" y="20" text-anchor="end">1,800</text>
-            <text x="36" y="64" text-anchor="end">1,500</text>
-            <text x="36" y="108" text-anchor="end">1,200</text>
-            <text x="36" y="152" text-anchor="end">900</text>
-            <text x="36" y="196" text-anchor="end">300</text>
-            <text x="36" y="210" text-anchor="end">0</text>
-          </g>
-          <!-- X轴标签 -->
-          <g class="axis-labels" font-size="11">
-            <text x="50" y="212" text-anchor="middle">00:00</text>
-            <text x="96" y="212" text-anchor="middle">03:00</text>
-            <text x="142" y="212" text-anchor="middle">06:00</text>
-            <text x="188" y="212" text-anchor="middle">09:00</text>
-            <text x="235" y="212" text-anchor="middle">12:00</text>
-            <text x="281" y="212" text-anchor="middle">15:00</text>
-            <text x="327" y="212" text-anchor="middle">18:00</text>
-            <text x="373" y="212" text-anchor="middle">21:00</text>
-            <text x="420" y="212" text-anchor="middle">24:00</text>
-          </g>
-          <!-- 折线 + 面积 -->
-          <defs>
-            <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop class="grad-stop" offset="0%" stop-opacity="0.15" />
-              <stop class="grad-stop" offset="100%" stop-opacity="0.02" />
-            </linearGradient>
-          </defs>
-          <path class="trend-line"
-            d="M50,190 L73,186 L96,178 L119,172 L142,168 L165,162 L188,150 L211,138 L235,118 L258,95 L281,75 L304,68 L327,78 L350,92 L373,115 L396,140 L420,160 L443,175 L466,184 L489,188 L512,191 L535,189 L558,192 L580,195"
-                fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
-          <path d="M50,190 L73,186 L96,178 L119,172 L142,168 L165,162 L188,150 L211,138 L235,118 L258,95 L281,75 L304,68 L327,78 L350,92 L373,115 L396,140 L420,160 L443,175 L466,184 L489,188 L512,191 L535,189 L558,192 L580,195 L580,196 L50,196Z"
-            fill="url(#areaGrad)" />
-          <!-- 数据点 -->
-          <g class="trend-dot">
-            <circle cx="50" cy="190" r="3.5" /><circle cx="96" cy="178" r="3.5" /><circle cx="142" cy="168" r="3.5" />
-            <circle cx="188" cy="150" r="3.5" /><circle cx="235" cy="118" r="3.5" /><circle cx="281" cy="75" r="3.5" />
-            <circle cx="327" cy="78" r="3.5" /><circle cx="373" cy="115" r="3.5" /><circle cx="420" cy="160" r="3.5" />
-            <circle cx="466" cy="184" r="3.5" /><circle cx="512" cy="191" r="3.5" /><circle cx="558" cy="192" r="3.5" />
-          </g>
-          <!-- 白色内圈（截图风格）-->
-          <g fill="#fff">
-            <circle cx="50" cy="190" r="1.5" /><circle cx="96" cy="178" r="1.5" /><circle cx="142" cy="168" r="1.5" />
-            <circle cx="188" cy="150" r="1.5" /><circle cx="235" cy="118" r="1.5" /><circle cx="281" cy="75" r="1.5" />
-            <circle cx="327" cy="78" r="1.5" /><circle cx="373" cy="115" r="1.5" /><circle cx="420" cy="160" r="1.5" />
-            <circle cx="466" cy="184" r="1.5" /><circle cx="512" cy="191" r="1.5" /><circle cx="558" cy="192" r="1.5" />
-          </g>
-        </svg>
+        <div v-else class="empty-hint">暂无热门搜索数据</div>
       </div>
 
-      <!-- 右：文档分类占比饼图 -->
+      <!-- 右：知识库文档分布 -->
       <div class="pie-panel card">
         <div class="panel-head">
-          <span class="panel-title">文档分类占比</span>
+          <span class="panel-title">知识库文档分布</span>
           <Icon name="alert" :size="14" class="info-hint" />
         </div>
         <div class="pie-body">
           <div class="donut-chart">
-            <!-- SVG 环形图 -->
             <svg viewBox="0 0 120 120" class="donut-svg">
               <circle
                 v-for="p in pieData"
@@ -156,11 +127,10 @@ const operations = [
               />
             </svg>
             <div class="donut-center">
-              <div class="donut-total">24,567</div>
+              <div class="donut-total">{{ pieTotal.toLocaleString() }}</div>
               <div class="donut-label">文档总数</div>
             </div>
           </div>
-          <!-- 图例 -->
           <div class="pie-legend">
             <div v-for="p in pieData" :key="p.label" class="legend-item">
               <span class="legend-dot" :class="'seg-' + p.seg"></span>
@@ -173,32 +143,30 @@ const operations = [
       </div>
     </div>
 
-    <!-- ====== Row 3: 近期操作记录 ====== -->
+    <!-- ====== Row 3: 知识库健康概览 ====== -->
     <div class="ops-section card">
       <div class="panel-head">
-        <span class="panel-title">近期操作记录</span>
-        <a href="#" class="view-more">查看更多</a>
+        <span class="panel-title">知识库健康概览</span>
+        <span v-if="lowHealth" class="warn-flag">⚠ {{ lowHealth }} 个库健康分偏低</span>
       </div>
       <table class="ops-table">
         <thead>
           <tr>
-            <th>操作时间</th><th>操作用户</th><th>操作类型</th><th>操作内容</th><th>相关文档</th>
+            <th>知识库</th><th>文档数</th><th>审核率</th><th>可检索率</th><th>健康分</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(op, i) in operations" :key="i">
-            <td class="col-time">{{ op.time }}</td>
-            <td>{{ op.user }}</td>
+          <tr v-for="row in healthRows" :key="row.name">
+            <td class="col-name">{{ row.name }}</td>
+            <td>{{ row.docCount }}</td>
+            <td>{{ row.reviewRate }}%</td>
+            <td>{{ row.retrievableRate }}%</td>
             <td>
-              <span class="type-badge" :class="'tone-' + op.tone">
-                <Icon :name="op.typeIcon" :size="12" />{{ op.type }}
-              </span>
+              <span class="score-pill" :class="row.healthScore >= 70 ? 'ok' : 'bad'">{{ row.healthScore }}</span>
             </td>
-            <td class="col-content">{{ op.content }}</td>
-            <td>
-              <a v-if="op.doc" :href="op.docLink" class="doc-link">{{ op.doc }}</a>
-              <span v-else class="no-doc">-</span>
-            </td>
+          </tr>
+          <tr v-if="!healthRows.length">
+            <td colspan="5" class="empty-hint">暂无数据</td>
           </tr>
         </tbody>
       </table>
@@ -225,7 +193,6 @@ const operations = [
   align-items: flex-start;
   gap: 16px;
 }
-/* 图标底色/色随语义 token（亮/暗自动协调）*/
 .stat-card.tone-blue .stat-icon-wrap { background: var(--brand-soft); color: var(--brand); }
 .stat-card.tone-cyan .stat-icon-wrap { background: var(--info-soft); color: var(--info); }
 .stat-card.tone-green .stat-icon-wrap { background: var(--success-soft); color: var(--success); }
@@ -260,7 +227,7 @@ const operations = [
   font-size: 12px;
   color: var(--text-tertiary);
 }
-.stat-delta.up { color: var(--danger); }
+.stat-delta.up { color: var(--success); }
 
 /* ---- 图表行 ---- */
 .charts-row {
@@ -268,7 +235,6 @@ const operations = [
   grid-template-columns: 1.5fr 1fr;
   gap: 16px;
 }
-
 .panel-head {
   display: flex;
   align-items: center;
@@ -285,40 +251,54 @@ const operations = [
   cursor: pointer;
 }
 
-.chart-tabs {
+/* 热门搜索榜 */
+.trend-list {
   display: flex;
+  flex-direction: column;
   gap: 4px;
-  margin-bottom: 12px;
 }
-.chart-tab {
-  padding: 5px 16px;
+.trend-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
   border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all var(--dur-fast);
-  border: none;
-  font-family: inherit;
+  transition: background var(--dur-fast);
 }
-.chart-tab:hover { background: var(--bg-hover); }
-.chart-tab.active {
-  background: var(--brand);
-  color: #fff;
+.trend-item:hover { background: var(--bg-hover); }
+.trend-rank {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg-subtle);
+  color: var(--text-tertiary);
 }
-
-.line-chart {
-  width: 100%;
-  height: 220px;
+.trend-rank.rk-1 { background: var(--brand); color: #fff; }
+.trend-rank.rk-2 { background: var(--brand-soft); color: var(--brand); }
+.trend-rank.rk-3 { background: var(--warning-soft); color: var(--warning); }
+.trend-q {
+  flex: 1;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-/* ---- SVG 图表主题化：全部走 CSS 变量，跟随亮/暗切换 ---- */
-.grid-lines line { stroke: var(--border); }
-.axis-labels text { fill: var(--text-tertiary); }
-.trend-line { stroke: var(--brand); }
-.trend-dot { fill: var(--brand); }
-.grad-stop { stop-color: var(--brand); }
+.trend-count {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand);
+  background: var(--brand-soft);
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+}
 
 /* 饼图分类色（--cat-1..5 调色板）*/
 .donut-seg.seg-1 { stroke: var(--cat-1); }
@@ -332,7 +312,7 @@ const operations = [
 .legend-dot.seg-4 { background: var(--cat-4); }
 .legend-dot.seg-5 { background: var(--cat-5); }
 
-/* ---- 饼图面板 ---- */
+/* 饼图面板 */
 .pie-body {
   display: flex;
   align-items: center;
@@ -361,7 +341,6 @@ const operations = [
   font-size: 11px;
   color: var(--text-tertiary);
 }
-
 .pie-legend {
   flex: 1;
   display: flex;
@@ -397,22 +376,22 @@ const operations = [
   font-size: 12px;
 }
 
-/* ---- 操作记录表 ---- */
-/* 面板卡片统一内边距（全局 .card 无 padding，这里补齐，修复贴边）*/
+/* ---- 健康概览表 ---- */
 .chart-panel,
 .pie-panel,
 .ops-section {
   padding: 20px;
 }
 .ops-section { overflow: hidden; }
-.view-more {
+.warn-flag {
   margin-left: auto;
-  font-size: 13px;
-  color: var(--brand);
-  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warning);
+  background: var(--warning-soft);
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
 }
-.view-more:hover { text-decoration: underline; }
-
 .ops-table {
   width: 100%;
   border-collapse: collapse;
@@ -433,29 +412,22 @@ const operations = [
   color: var(--text-primary);
 }
 .ops-table tr:last-child td { border-bottom: none; }
-.col-time { color: var(--text-tertiary); white-space: nowrap; }
-.col-content { max-width: 320px; }
-
-.type-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
+.col-name { font-weight: 600; }
+.score-pill {
+  display: inline-block;
+  min-width: 30px;
+  text-align: center;
+  padding: 2px 10px;
   border-radius: var(--radius-pill);
+  font-weight: 700;
   font-size: 12px;
-  font-weight: 500;
 }
-/* 语义色调（操作类型），背景/文字跟随 token，暗色自动协调 */
-.type-badge.tone-blue { color: var(--brand); background: var(--brand-soft); }
-.type-badge.tone-cyan { color: var(--info); background: var(--info-soft); }
-.type-badge.tone-green { color: var(--success); background: var(--success-soft); }
-.type-badge.tone-orange { color: var(--warning); background: var(--warning-soft); }
-.type-badge.tone-purple { color: var(--node-tag); background: var(--tag-soft); }
-.type-badge.tone-red { color: var(--danger); background: var(--danger-soft); }
-.doc-link {
-  color: var(--brand);
-  text-decoration: none;
+.score-pill.ok { color: var(--success); background: var(--success-soft); }
+.score-pill.bad { color: var(--danger); background: var(--danger-soft); }
+.empty-hint {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
 }
-.doc-link:hover { text-decoration: underline; }
-.no-doc { color: var(--text-tertiary); }
 </style>
