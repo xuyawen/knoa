@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 首页大盘 — 按 640(2).png 截图 1:1 还原。
 // 5 张指标卡 + 访问趋势折线图 + 文档分类饼图 + 近期操作记录表。
-defineProps<{ activeTab?: number }>()
+// 所有颜色均走 style.css 的 CSS 变量（含暗色覆盖），不写死 hex。
 
 import { ref } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
@@ -13,31 +13,31 @@ const chartTabs = [
   { label: '近30日', key: 'month' },
 ]
 
-// 指标卡数据
+// 指标卡数据 — tone 对应 style.css 语义 token（亮/暗自动协调）
 const stats = [
-  { icon: 'doc', iconBg: '#E6F0FF', iconColor: '#014DB2', label: '文档总数', value: '24,567', delta: '+320', up: true },
-  { icon: 'upload', iconBg: '#DBEAFE', iconColor: '#3B82F6', label: '今日新增文档', value: '128', delta: '+15', up: true },
-  { icon: 'chat', iconBg: '#D1FAE5', iconColor: '#10B981', label: 'AI问答次数', value: '2,345', delta: '+234', up: true },
-  { icon: 'search', iconBg: '#FEF3C7', iconColor: '#F59E0B', label: '用户搜索次数', value: '8,765', delta: '+567', up: true },
-  { icon: 'users', iconBg: '#E0E7FF', iconColor: '#4F46E5', label: '活跃用户数', value: '1,234', delta: '+123', up: true },
+  { icon: 'doc', tone: 'blue', label: '文档总数', value: '24,567', delta: '+320', up: true },
+  { icon: 'upload', tone: 'cyan', label: '今日新增文档', value: '128', delta: '+15', up: true },
+  { icon: 'chat', tone: 'green', label: 'AI问答次数', value: '2,345', delta: '+234', up: true },
+  { icon: 'search', tone: 'orange', label: '用户搜索次数', value: '8,765', delta: '+567', up: true },
+  { icon: 'users', tone: 'purple', label: '活跃用户数', value: '1,234', delta: '+123', up: true },
 ]
 
-// 饼图数据
+// 饼图数据 — seg 对应 --cat-1..5 调色板 token；dash/offset 为环形分段几何
 const pieData = [
-  { label: '产品文档', value: 8456, pct: '34.43%', color: '#3B82F6' },
-  { label: '技术文档', value: 6789, pct: '27.66%', color: '#10B981' },
-  { label: '培训资料', value: 4321, pct: '17.60%', color: '#F59E0B' },
-  { label: '制度流程', value: 3210, pct: '13.08%', color: '#8B5CF6' },
-  { label: '市场营销', value: 1791, pct: '7.30%', color: '#06B6D4' },
+  { label: '产品文档', value: 8456, pct: '34.43%', seg: 1, dash: '100 188.5', offset: 0 },
+  { label: '技术文档', value: 6789, pct: '27.66%', seg: 2, dash: '79.7 208.8', offset: -100 },
+  { label: '培训资料', value: 4321, pct: '17.60%', seg: 3, dash: '50.7 237.8', offset: -179.7 },
+  { label: '制度流程', value: 3210, pct: '13.08%', seg: 4, dash: '37.7 250.8', offset: -230.4 },
+  { label: '市场营销', value: 1791, pct: '7.30%', seg: 5, dash: '21 262.5', offset: -268.1 },
 ]
 
-// 操作记录数据
+// 操作记录数据 — tone 对应语义 badge token
 const operations = [
-  { time: '2024-05-20 14:30:25', user: '张三', type: '上传文档', typeIcon: 'upload', typeColor: '#3B82F6', content: '上传了文档《产品使用手册.pdf》', doc: '产品使用手册.pdf', docLink: '#' },
-  { time: '2024-05-20 14:25:10', user: '李四', type: '更新文档', typeIcon: 'edit', typeColor: '#F59E0B', content: '更新了文档《企业安全管理制度.docx》', doc: '企业安全管理制度.docx', docLink: '#' },
-  { time: '2024-05-20 14:20:45', user: '王五', type: '删除文档', typeIcon: 'trash', typeColor: '#EF4444', content: '删除了文档《旧版合同模板.docx》', doc: '旧版合同模板.docx', docLink: '#' },
-  { time: '2024-05-20 14:15:30', user: '赵六', type: '用户登录', typeIcon: 'user', typeColor: '#8B5CF6', content: '用户登录系统', doc: '', docLink: '' },
-  { time: '2024-05-20 14:10:18', user: '孙七', type: 'AI问答', typeIcon: 'chat', typeColor: '#06B6D4', content: '通过AI问答获取了答案', doc: '', docLink: '' },
+  { time: '2024-05-20 14:30:25', user: '张三', type: '上传文档', typeIcon: 'upload', tone: 'blue', content: '上传了文档《产品使用手册.pdf》', doc: '产品使用手册.pdf', docLink: '#' },
+  { time: '2024-05-20 14:25:10', user: '李四', type: '更新文档', typeIcon: 'edit', tone: 'orange', content: '更新了文档《企业安全管理制度.docx》', doc: '企业安全管理制度.docx', docLink: '#' },
+  { time: '2024-05-20 14:20:45', user: '王五', type: '删除文档', typeIcon: 'trash', tone: 'red', content: '删除了文档《旧版合同模板.docx》', doc: '旧版合同模板.docx', docLink: '#' },
+  { time: '2024-05-20 14:15:30', user: '赵六', type: '用户登录', typeIcon: 'user', tone: 'purple', content: '用户登录系统', doc: '', docLink: '' },
+  { time: '2024-05-20 14:10:18', user: '孙七', type: 'AI问答', typeIcon: 'chat', tone: 'cyan', content: '通过AI问答获取了答案', doc: '', docLink: '' },
 ]
 </script>
 
@@ -45,9 +45,9 @@ const operations = [
   <div class="dashboard">
     <!-- ====== Row 1: 指标卡 ====== -->
     <div class="stats-row">
-      <div v-for="s in stats" :key="s.label" class="stat-card card">
-        <div class="stat-icon-wrap" :style="{ background: s.iconBg }">
-          <Icon :name="s.icon" :size="22" :style="{ color: s.iconColor }" />
+      <div v-for="s in stats" :key="s.label" class="stat-card card" :class="'tone-' + s.tone">
+        <div class="stat-icon-wrap">
+          <Icon :name="s.icon" :size="22" />
         </div>
         <div class="stat-info">
           <div class="stat-label">{{ s.label }}</div>
@@ -77,14 +77,14 @@ const operations = [
         <svg viewBox="0 0 600 220" class="line-chart" preserveAspectRatio="none">
           <!-- Y轴网格线 -->
           <g class="grid-lines">
-            <line x1="44" y1="16" x2="584" y2="16" stroke="#EEF2F8" stroke-width="1" />
-            <line x1="44" y1="60" x2="584" y2="60" stroke="#EEF2F8" stroke-width="1" />
-            <line x1="44" y1="104" x2="584" y2="104" stroke="#EEF2F8" stroke-width="1" />
-            <line x1="44" y1="148" x2="584" y2="148" stroke="#EEF2F8" stroke-width="1" />
-            <line x1="44" y1="192" x2="584" y2="192" stroke="#EEF2F8" stroke-width="1" />
+            <line x1="44" y1="16" x2="584" y2="16" stroke-width="1" />
+            <line x1="44" y1="60" x2="584" y2="60" stroke-width="1" />
+            <line x1="44" y1="104" x2="584" y2="104" stroke-width="1" />
+            <line x1="44" y1="148" x2="584" y2="148" stroke-width="1" />
+            <line x1="44" y1="192" x2="584" y2="192" stroke-width="1" />
           </g>
           <!-- Y轴标签 -->
-          <g class="y-labels" fill="#8A97AC" font-size="11">
+          <g class="axis-labels" font-size="11">
             <text x="36" y="20" text-anchor="end">1,800</text>
             <text x="36" y="64" text-anchor="end">1,500</text>
             <text x="36" y="108" text-anchor="end">1,200</text>
@@ -93,7 +93,7 @@ const operations = [
             <text x="36" y="210" text-anchor="end">0</text>
           </g>
           <!-- X轴标签 -->
-          <g class="x-labels" fill="#8A97AC" font-size="11">
+          <g class="axis-labels" font-size="11">
             <text x="50" y="212" text-anchor="middle">00:00</text>
             <text x="96" y="212" text-anchor="middle">03:00</text>
             <text x="142" y="212" text-anchor="middle">06:00</text>
@@ -107,16 +107,17 @@ const operations = [
           <!-- 折线 + 面积 -->
           <defs>
             <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#014DB2" stop-opacity="0.15" />
-              <stop offset="100%" stop-color="#014DB2" stop-opacity="0.02" />
+              <stop class="grad-stop" offset="0%" stop-opacity="0.15" />
+              <stop class="grad-stop" offset="100%" stop-opacity="0.02" />
             </linearGradient>
           </defs>
-          <path d="M50,190 L73,186 L96,178 L119,172 L142,168 L165,162 L188,150 L211,138 L235,118 L258,95 L281,75 L304,68 L327,78 L350,92 L373,115 L396,140 L420,160 L443,175 L466,184 L489,188 L512,191 L535,189 L558,192 L580,195"
-                fill="none" stroke="#014DB2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+          <path class="trend-line"
+            d="M50,190 L73,186 L96,178 L119,172 L142,168 L165,162 L188,150 L211,138 L235,118 L258,95 L281,75 L304,68 L327,78 L350,92 L373,115 L396,140 L420,160 L443,175 L466,184 L489,188 L512,191 L535,189 L558,192 L580,195"
+                fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
           <path d="M50,190 L73,186 L96,178 L119,172 L142,168 L165,162 L188,150 L211,138 L235,118 L258,95 L281,75 L304,68 L327,78 L350,92 L373,115 L396,140 L420,160 L443,175 L466,184 L489,188 L512,191 L535,189 L558,192 L580,195 L580,196 L50,196Z"
             fill="url(#areaGrad)" />
           <!-- 数据点 -->
-          <g fill="#014DB2">
+          <g class="trend-dot">
             <circle cx="50" cy="190" r="3.5" /><circle cx="96" cy="178" r="3.5" /><circle cx="142" cy="168" r="3.5" />
             <circle cx="188" cy="150" r="3.5" /><circle cx="235" cy="118" r="3.5" /><circle cx="281" cy="75" r="3.5" />
             <circle cx="327" cy="78" r="3.5" /><circle cx="373" cy="115" r="3.5" /><circle cx="420" cy="160" r="3.5" />
@@ -142,21 +143,17 @@ const operations = [
           <div class="donut-chart">
             <!-- SVG 环形图 -->
             <svg viewBox="0 0 120 120" class="donut-svg">
-              <!-- 产品文档 34.43% = 124° -->
-              <circle cx="60" cy="60" r="46" fill="none" stroke="#3B82F6" stroke-width="18"
-                stroke-dasharray="100 188.5" transform="rotate(-90 60 60)" />
-              <!-- 技术文档 27.66% = 99.6° -->
-              <circle cx="60" cy="60" r="46" fill="none" stroke="#10B981" stroke-width="18"
-                stroke-dasharray="79.7 208.8" stroke-dashoffset="-100" transform="rotate(-90 60 60)" />
-              <!-- 培训资料 17.60% = 63.4° -->
-              <circle cx="60" cy="60" r="46" fill="none" stroke="#F59E0B" stroke-width="18"
-                stroke-dasharray="50.7 237.8" stroke-dashoffset="-179.7" transform="rotate(-90 60 60)" />
-              <!-- 制度流程 13.08% = 47.1° -->
-              <circle cx="60" cy="60" r="46" fill="none" stroke="#8B5CF6" stroke-width="18"
-                stroke-dasharray="37.7 250.8" stroke-dashoffset="-230.4" transform="rotate(-90 60 60)" />
-              <!-- 市场营销 7.30% = 26.3° -->
-              <circle cx="60" cy="60" r="46" fill="none" stroke="#06B6D4" stroke-width="18"
-                stroke-dasharray="21 262.5" stroke-dashoffset="-268.1" transform="rotate(-90 60 60)" />
+              <circle
+                v-for="p in pieData"
+                :key="p.label"
+                cx="60" cy="60" r="46" fill="none"
+                stroke-width="18"
+                :stroke-dasharray="p.dash"
+                :stroke-dashoffset="p.offset"
+                class="donut-seg"
+                :class="'seg-' + p.seg"
+                transform="rotate(-90 60 60)"
+              />
             </svg>
             <div class="donut-center">
               <div class="donut-total">24,567</div>
@@ -166,7 +163,7 @@ const operations = [
           <!-- 图例 -->
           <div class="pie-legend">
             <div v-for="p in pieData" :key="p.label" class="legend-item">
-              <span class="legend-dot" :style="{ background: p.color }"></span>
+              <span class="legend-dot" :class="'seg-' + p.seg"></span>
               <span class="legend-label">{{ p.label }}</span>
               <span class="legend-value">{{ p.value.toLocaleString() }}</span>
               <span class="legend-pct">{{ p.pct }}</span>
@@ -193,7 +190,7 @@ const operations = [
             <td class="col-time">{{ op.time }}</td>
             <td>{{ op.user }}</td>
             <td>
-              <span class="type-badge" :style="{ color: op.typeColor, background: op.typeColor + '18' }">
+              <span class="type-badge" :class="'tone-' + op.tone">
                 <Icon :name="op.typeIcon" :size="12" />{{ op.type }}
               </span>
             </td>
@@ -233,6 +230,12 @@ const operations = [
   align-items: flex-start;
   gap: 16px;
 }
+/* 图标底色/色随语义 token（亮/暗自动协调）*/
+.stat-card.tone-blue .stat-icon-wrap { background: var(--brand-soft); color: var(--brand); }
+.stat-card.tone-cyan .stat-icon-wrap { background: var(--info-soft); color: var(--info); }
+.stat-card.tone-green .stat-icon-wrap { background: var(--success-soft); color: var(--success); }
+.stat-card.tone-orange .stat-icon-wrap { background: var(--warning-soft); color: var(--warning); }
+.stat-card.tone-purple .stat-icon-wrap { background: var(--tag-soft); color: var(--node-tag); }
 .stat-icon-wrap {
   width: 48px;
   height: 48px;
@@ -262,7 +265,7 @@ const operations = [
   font-size: 12px;
   color: var(--text-tertiary);
 }
-.stat-delta.up { color: #EF4444; }
+.stat-delta.up { color: var(--danger); }
 
 /* ---- 图表行 ---- */
 .charts-row {
@@ -315,12 +318,30 @@ const operations = [
   height: 220px;
 }
 
+/* ---- SVG 图表主题化：全部走 CSS 变量，跟随亮/暗切换 ---- */
+.grid-lines line { stroke: var(--border); }
+.axis-labels text { fill: var(--text-tertiary); }
+.trend-line { stroke: var(--brand); }
+.trend-dot { fill: var(--brand); }
+.grad-stop { stop-color: var(--brand); }
+
+/* 饼图分类色（--cat-1..5 调色板）*/
+.donut-seg.seg-1 { stroke: var(--cat-1); }
+.donut-seg.seg-2 { stroke: var(--cat-2); }
+.donut-seg.seg-3 { stroke: var(--cat-3); }
+.donut-seg.seg-4 { stroke: var(--cat-4); }
+.donut-seg.seg-5 { stroke: var(--cat-5); }
+.legend-dot.seg-1 { background: var(--cat-1); }
+.legend-dot.seg-2 { background: var(--cat-2); }
+.legend-dot.seg-3 { background: var(--cat-3); }
+.legend-dot.seg-4 { background: var(--cat-4); }
+.legend-dot.seg-5 { background: var(--cat-5); }
+
 /* ---- 饼图面板 ---- */
 .pie-body {
   display: flex;
   align-items: center;
   gap: 24px;
-  padding: 8px 0;
 }
 .donut-chart {
   position: relative;
@@ -382,6 +403,12 @@ const operations = [
 }
 
 /* ---- 操作记录表 ---- */
+/* 面板卡片统一内边距（全局 .card 无 padding，这里补齐，修复贴边）*/
+.chart-panel,
+.pie-panel,
+.ops-section {
+  padding: 20px;
+}
 .ops-section { overflow: hidden; }
 .view-more {
   margin-left: auto;
@@ -423,6 +450,13 @@ const operations = [
   font-size: 12px;
   font-weight: 500;
 }
+/* 语义色调（操作类型），背景/文字跟随 token，暗色自动协调 */
+.type-badge.tone-blue { color: var(--brand); background: var(--brand-soft); }
+.type-badge.tone-cyan { color: var(--info); background: var(--info-soft); }
+.type-badge.tone-green { color: var(--success); background: var(--success-soft); }
+.type-badge.tone-orange { color: var(--warning); background: var(--warning-soft); }
+.type-badge.tone-purple { color: var(--node-tag); background: var(--tag-soft); }
+.type-badge.tone-red { color: var(--danger); background: var(--danger-soft); }
 .doc-link {
   color: var(--brand);
   text-decoration: none;

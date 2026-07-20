@@ -45,6 +45,16 @@
   --node-tag: #8B5CF6;        /* 标签 · 紫 */
   --node-category: #F59E0B;    /* 业务分类 · 橙 */
 
+  /* ---- 标签/紫色软底（指标卡、badge 复用）---- */
+  --tag-soft: #E0E7FF;
+
+  /* ---- 饼图分类调色板（跟随主题，不写死）---- */
+  --cat-1: #3B82F6;          /* 产品文档 · 蓝 */
+  --cat-2: #10B981;          /* 技术文档 · 绿 */
+  --cat-3: #F59E0B;          /* 培训资料 · 橙 */
+  --cat-4: #8B5CF6;          /* 制度流程 · 紫 */
+  --cat-5: #06B6D4;          /* 市场营销 · 青 */
+
   /* ---- 阴影 ---- */
   --shadow-card: 0 1px 3px rgba(10, 22, 40, 0.06);
   --shadow-float: 0 8px 24px rgba(10, 22, 40, 0.12);
@@ -63,8 +73,8 @@
   --font-display: 'Outfit', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
 
   /* ---- 布局尺寸 ---- */
-  --sidebar-w: 232px;
-  --topbar-h: 60px;
+  --sidebar-w: 196px;
+  --topbar-h: 58px;
   --content-max: 1320px;
 
   /* ---- 按钮统一尺寸 ---- */
@@ -115,6 +125,14 @@
   --node-knowledge: #34D399;
   --node-tag: #A78BFA;
   --node-category: #FBBF24;
+
+  --tag-soft: #1E1B3A;
+
+  --cat-1: #60A5FA;
+  --cat-2: #34D399;
+  --cat-3: #FBBF24;
+  --cat-4: #A78BFA;
+  --cat-5: #22D3EE;
 
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.5);

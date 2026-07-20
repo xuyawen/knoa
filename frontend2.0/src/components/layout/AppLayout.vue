@@ -189,7 +189,7 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
 
 /* ==================== 顶部导航栏 ==================== */
 .topbar {
-  height: 58px;
+  height: var(--topbar-h);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -268,7 +268,7 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
   height: 16px;
   padding: 0 4px;
   border-radius: 8px;
-  background: #FF4D4F;
+  background: var(--danger);
   color: #fff;
   font-size: 10px;
   font-weight: 700;
@@ -397,7 +397,7 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
 
 /* 左侧子侧栏 */
 .sub-sidebar {
-  width: 196px;
+  width: var(--sidebar-w);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
