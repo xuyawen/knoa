@@ -1,123 +1,200 @@
 <script setup lang="ts">
-// 智能搜索 — 按 640(4).png 截图 1:1 还原。
+// 智能搜索 — 搜索即问答：复用 /api/ask 流式接口，
+// 把输入当作问题直接检索，结果以「AI 答案 + 溯源卡片」呈现。
+// 去掉了原 mock 中无后端支撑的假筛选下拉与假统计数。
 defineProps<{ activeTab?: number }>()
 
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
+import { useToastStore } from '@/stores/toast'
+import { streamAsk } from '@/api'
+import type { ThinkingStep, SourceItem } from '@/types/api'
 
-const searchQuery = ref('企业数据安全管理规范')
-const viewMode = ref<'list' | 'grid'>('list')
+const toast = useToastStore()
 
-const results = [
-  {
-    icon: 'doc', iconBg: '#E6F0FF', iconColor: '#3B82F6', iconLetter: 'W',
-    title: '企业数据安全管理规范 v2.1',
-    summary: '…为加强企业<strong>数据安全</strong>管理，规范数据处理活动，保障数据安全，特制定本规范。本规范适用于公司及各子公司全体员工，涵盖数据收集、存储、使用、传输、销毁全生命周期需要…',
-    source: '安全管理 > 数据安全',
-    time: '2024-05-20 10:30',
-    scope: '仅企业内部可见',
-  },
-  {
-    icon: 'pdf', iconBg: '#FEE2E2', iconColor: '#EF4444', iconLetter: '',
-    title: '数据安全分级分类实施指南',
-    summary: '…本指南围绕<strong>数据安全</strong>分级分类方法展开，帮助企业识别和划分数据重要性等级，明确不同级别数据的安全保护措施和管理要求，提升整体<strong>数据安全</strong>防护能力…',
-    source: '安全管理 > 实施指南',
-    time: '2024-04-28 15:45',
-    scope: '仅企业内部可见',
-  },
-  {
-    icon: 'excel', iconBg: '#D1FAE5', iconColor: '#10B981', iconLetter: '',
-    title: '数据安全检查清单（2024版）',
-    summary: '…本清单用于检查企业<strong>数据安全</strong>管理的合规性，内容包括数据权限管理、数据脱敏、日志审计、应急响应等关键控制点，确保<strong>数据安全</strong>管理措施有效落地…',
-    source: '安全管理 > 检查清单',
-    time: '2024-05-15 09:20',
-    scope: '部分部门可见',
-  },
-  {
-    icon: 'pptx', iconBg: '#FEF3C7', iconColor: '#F59E0B', iconLetter: '',
-    title: '数据安全培训课件',
-    summary: '…本课件适用于员工<strong>数据安全</strong>意识培训，内容涵盖<strong>数据安全</strong>法规、公司政策、案例分析及最佳实践，帮助员工理解并遵守<strong>数据安全</strong>管理要求…',
-    source: '培训资料 > 安全培训',
-    time: '2024-03-30 11:10',
-    scope: '仅企业内部可见',
-  },
+const query = ref('')
+const submitted = ref('')        // 当前已提交的问题
+const answer = ref('')           // 流式累积的回答正文
+const sources = ref<SourceItem[]>([])
+const thinking = ref<ThinkingStep[]>([])
+const streaming = ref(false)
+const errorMsg = ref('')
+const showThinking = ref(false)
+const askAbort = ref<AbortController | null>(null)
+const scrollRef = ref<HTMLElement | null>(null)
+
+const suggested = [
+  '数据安全分级分类标准是怎样的？',
+  '员工入职需要准备哪些材料？',
+  '差旅报销流程是什么？',
+  '如何申请系统权限？',
 ]
 
-function clearSearch() { searchQuery.value = '' }
-function clearFilters() {}
+function scrollToBottom() {
+  nextTick(() => {
+    const el = scrollRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+}
+
+async function runSearch() {
+  const text = query.value.trim()
+  if (!text || streaming.value) return
+  submitted.value = text
+  answer.value = ''
+  sources.value = []
+  thinking.value = []
+  errorMsg.value = ''
+  showThinking.value = false
+  streaming.value = true
+
+  const ac = new AbortController()
+  askAbort.value = ac
+  try {
+    // 纯搜索场景：不挂 sessionId，走全局检索；事件结构与 Chat 完全一致
+    for await (const ev of streamAsk(text, null, null, undefined, { signal: ac.signal })) {
+      if (ev.event === 'thinking') {
+        thinking.value = [...thinking.value, ev.data as ThinkingStep]
+      } else if (ev.event === 'sources') {
+        sources.value = ev.data as SourceItem[]
+      } else if (ev.event === 'delta') {
+        answer.value += (ev.data as { content: string }).content
+        scrollToBottom()
+      } else if (ev.event === 'error') {
+        errorMsg.value = (ev.data as { message: string }).message
+        toast.error(`搜索出错：${errorMsg.value}`)
+      }
+      // 'done' / 'message' 在搜索场景无需持久化，忽略
+    }
+  } catch (e: any) {
+    if (e?.name !== 'AbortError') {
+      toast.error(`搜索中断：${e?.message || e}`)
+    }
+  } finally {
+    streaming.value = false
+    askAbort.value = null
+  }
+}
+
+function stop() {
+  askAbort.value?.abort()
+}
+
+function resetSearch() {
+  submitted.value = ''
+  answer.value = ''
+  sources.value = []
+  thinking.value = []
+  errorMsg.value = ''
+}
+
+function pick(s: string) {
+  query.value = s
+  runSearch()
+}
+
+function clearSearch() {
+  query.value = ''
+}
 </script>
 
 <template>
   <div class="search-page">
-    <!-- 页面标题 -->
     <h2 class="page-title">智能搜索</h2>
 
     <!-- ====== 搜索栏 ====== -->
     <div class="search-bar-row card">
       <div class="search-input-wrap">
         <Icon name="search" :size="17" class="sb-icon" />
-        <input v-model="searchQuery" type="text" placeholder="搜索文档名称、内容..." class="sb-input" />
-        <button v-if="searchQuery" class="sb-clear" @click="clearSearch">
+        <input
+          v-model="query"
+          type="text"
+          placeholder="搜文档、问制度、查流程…"
+          class="sb-input"
+          @keydown.enter="runSearch"
+        />
+        <button v-if="query" class="sb-clear" @click="clearSearch">
           <Icon name="close" :size="13" />
         </button>
       </div>
-      <button class="btn btn-primary sb-btn">搜索</button>
-
-      <a href="#" class="adv-search-link">高级搜索 <Icon name="chevron-down" :size="11" /></a>
-    </div>
-
-    <!-- ====== 筛选行 ====== -->
-    <div class="filter-row">
-      <div class="filter-item">
-        <span class="filter-label">文件类型：</span>
-        <div class="filter-dropdown">全部类别 <Icon name="chevron-down" :size="11" /></div>
-      </div>
-      <div class="filter-item">
-        <span class="filter-label">更新时间：</span>
-        <div class="filter-dropdown">全部时间 <Icon name="chevron-down" :size="11" /></div>
-      </div>
-      <div class="filter-item">
-        <span class="filter-label">文档分类：</span>
-        <div class="filter-dropdown">全部分类 <Icon name="chevron-down" :size="11" /></div>
-      </div>
-      <div class="filter-item">
-        <span class="filter-label">权限范围：</span>
-        <div class="filter-dropdown">全部权限 <Icon name="chevron-down" :size="11" /></div>
-      </div>
-      <button class="clear-filters" @click="clearFilters">
-        <Icon name="refresh" :size="12" /> 清空
-      </button>
-      <button class="expand-filter">
-        展开 <Icon name="chevron-down" :size="11" />
+      <button
+        class="btn btn-primary sb-btn"
+        :disabled="!query.trim() || streaming"
+        @click="runSearch"
+      >
+        {{ streaming ? '检索中…' : '搜索' }}
       </button>
     </div>
 
-    <!-- ====== 结果统计 + 排序 ====== -->
-    <div class="result-header">
-      <span class="result-count">找到约 <strong>128</strong> 条结果 (用时 0.23 秒)</span>
-      <div class="result-actions">
-        <div class="sort-select">相关度排序 <Icon name="chevron-down" :size="11" /></div>
-        <button class="view-toggle" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'"><Icon name="listview" :size="16" /></button>
-        <button class="view-toggle" :class="{ active: viewMode === 'grid' }" @click="viewMode = 'grid'"><Icon name="gridview" :size="16" /></button>
-      </div>
+    <!-- 空状态：热门搜索建议 -->
+    <div v-if="!submitted" class="suggest-row">
+      <span class="suggest-label">大家都在搜</span>
+      <button v-for="(s, i) in suggested" :key="i" class="chip" @click="pick(s)">{{ s }}</button>
     </div>
 
-    <!-- ====== 搜索结果卡片列表 ====== -->
-    <div class="result-list">
-      <div v-for="(r, i) in results" :key="i" class="result-card card">
-        <div class="rc-head">
-          <div class="rc-icon" :style="{ background: r.iconBg }">
-            <span v-if="r.iconLetter" class="rc-letter" :style="{ color: r.iconColor }">{{ r.iconLetter }}</span>
-            <Icon v-else :name="r.icon === 'pdf' ? 'pdf' : r.icon === 'excel' ? 'excel' : r.icon === 'pptx' ? 'pptx' : 'doc'" :size="22" :style="{ color: r.iconColor }" />
+    <!-- ====== 结果区 ====== -->
+    <div v-else class="result-area" ref="scrollRef">
+      <!-- 问题头 -->
+      <div class="result-head">
+        <h3 class="result-q">{{ submitted }}</h3>
+        <button class="btn-ghost-sm" @click="resetSearch">新搜索</button>
+      </div>
+
+      <!-- 思考过程（折叠） -->
+      <div v-if="thinking.length" class="thinking">
+        <button class="thinking-toggle" @click="showThinking = !showThinking">
+          <Icon name="sparkles" :size="13" />
+          AI 检索过程（{{ thinking.length }} 步）
+          <Icon name="chevron-down" :size="11" :class="{ rotated: showThinking }" />
+        </button>
+        <ul v-if="showThinking" class="thinking-list">
+          <li v-for="t in thinking" :key="t.step">
+            <span class="think-action">{{ t.action }}</span>
+            <span class="think-detail">{{ t.detail }}</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- 回答正文 -->
+      <div class="answer-card card">
+        <div v-if="answer" class="answer-body">{{ answer }}</div>
+        <div v-else-if="streaming" class="answer-loading">
+          <span class="dot" /><span class="dot" /><span class="dot" />
+        </div>
+        <div v-else-if="errorMsg" class="answer-error">{{ errorMsg }}</div>
+      </div>
+
+      <!-- 来源卡片（溯源） -->
+      <div v-if="sources.length" class="refs-section">
+        <div class="refs-label">为你检索到 {{ sources.length }} 个相关来源</div>
+        <div class="refs-list">
+          <div v-for="(s, i) in sources" :key="s.id ?? i" class="ref-card card">
+            <div class="ref-icon" :class="`src-${s.sourceType || 'kb'}`">
+              <Icon
+                :name="s.sourceType === 'web' ? 'globe' : s.sourceType === 'graph' ? 'node' : 'doc'"
+                :size="16"
+              />
+            </div>
+            <div class="ref-info">
+              <div class="ref-name">{{ s.title }}</div>
+              <div class="ref-meta">
+                <span class="ref-kb">{{ s.kb }}</span>
+                <span v-if="s.confidence" class="ref-conf">相关度 {{ Math.round(s.confidence * 100) }}%</span>
+              </div>
+              <div class="ref-snippet">{{ s.snippet }}</div>
+            </div>
           </div>
-          <h3 class="rc-title">{{ r.title }}</h3>
         </div>
-        <p class="rc-summary" v-html="r.summary"></p>
-        <div class="rc-meta">
-          <span class="meta-item"><Icon name="folder" :size="12" /> 来源：{{ r.source }}</span>
-          <span class="meta-item"><Icon name="clock" :size="12" /> 更新时间：{{ r.time }}</span>
-          <span class="meta-item meta-scope"><Icon name="shield" :size="12" /> 权限：{{ r.scope }}</span>
-        </div>
+      </div>
+
+      <!-- 停止 / 重新搜索 -->
+      <div class="result-actions">
+        <button v-if="streaming" class="btn btn-ghost" @click="stop">
+          <Icon name="close" :size="14" /> 停止
+        </button>
+        <button v-else class="btn btn-ghost" @click="runSearch">
+          <Icon name="refresh" :size="14" /> 重新搜索
+        </button>
       </div>
     </div>
   </div>
@@ -181,184 +258,183 @@ function clearFilters() {}
   color: var(--text-tertiary);
   cursor: pointer;
   background: transparent;
+  border: none;
 }
 .sb-clear:hover { background: var(--bg-hover); }
 .sb-btn { height: 42px; padding: 0 28px; font-size: 14px; }
 
-.adv-search-link {
-  margin-left: auto;
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-decoration: none;
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.adv-search-link:hover { color: var(--brand); }
-
-/* ---- 筛选行 ---- */
-.filter-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 8px 0;
-}
-.filter-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.filter-label {
-  font-size: 13px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-.filter-dropdown {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  color: var(--text-primary);
-  cursor: pointer;
-  background: var(--bg-surface);
-  white-space: nowrap;
-}
-.filter-dropdown:hover { border-color: var(--brand); }
-.clear-filters, .expand-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 12px;
-  border: none;
-  background: transparent;
-  font-size: 13px;
-  color: var(--brand);
-  cursor: pointer;
-  font-family: inherit;
-}
-.clear-filters:hover, .expand-filter:hover { opacity: 0.75; }
-
-/* ---- 结果头 ---- */
-.result-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 0 8px;
-}
-.result-count {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.result-count strong { color: var(--text-primary); }
-.result-actions {
+/* ---- 建议 ---- */
+.suggest-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 0;
 }
-.sort-select {
+.suggest-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+.chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 5px 12px;
+  padding: 6px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
+  border-radius: var(--radius-pill);
+  font-size: 12.5px;
+  color: var(--text-primary);
   background: var(--bg-surface);
-}
-
-.view-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-tertiary);
   cursor: pointer;
+  transition: all var(--dur-fast);
+  white-space: nowrap;
+  font-family: inherit;
 }
-.view-toggle:hover { background: var(--bg-hover); color: var(--text-secondary); }
-.view-toggle.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.chip:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
 
-/* ---- 结果卡片 ---- */
-.result-list {
+/* ---- 结果区 ---- */
+.result-area {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
-.result-card {
-  padding: 18px 20px;
-  transition: box-shadow var(--dur-fast), transform var(--dur-fast);
-}
-.result-card:hover {
-  box-shadow: var(--shadow-float);
-  transform: translateY(-1px);
-}
-
-.rc-head {
+.result-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
 }
-.rc-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+.result-q {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.4;
+}
+.btn-ghost-sm {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--dur-fast);
+}
+.btn-ghost-sm:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* 思考过程 */
+.thinking {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+.thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.thinking-toggle .chevron-down { margin-left: auto; transition: transform var(--dur-fast); color: var(--text-tertiary); }
+.thinking-toggle .chevron-down.rotated { transform: rotate(180deg); }
+.thinking-list { margin: 0; padding: 4px 12px 10px 26px; }
+.thinking-list li { font-size: 12px; color: var(--text-tertiary); margin-bottom: 4px; line-height: 1.5; }
+.think-action {
+  display: inline-block;
+  padding: 0 7px;
+  margin-right: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 600;
+}
+
+/* 回答正文 */
+.answer-card {
+  padding: 18px 20px;
+}
+.answer-body {
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.answer-loading { display: flex; gap: 5px; padding: 4px 0; }
+.answer-loading .dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary);
+  animation: blink 1.2s infinite ease-in-out;
+}
+.answer-loading .dot:nth-child(2) { animation-delay: 0.2s; }
+.answer-loading .dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+.answer-error { font-size: 12.5px; color: #DC2626; }
+
+/* 来源卡片（溯源） */
+.refs-section { margin-top: 2px; }
+.refs-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; }
+.refs-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.ref-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  transition: box-shadow var(--dur-fast), transform var(--dur-fast);
+}
+.ref-card:hover { box-shadow: var(--shadow-float); transform: translateY(-1px); }
+.ref-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
-.rc-letter {
-  font-size: 18px;
-  font-weight: 800;
-  font-family: var(--font-display);
-}
-.rc-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0;
-  line-height: 1.35;
-}
-
-.rc-summary {
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--text-secondary);
-  margin: 0 0 12px;
-}
-/* 高亮关键词 */
-.rc-summary :deep(strong) {
-  background: linear-gradient(120deg, rgba(245, 158, 11, 0.25), rgba(245, 158, 11, 0.15));
-  color: #92400E;
-  padding: 0 2px;
-  border-radius: 2px;
-  font-weight: 600;
+.ref-icon.src-kb { background: #DBEAFE; color: #1E40AF; }
+.ref-icon.src-web { background: #D1FAE5; color: #065F46; }
+.ref-icon.src-graph { background: #FEF3C7; color: #92400E; }
+.ref-info { min-width: 0; }
+.ref-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-tertiary); margin: 2px 0 4px; }
+.ref-kb { color: var(--brand); }
+.ref-snippet {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.rc-meta {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-.meta-item {
+/* 操作 */
+.result-actions { display: flex; gap: 8px; }
+.btn-ghost {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-tertiary);
+  gap: 5px;
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--dur-fast);
 }
-.meta-scope { color: var(--brand); font-weight: 500; }
-
+.btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
 </style>
