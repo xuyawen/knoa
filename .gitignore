@@ -41,6 +41,12 @@ deploy/backup/*.sql
 # 命名形如 AI学习笔记_*.md 的学习笔记均忽略，不在项目内同步
 AI学习笔记_*.md
 
+# interview prep materials (user-only, NEVER commit to git)
+# 面试复习/面试相关 md 一律不入库
+INTERVIEW*.md
+*面试*.md
+*interview*.md
+
 # secrets — global fallback (never commit private keys / certs / macOS cruft)
 *.pem
 *.key
