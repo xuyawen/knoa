@@ -269,7 +269,7 @@ const recentNodes = [
             <span class="leg-line leg-solid"></span> 包含
           </div>
         </div>
-        <p class="canvas-hint">💡 拖拽节点可移动，滚轮缩放画布</p>
+        <p class="canvas-hint">拖拽节点可移动，滚轮缩放画布</p>
       </div>
 
       <!-- 右：数据面板 -->

@@ -7,6 +7,11 @@ import { ref } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 
 const chartTab = ref('today')
+const chartTabs = [
+  { label: '今日', key: 'today' },
+  { label: '近7日', key: 'week' },
+  { label: '近30日', key: 'month' },
+]
 
 // 指标卡数据
 const stats = [
@@ -64,9 +69,9 @@ const operations = [
         </div>
         <!-- Tab 切换 -->
         <div class="chart-tabs">
-          <button v-for="t in ['今日', '近7日', '近30日']" :key="t"
-            class="chart-tab" :class="{ active: (t === '今日' && chartTab === 'today') || (t === '近7日' && chartTab === 'week') || (t === '近30日' && chartTab === 'month') }"
-            @click="chartTab = t.toLowerCase()">{{ t }}</button>
+          <button v-for="t in chartTabs" :key="t.key"
+            class="chart-tab" :class="{ active: chartTab === t.key }"
+            @click="chartTab = t.key">{{ t.label }}</button>
         </div>
         <!-- 折线图 SVG -->
         <svg viewBox="0 0 600 220" class="line-chart" preserveAspectRatio="none">
