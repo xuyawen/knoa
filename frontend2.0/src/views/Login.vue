@@ -30,6 +30,16 @@ async function handleLogin() {
 
 <template>
   <div class="login-page">
+    <!-- ====== 顶部栏：仅 logo + 系统名（无菜单）====== -->
+    <header class="login-topbar">
+      <div class="login-topbar-brand">
+        <img src="/favicon.svg" alt="Knoa" class="login-topbar-logo" />
+        <span class="login-topbar-title">企业智能知识库系统</span>
+      </div>
+    </header>
+
+    <!-- ====== 主体行：左侧品牌区 + 右侧卡片 ====== -->
+    <div class="login-body">
     <!-- ====== 左侧品牌区 ====== -->
     <div class="login-brand">
       <h1 class="brand-title">企业智能知识库系统</h1>
@@ -116,6 +126,7 @@ async function handleLogin() {
         </div>
       </div>
     </div>
+    </div>
   </div>
 </template>
 
@@ -123,8 +134,44 @@ async function handleLogin() {
 /* ========== 页面容器 — 淡蓝白渐变背景 ========== */
 .login-page {
   display: flex;
+  flex-direction: column;
   min-height: 100vh;
   background: linear-gradient(135deg, #F0F5FF 0%, #F7FAFC 45%, #FFFFFF 100%);
+}
+
+/* ========== 顶部栏：仅 logo + 系统名（与 AppLayout 顶栏同款样式，无菜单）========== */
+.login-topbar {
+  height: 58px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+.login-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.login-topbar-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+.login-topbar-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+/* ========== 主体行：左侧品牌区 + 右侧卡片 ========== */
+.login-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 /* ========== 左侧品牌区 ========== */
