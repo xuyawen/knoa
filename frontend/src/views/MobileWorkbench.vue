@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useChatStore } from '@/stores/chat'
@@ -115,11 +115,17 @@ const kbCards = computed(() => {
   return [...fromKb, ...fromWs]
 })
 
+function onDocClick(e: MouseEvent) {
+  const t = e.target as HTMLElement
+  if (!t.closest('.kb-dropdown')) kbDropdownOpen.value = false
+}
+
 onMounted(() => {
-  document.addEventListener('click', (e: MouseEvent) => {
-    const t = e.target as HTMLElement
-    if (!t.closest('.kb-dropdown')) kbDropdownOpen.value = false
-  })
+  document.addEventListener('click', onDocClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocClick)
 })
 </script>
 

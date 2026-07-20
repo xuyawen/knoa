@@ -18,6 +18,7 @@ from app.core.metrics import (
 )
 from app.core.security import create_access_token, decode_access_token
 from app.database import AsyncSessionLocal
+from app.deps import get_es
 from app.db import ChatSession, User
 from app.routers import (
     ask,
@@ -69,6 +70,12 @@ async def lifespan(app: FastAPI):
         )
         await session.commit()
     yield
+
+    # 统一关闭 ES 单例（httpx 连接池），避免连接泄漏（P1-1）
+    try:
+        await get_es().aclose()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="知海 Knoa API", version="0.1.0", lifespan=lifespan)

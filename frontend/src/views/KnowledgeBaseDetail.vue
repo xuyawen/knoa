@@ -66,9 +66,10 @@ const kbId = computed(() => route.params.id as string)
 const kb = computed(() => {
   const s = knowledgeStore.bases.find(b => b.id === kbId.value)
   const base = kbMap[kbId.value] || { name: '未知', description: '' }
+  // 优先用后端返回的实时 name/description（后台可编辑），kbMap 仅作找不到时的兜底
   return {
     name: s?.name || base.name,
-    description: base.description,
+    description: s?.description || base.description,
   }
 })
 

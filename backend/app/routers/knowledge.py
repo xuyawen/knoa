@@ -21,7 +21,7 @@ from app.core.security import (
     require_roles,
 )
 from app.db import DocChunk, Document, KBPermission, KnowledgeBase, User
-from app.deps import get_db, get_embedder, get_llm
+from app.deps import get_db, get_embedder, get_llm, get_es
 from app.models.knowledge import (
     AIReviewOut,
     DocumentDetailOut,
@@ -223,6 +223,12 @@ async def upload_document(
     else:
         raise HTTPException(status_code=422, detail="content 与 content_b64 至少提供其一")
 
+    # 1b) 大小防护：解码后原始字节上限 20MB，防止超大/恶意文件撑爆内存
+    #     （PDF/DOCX 解析还会进一步放大，故在落库前拦截）
+    MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="文件过大，单篇上传上限 20MB")
+
     # 2) 原始文件落对象存储（key 含 uuid 防重名；source_path 记录其位置用于溯源）
     store = get_object_store()
     object_key = f"uploads/{kb_id}/{uuid.uuid4().hex}_{filename}"
@@ -323,7 +329,7 @@ async def approve_document(
         settings.RAG_CHUNK_SIZE,
         settings.RAG_CHUNK_OVERLAP,
         settings.RAG_CHUNK_MIN_CHARS,
-        es=ESClient(),
+        es=get_es(),
         graph=GraphStore(llm, embedder),
     )
     await ingester.ingest_existing(doc, db)
@@ -475,7 +481,7 @@ async def _delete_kb_cascade(db: AsyncSession, kb_id: str) -> None:
         await db.execute(delete(DocChunk).where(DocChunk.document_id == doc.id))
         # 删 ES 索引，连接失败静默跳过
         try:
-            await ESClient().delete_by_doc(kb_id, str(doc.id))
+            await get_es().delete_by_doc(kb_id, str(doc.id))
         except Exception:
             pass
         # 删对象存储原始文件，缺失不阻断删除

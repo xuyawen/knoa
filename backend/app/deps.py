@@ -8,6 +8,7 @@ from app.config import settings
 from app.core.llm.base import LLMConfig
 from app.core.llm.openai_compat import OpenAICompatProvider
 from app.core.rag.embeddings import EmbeddingModel
+from app.core.rag.es_client import ESClient
 from app.core.store.redis_store import RedisStore
 from app.database import AsyncSessionLocal
 
@@ -51,3 +52,13 @@ def get_llm() -> OpenAICompatProvider:
 @lru_cache
 def get_redis() -> RedisStore:
     return RedisStore(settings.REDIS_URL)
+
+
+@lru_cache
+def get_es() -> ESClient:
+    """ES 客户端单例（可选组件；内部 httpx.AsyncClient 懒创建）。
+
+    lru_cache 保证全进程一个实例，避免每次请求 new 一个连接池且从不
+    关闭导致连接泄漏（P1-1）。进程退出由 main.lifespan 统一 aclose。
+    """
+    return ESClient()

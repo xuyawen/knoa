@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rag.chunker import MarkdownChunker
@@ -98,6 +98,14 @@ class DocumentIngester:
         审核通过后再调本方法把这篇文档真正切分进检索库。
         与 ingest_dir 共享同一套 chunk/embed/ES/图谱逻辑，保证行为一致。
         """
+        # 幂等摄入：先清该文档旧 chunk（PG）+ ES + 图谱，
+        # 避免「审核通过 → 驳回 → 再审核通过」路径产生重复向量块 / 脏图节点
+        await db.execute(delete(DocChunk).where(DocChunk.document_id == doc.id))
+        if self._es is not None and self._es.enabled:
+            await self._es.delete_by_doc(doc.kb_id, doc.id)
+        if self._graph is not None:
+            await self._graph.delete_by_doc(doc.kb_id, doc.id)
+
         # 双写：确保该 KB 的 ES 索引存在（幂等；不可用时返回 False，静默跳过）。
         if self._es is not None:
             await self._es.ensure_index(doc.kb_id)

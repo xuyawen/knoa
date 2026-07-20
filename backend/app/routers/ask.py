@@ -19,7 +19,7 @@ from app.core.security import (
 from app.core.store.redis_store import RedisStore
 from app.config import settings
 from app.db import User
-from app.deps import get_db, get_embedder, get_llm, get_redis
+from app.deps import get_db, get_embedder, get_llm, get_redis, get_es
 from app.models.chat import AskRequest
 
 router = APIRouter()
@@ -67,7 +67,7 @@ async def ask(
 
     # 检索器选择：ES 可用且目标库已建索引 → ES 混合检索；
     # 否则回退 pgvector HybridRetriever（ES 未启用 / 索引不存在 / 网络异常都安全降级）
-    es = ESClient()
+    es = get_es()
     if es.enabled and req.knowledge_base and await es.index_exists(req.knowledge_base):
         retriever = ESRetriever(embedder, es, settings.RRF_K)
     else:

@@ -210,30 +210,33 @@ async function confirmDel() {
   }
 }
 
+// 点击外部关闭下拉菜单（命名函数，便于卸载时移除监听，避免泄漏累积）
+function onDocClick(e: MouseEvent) {
+  const t = e.target as HTMLElement
+  if (!t.closest('.sf-dropdown')) {
+    roleOpen.value = false
+    statusOpen.value = false
+  }
+  if (!t.closest('.row-dropdown')) {
+    roleOpenRow.value = null
+  }
+  if (!t.closest('.modal-dropdown')) {
+    modalRoleOpen.value = false
+  }
+}
+
 onMounted(() => {
   syncMobile()
   mq = window.matchMedia('(max-width: 900px)')
   mq.addEventListener('change', syncMobile)
   load()
   window.addEventListener('keydown', onKey)
-  // 点击外部关闭下拉
-  document.addEventListener('click', (e: MouseEvent) => {
-    const t = e.target as HTMLElement
-    if (!t.closest('.sf-dropdown')) {
-      roleOpen.value = false
-      statusOpen.value = false
-    }
-    if (!t.closest('.row-dropdown')) {
-      roleOpenRow.value = null
-    }
-    if (!t.closest('.modal-dropdown')) {
-      modalRoleOpen.value = false
-    }
-  })
+  document.addEventListener('click', onDocClick)
 })
 onUnmounted(() => {
   mq?.removeEventListener('change', syncMobile)
   window.removeEventListener('keydown', onKey)
+  document.removeEventListener('click', onDocClick)
 })
 </script>
 
