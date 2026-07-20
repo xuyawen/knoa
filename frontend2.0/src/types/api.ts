@@ -171,6 +171,31 @@ export interface FeedbackPayload {
   rating: 'up' | 'down'
 }
 
+/* ===== 知识图谱（只读 /api/graph） ===== */
+export interface GraphNode {
+  id: string
+  label: string
+  type: string | null
+  kbId: string
+  createdAt?: string | null
+}
+export interface GraphEdge {
+  source: string   // GraphNode.id
+  target: string   // GraphNode.id
+  relation: string
+}
+export interface GraphStats {
+  nodeCount: number
+  edgeCount: number
+  kbCount: number
+  typeCounts: Record<string, number>
+}
+export interface GraphData {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  stats: GraphStats
+}
+
 export interface KnowledgeBasesResponse {
   knowledgeBases: KnowledgeBase[]
   health: HealthItem[]

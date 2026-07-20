@@ -25,6 +25,7 @@ from app.routers import (
     auth,
     events,
     feedback,
+    graph,
     health,
     knowledge,
     memory,
@@ -174,3 +175,4 @@ app.include_router(sessions.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
 app.include_router(metrics.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
+app.include_router(graph.router, prefix="/api")

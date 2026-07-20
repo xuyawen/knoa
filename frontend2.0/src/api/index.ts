@@ -11,6 +11,7 @@ import type {
   KnowledgeBase,
   AIReview,
   ChatAttachment,
+  GraphData,
 } from '@/types/api'
 import { authHeaders, TokenExpiredError } from './http'
 
@@ -259,6 +260,14 @@ export async function batchDeleteKnowledgeBases(ids: string[]): Promise<void> {
 /** 取消对某条回答的反馈。 */
 export async function deleteFeedback(messageId: string) {
   const resp = await fetch(`/api/feedback/${messageId}`, { method: 'DELETE', headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 知识图谱只读数据：返回 kg_node / kg_edge 的真实节点与边。 */
+export async function getGraph(kbId?: string | null): Promise<GraphData> {
+  const qs = kbId ? `?kb_id=${encodeURIComponent(kbId)}` : ''
+  const resp = await fetch(`/api/graph${qs}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }

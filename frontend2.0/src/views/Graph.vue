@@ -1,64 +1,319 @@
 <script setup lang="ts">
-// 知识图谱 — 按 640(6).png 截图 1:1 还原。
+// 知识图谱 — 接真实 /api/graph（kg_node / kg_edge）。
+// 用客户端力导向布局渲染实体关系图，支持拖拽 / 缩放 / 平移 / 悬浮高亮 / 点击查看。
+// 右侧统计面板全部取自接口真实数据（节点/边/库数、类型分布、按度数 Top、最近新增）。
 defineProps<{ activeTab?: number }>()
 
-import { ref } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
+import { useToastStore } from '@/stores/toast'
+import { useKnowledgeStore } from '@/stores/knowledge'
+import { getGraph } from '@/api'
+import type { GraphData, GraphNode, GraphEdge } from '@/types/api'
 
-const graphQuery = ref('')
+const toast = useToastStore()
+const knowledge = useKnowledgeStore()
 
-// 图谱统计
-const stats = [
-  { label: '节点总数', value: '1,245', icon: 'doc', color: '#3B82F6' },
-  { label: '文档节点', value: '612', icon: 'doc', color: '#3B82F6' },
-  { label: '标签', value: '156', icon: 'tag', color: '#8B5CF6' },
-  { label: '关系总数', value: '3,672', icon: 'link', color: '#10B981' },
-  { label: '知识点', value: '423', icon: 'fire', color: '#10B981' },
-  { label: '业务分类', value: '54', icon: 'folder', color: '#F59E0B' },
-]
+const graph = ref<GraphData | null>(null)
+const loading = ref(false)
+const errorMsg = ref('')
+const selectedKb = ref<string | null>(null)
+const searchTerm = ref('')
+const selectedId = ref<string | null>(null)
+const hoveredId = ref<string | null>(null)
 
-// 热门节点 Top 5
-const hotNodes = [
-  { name: '数字化转型规划', type: 'doc', color: '#3B82F6', count: 362 },
-  { name: '技术架构设计', type: 'doc', color: '#3B82F6', count: 286 },
-  { name: '业务流程优化', type: 'knowledge', color: '#10B981', count: 286 },
-  { name: '数据治理体系', type: 'knowledge', color: '#10B981', count: 254 },
-  { name: '组织架构升级', type: 'tag', color: '#8B5CF6', count: 198 },
-]
+/* ---- 力导向布局 ---- */
+interface LNode { id: string; x: number; y: number; deg: number; r: number }
+const W = 900
+const H = 560
+const lNodes = ref<LNode[]>([])
+const tx = ref(0)
+const ty = ref(0)
+const k = ref(1)
+const svgRef = ref<SVGSVGElement | null>(null)
 
-// 最近新增节点
-const recentNodes = [
-  { name: '制造业转型案例.docx', type: 'doc', color: '#3B82F6', time: '2024-05-20 14:30' },
-  { name: '技术选型方案.xlsx', type: 'excel', color: '#10B981', time: '2024-05-20 10:15' },
-  { name: '大行业案例.pptx', type: 'pptx', color: '#F59E0B', time: '2024-05-19 16:45' },
-  { name: '数字化转型白皮书.pdf', type: 'pdf', color: '#EF4444', time: '2024-05-19 09:20' },
-]
+const degree = computed<Record<string, number>>(() => {
+  const m: Record<string, number> = {}
+  for (const e of graph.value?.edges || []) {
+    m[e.source] = (m[e.source] || 0) + 1
+    m[e.target] = (m[e.target] || 0) + 1
+  }
+  return m
+})
+
+const adjacency = computed<Record<string, Set<string>>>(() => {
+  const m: Record<string, Set<string>> = {}
+  for (const n of graph.value?.nodes || []) m[n.id] = new Set()
+  for (const e of graph.value?.edges || []) {
+    m[e.source]?.add(e.target)
+    m[e.target]?.add(e.source)
+  }
+  return m
+})
+
+function computeLayout(nodes: GraphNode[], edges: GraphEdge[]): LNode[] {
+  const n = nodes.length
+  const arr: LNode[] = nodes.map((nd, i) => {
+    const ang = (i / Math.max(1, n)) * Math.PI * 2
+    const rad = Math.min(W, H) * 0.4
+    return {
+      id: nd.id,
+      x: W / 2 + Math.cos(ang) * rad,
+      y: H / 2 + Math.sin(ang) * rad,
+      deg: degree.value[nd.id] || 0,
+      r: 6 + Math.min(13, Math.sqrt(degree.value[nd.id] || 0) * 3),
+    }
+  })
+  const idx: Record<string, number> = {}
+  arr.forEach((a, i) => { idx[a.id] = i })
+
+  const REP = 6000
+  const SPRING = 0.04
+  const REST = 72
+  const CENTER = 0.008
+  for (let it = 0; it < 240; it++) {
+    // 斥力（库仑）
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        let dx = arr[i].x - arr[j].x
+        let dy = arr[i].y - arr[j].y
+        const d2 = dx * dx + dy * dy + 0.01
+        const f = REP / d2
+        const d = Math.sqrt(d2)
+        const fx = (dx / d) * f
+        const fy = (dy / d) * f
+        arr[i].x += fx; arr[i].y += fy
+        arr[j].x -= fx; arr[j].y -= fy
+      }
+    }
+    // 引力（弹簧，沿边）
+    for (const e of edges) {
+      const a = idx[e.source]
+      const b = idx[e.target]
+      if (a == null || b == null) continue
+      let dx = arr[b].x - arr[a].x
+      let dy = arr[b].y - arr[a].y
+      const d = Math.sqrt(dx * dx + dy * dy) + 0.01
+      const f = SPRING * (d - REST)
+      const fx = (dx / d) * f
+      const fy = (dy / d) * f
+      arr[a].x += fx; arr[a].y += fy
+      arr[b].x -= fx; arr[b].y -= fy
+    }
+    // 向心
+    for (let i = 0; i < n; i++) {
+      arr[i].x += (W / 2 - arr[i].x) * CENTER
+      arr[i].y += (H / 2 - arr[i].y) * CENTER
+      if (arr[i].x < 20) arr[i].x = 20
+      if (arr[i].x > W - 20) arr[i].x = W - 20
+      if (arr[i].y < 20) arr[i].y = 20
+      if (arr[i].y > H - 20) arr[i].y = H - 20
+    }
+  }
+  return arr
+}
+
+const posMap = computed<Record<string, { x: number; y: number }>>(() => {
+  const m: Record<string, { x: number; y: number }> = {}
+  for (const n of lNodes.value) m[n.id] = { x: n.x, y: n.y }
+  return m
+})
+
+/* ---- 高亮（悬浮 / 选中 / 搜索） ---- */
+const focusId = computed(() => hoveredId.value ?? selectedId.value)
+const activeIds = computed<Set<string> | null>(() => {
+  const set = new Set<string>()
+  const term = searchTerm.value.trim().toLowerCase()
+  if (term) {
+    for (const n of graph.value?.nodes || []) {
+      if (n.label.toLowerCase().includes(term)) set.add(n.id)
+    }
+  } else if (focusId.value) {
+    set.add(focusId.value)
+  } else {
+    return null // null = 全部高亮
+  }
+  if (set.size) {
+    const extra: string[] = []
+    for (const id of set) for (const nb of (adjacency.value[id] || [])) extra.push(nb)
+    extra.forEach((x) => set.add(x))
+  }
+  return set
+})
+function nodeDim(id: string): boolean {
+  const a = activeIds.value
+  return a ? !a.has(id) : false
+}
+function edgeDim(e: GraphEdge): boolean {
+  const a = activeIds.value
+  if (!a) return false
+  return !(a.has(e.source) && a.has(e.target))
+}
+
+/* ---- KB 配色 / 名称 ---- */
+const PALETTE = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#F97316', '#6366F1']
+const kbColor = computed<Record<string, string>>(() => {
+  const m: Record<string, string> = {}
+  knowledge.bases.forEach((b, i) => { m[b.id] = PALETTE[i % PALETTE.length] })
+  return m
+})
+function nodeColor(kbId: string): string {
+  return kbColor.value[kbId] || '#94A3B8'
+}
+function kbName(id: string): string {
+  return knowledge.bases.find((b) => b.id === id)?.name || id
+}
+const presentKbs = computed(() => {
+  const ids = new Set<string>()
+  for (const n of graph.value?.nodes || []) ids.add(n.kbId)
+  return knowledge.bases.filter((b) => ids.has(b.id))
+})
+
+/* ---- 统计面板派生数据 ---- */
+const stats = computed(() => graph.value?.stats)
+const typeBars = computed(() => {
+  const tc = graph.value?.stats.typeCounts || {}
+  const entries = Object.entries(tc).sort((a, b) => b[1] - a[1])
+  const max = entries.length ? entries[0][1] : 1
+  return entries.map(([label, count]) => ({ label, count, pct: Math.round((count / max) * 100) }))
+})
+const topNodes = computed(() =>
+  [...(graph.value?.nodes || [])]
+    .map((n) => ({ node: n, deg: degree.value[n.id] || 0 }))
+    .sort((a, b) => b.deg - a.deg)
+    .slice(0, 6),
+)
+const recentNodes = computed(() =>
+  [...(graph.value?.nodes || [])]
+    .filter((n) => n.createdAt)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    .slice(0, 6),
+)
+const selectedNode = computed(() => graph.value?.nodes.find((n) => n.id === selectedId.value) || null)
+const selectedNeighbors = computed<string[]>(() => {
+  const id = selectedId.value
+  if (!id) return []
+  const out: string[] = []
+  for (const e of graph.value?.edges || []) {
+    if (e.source === id) out.push(graph.value!.nodes.find((n) => n.id === e.target)?.label || e.target)
+    else if (e.target === id) out.push(graph.value!.nodes.find((n) => n.id === e.source)?.label || e.source)
+  }
+  return out
+})
+
+/* ---- 交互：平移 / 拖拽 / 缩放 ---- */
+let panning = false
+let dragging: string | null = null
+let lastRoot: { x: number; y: number } | null = null
+
+function toRoot(clientX: number, clientY: number) {
+  const svg = svgRef.value
+  if (!svg) return { x: 0, y: 0 }
+  const ctm = svg.getScreenCTM()
+  if (!ctm) return { x: 0, y: 0 }
+  const inv = ctm.inverse()
+  return { x: clientX * inv.a + clientY * inv.b + inv.e, y: clientX * inv.c + clientY * inv.d + inv.f }
+}
+function toLocal(clientX: number, clientY: number) {
+  const r = toRoot(clientX, clientY)
+  return { x: (r.x - tx.value) / k.value, y: (r.y - ty.value) / k.value }
+}
+function onCanvasDown(e: PointerEvent) {
+  if (dragging) return
+  panning = true
+  lastRoot = toRoot(e.clientX, e.clientY)
+  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+}
+function onNodeDown(e: PointerEvent, id: string) {
+  e.stopPropagation()
+  dragging = id
+  lastRoot = null
+  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+}
+function onMove(e: PointerEvent) {
+  if (dragging) {
+    const l = toLocal(e.clientX, e.clientY)
+    const nd = lNodes.value.find((x) => x.id === dragging)
+    if (nd) { nd.x = l.x; nd.y = l.y }
+  } else if (panning && lastRoot) {
+    const r = toRoot(e.clientX, e.clientY)
+    tx.value += r.x - lastRoot.x
+    ty.value += r.y - lastRoot.y
+    lastRoot = r
+  }
+}
+function onUp() {
+  panning = false
+  dragging = null
+}
+function onWheel(e: WheelEvent) {
+  e.preventDefault()
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12
+  k.value = Math.min(3, Math.max(0.3, k.value * factor))
+}
+function zoom(dir: number) {
+  k.value = Math.min(3, Math.max(0.3, k.value * (dir > 0 ? 1.2 : 1 / 1.2)))
+}
+function resetView() {
+  tx.value = 0
+  ty.value = 0
+  k.value = 1
+}
+
+/* ---- 加载 ---- */
+async function fetchGraph() {
+  loading.value = true
+  errorMsg.value = ''
+  try {
+    const data = await getGraph(selectedKb.value)
+    graph.value = data
+    lNodes.value = computeLayout(data.nodes, data.edges)
+    selectedId.value = null
+    hoveredId.value = null
+    resetView()
+    await nextTick()
+  } catch (e: any) {
+    errorMsg.value = e?.message || String(e)
+    toast.error(`加载图谱失败：${errorMsg.value}`)
+  } finally {
+    loading.value = false
+  }
+}
+
+function resetAll() {
+  searchTerm.value = ''
+  selectedId.value = null
+  hoveredId.value = null
+  resetView()
+}
+
+onMounted(async () => {
+  if (!knowledge.loaded) await knowledge.load().catch(() => {})
+  await fetchGraph()
+})
 </script>
 
 <template>
   <div class="graph-page">
-    <!-- 页面标题 -->
     <h2 class="page-title">知识图谱</h2>
 
     <!-- ====== 工具栏 ====== -->
     <div class="graph-toolbar card">
       <div class="toolbar-left">
         <div class="g-search">
-          <input v-model="graphQuery" type="text" placeholder="请输入关键词搜索图谱..." class="g-input" />
+          <input v-model="searchTerm" type="text" placeholder="搜索实体名称高亮关联…" class="g-input" />
           <Icon name="search" :size="15" class="g-search-icon" />
         </div>
-        <div class="g-filter">节点类型 <span>全部</span> <Icon name="chevron-down" :size="11" /></div>
-        <div class="g-filter">业务分类 <span>全部</span> <Icon name="chevron-down" :size="11" /></div>
-        <div class="g-date">
-          创建时间
-          <Icon name="calendar" :size="13" style="margin-left:4px"/>
-          <span class="date-ph">选择日期范围</span>
-        </div>
-        <button class="btn btn-ghost btn-sm g-reset">重置</button>
+        <select v-model="selectedKb" class="g-select" @change="fetchGraph">
+          <option :value="null">全部分类</option>
+          <option v-for="b in knowledge.bases" :key="b.id" :value="b.id">{{ b.name }}</option>
+        </select>
+        <button class="btn btn-ghost btn-sm g-reset" @click="resetAll">重置</button>
       </div>
       <div class="toolbar-right">
-        <button class="btn btn-primary btn-sm"><Icon name="search" :size="13" /> 搜索</button>
-        <button class="btn btn-ghost btn-sm"><Icon name="export" :size="13" /> 导出图谱</button>
+        <button class="btn btn-primary btn-sm" :disabled="loading" @click="fetchGraph">
+          <Icon name="refresh" :size="13" /> {{ loading ? '加载中…' : '刷新' }}
+        </button>
       </div>
     </div>
 
@@ -66,241 +321,167 @@ const recentNodes = [
     <div class="graph-body">
       <!-- 左：图布 -->
       <div class="canvas-area card">
-        <svg viewBox="0 0 780 480" class="force-graph" preserveAspectRatio="xMidYMid meet">
-          <!-- 定义箭头标记 -->
+        <!-- 加载 / 空态 / 图布 -->
+        <div v-if="loading" class="canvas-state">
+          <span class="dot" /><span class="dot" /><span class="dot" />
+          <p>正在构建知识图谱…</p>
+        </div>
+
+        <div v-else-if="graph && graph.nodes.length === 0" class="canvas-state">
+          <div class="empty-avatar"><Icon name="graph" :size="26" /></div>
+          <p class="empty-title">暂无图谱数据</p>
+          <p class="empty-sub">上传并审核文档后，系统会自动抽取实体与关系构建知识图谱。</p>
+        </div>
+
+        <svg
+          v-else
+          ref="svgRef"
+          viewBox="0 0 900 560"
+          class="force-graph"
+          preserveAspectRatio="xMidYMid meet"
+          @pointerdown="onCanvasDown"
+          @pointermove="onMove"
+          @pointerup="onUp"
+          @pointerleave="onUp"
+          @wheel.prevent="onWheel"
+        >
           <defs>
-            <marker id="arrowRef" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto-start-reverse" markerUnits="strokeWidth">
+            <marker id="arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto-start-reverse" markerUnits="strokeWidth">
               <path d="M0,0 L0,6 L8,3 z" fill="#94A3B8" />
             </marker>
-            <marker id="arrowInc" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto-start-reverse" markerUnits="strokeWidth">
-              <path d="M0,0 L0,6 L8,3 z" fill="#CBD5E1" />
-            </marker>
-            <!-- 节点发光效果 -->
-            <filter id="glow">
-              <feGaussianBlur stdDeviation="2.5" result="blur" />
-              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-            </filter>
           </defs>
 
-          <!-- ====== 连线（先画，在底层）====== -->
-          <g class="edges" stroke-width="1.5" fill="none">
-            <!-- 引用关系（实线+箭头） -->
-            <path d="M220,160 Q280,140 340,200" stroke="#94A3B8" marker-end="url(#arrowRef)" />
-            <text x="265" y="142" class="edge-label" fill="#8A97AC">引用</text>
-
-            <path d="M560,155 Q500,150 430,200" stroke="#94A3B8" marker-end="url(#arrowRef)" />
-            <text x="498" y="142" class="edge-label" fill="#8A97AC">引用</text>
-
-            <path d="M260,320 Q310,290 355,250" stroke="#94A3B8" marker-end="url(#arrowRef)" />
-            <text x="292" y="272" class="edge-label" fill="#8A97AC">引用</text>
-
-            <path d="M520,320 Q480,285 440,248" stroke="#94A3B8" marker-end="url(#arrowRef)" />
-            <text x="482" y="272" class="edge-label" fill="#8A97AC">引用</text>
-
-            <!-- 包含关系（实线） -->
-            <line x1="390" y1="228" x2="270" y2="175" stroke="#CBD5E1" />
-            <text x="320" y="193" class="edge-label" fill="#8A97AC">包含</text>
-
-            <line x1="400" y1="228" x2="520" y2="170" stroke="#CBD5E1" />
-            <text x="458" y="193" class="edge-label" fill="#8A97AC">包含</text>
-
-            <line x1="385" y1="255" x2="275" y2="305" stroke="#CBD5E1" />
-            <text x="315" y="275" class="edge-label" fill="#8A97AC">包含</text>
-
-            <line x1="405" y1="255" x2="525" y2="308" stroke="#CBD5E1" />
-            <text x="468" y="275" class="edge-label" fill="#8A97AC">包含</text>
-
-            <line x1="395" y1="255" x2="395" y2="350" stroke="#CBD5E1" />
-            <text x="405" y="305" class="edge-label" fill="#8A97AC">属于</text>
-
-            <line x1="450" y1="370" x2="505" y2="365" stroke="#CBD5E1" />
-            <text x="472" y="362" class="edge-label" fill="#8A97AC">包含</text>
-
-            <line x1="340" y1="370" x2="285" y2="368" stroke="#CBD5E1" />
-            <text x="302" y="362" class="edge-label" fill="#8A97AC">关联</text>
-
-            <!-- 关联关系（虚线） -->
-            <path d="M200,195 Q170,240 190,300" stroke="#94A3B8" stroke-dasharray="5,4" />
-            <text x="165" y="250" class="edge-label" fill="#8A97AC">关联</text>
-
-            <path d="M205,185 Q165,145 180,105" stroke="#94A3B8" stroke-dasharray="5,4" />
-            <text x="148" y="142" class="edge-label" fill="#8A97AC">关联</text>
-
-            <path d="M585,190 Q620,235 600,295" stroke="#94A3B8" stroke-dasharray="5,4" />
-            <text x="612" y="245" class="edge-label" fill="#8A97AC">关联</text>
-
-            <path d="M580,178 Q618,138 600,100" stroke="#94A3B8" stroke-dasharray="5,4" />
-            <text x="615" y="135" class="edge-label" fill="#8A97AC">关联</text>
-
-            <path d="M230,348 Q210,390 245,420" stroke="#94A3B8" stroke-dasharray="5,4" />
-            <text x="212" y="390" class="edge-label" fill="#8A97AC">关联</text>
-
-            <path d="M555,348 Q580,390 545,420" stroke="#94A3B8" stroke-dasharray="5,4" />
-            <text x="572" y="390" class="edge-label" fill="#8A97AC">关联</text>
-
-            <path d="M330,398 Q360,425 380,418" stroke="#94A3B8" stroke-dasharray="5,4" />
-            <text x="342" y="422" class="edge-label" fill="#8A97AC">关联</text>
-
-            <path d="M465,398 Q435,425 415,418" stroke="#94A3B8" stroke-dasharray="5,4" />
-            <text x="432" y="422" class="edge-label" fill="#8A97AC">关联</text>
-          </g>
-
-          <!-- ====== 节点 ====== -->
-          <g class="nodes">
-            <!-- 中心节点：企业数字化转型蓝图 (文档/蓝) -->
-            <g transform="translate(395, 225)" filter="url(#glow)">
-              <rect x="-42" y="-22" width="84" height="44" rx="10" fill="#3B82F6" />
-              <rect x="-41" y="-21" width="82" height="42" rx="9" fill="none" stroke="#fff" stroke-opacity=".3" stroke-width="1" />
-              <text y="-2" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">企业数字化转型蓝图</text>
-              <text y="12" text-anchor="middle" fill="rgba(255,255,255,.75)" font-size="9">(Document)</text>
+          <g :transform="`translate(${tx},${ty}) scale(${k})`">
+            <!-- 边 -->
+            <g class="edges" fill="none">
+              <template v-for="(e, i) in (graph?.edges || [])" :key="'e' + i">
+                <g v-if="posMap[e.source] && posMap[e.target]" :class="{ dim: edgeDim(e) }">
+                  <line
+                    :x1="posMap[e.source].x" :y1="posMap[e.source].y"
+                    :x2="posMap[e.target].x" :y2="posMap[e.target].y"
+                    :stroke="focusId ? '#94A3B8' : '#CBD5E1'"
+                    stroke-width="1.4"
+                    marker-end="url(#arrow)"
+                  />
+                  <!-- 关系标签：仅在聚焦（悬浮/选中/搜索命中）时显示，避免拥挤 -->
+                  <text
+                    v-if="!edgeDim(e)"
+                    :x="(posMap[e.source].x + posMap[e.target].x) / 2"
+                    :y="(posMap[e.source].y + posMap[e.target].y) / 2 - 3"
+                    class="edge-label"
+                    text-anchor="middle"
+                  >{{ e.relation }}</text>
+                </g>
+              </template>
             </g>
 
-            <!-- 周围节点 — 上层 -->
-            <g transform="translate(200, 160)">
-              <rect x="-38" y="-17" width="76" height="34" rx="8" fill="#fff" stroke="#3B82F6" stroke-width="1.5" />
-              <circle cx="-28" cy="0" r="8" fill="#E6F0FF" /><text x="-28" y="3.5" text-anchor="middle" fill="#3B82F6" font-size="9" font-weight="700">W</text>
-              <text x="6" y="4" text-anchor="middle" fill="#334155" font-size="10.5" font-weight="600">数字化转型白皮书.pdf</text>
-            </g>
-            <g transform="translate(570, 155)">
-              <rect x="-52" y="-17" width="104" height="34" rx="8" fill="#fff" stroke="#3B82F6" stroke-width="1.5" />
-              <circle cx="-42" cy="0" r="8" fill="#E6F0FF" /><text x="-42" y="3.5" text-anchor="middle" fill="#3B82F6" font-size="9" font-weight="700">W</text>
-              <text x="8" y="4" text-anchor="middle" fill="#334155" font-size="10.5" font-weight="600">制造业转型策略.docx</text>
-            </g>
-
-            <!-- 中层左右 -->
-            <g transform="translate(250, 320)">
-              <rect x="-46" y="-17" width="92" height="34" rx="8" fill="#fff" stroke="#3B82F6" stroke-width="1.5" />
-              <circle cx="-36" cy="0" r="8" fill="#D1FAE5" /><text x="-36" y="3.5" text-anchor="middle" fill="#10B981" font-size="9" font-weight="700">X</text>
-              <text x="8" y="4" text-anchor="middle" fill="#334155" font-size="10.5" font-weight="600">技术选型方案.xlsx</text>
-            </g>
-            <g transform="translate(540, 320)">
-              <rect x="-54" y="-17" width="108" height="34" rx="8" fill="#fff" stroke="#F59E0B" stroke-width="1.5" />
-              <circle cx="-44" cy="0" r="8" fill="#FEF3C7" /><text x="-44" y="3.5" text-anchor="middle" fill="#D97706" font-size="9" font-weight="700">P</text>
-              <text x="8" y="4" text-anchor="middle" fill="#334155" font-size="10.5" font-weight="600">零壹行业案例.pptx</text>
-            </g>
-
-            <!-- 知识点（绿） -->
-            <g transform="translate(175, 188)">
-              <rect x="-36" y="-14" width="72" height="28" rx="14" fill="#D1FAE5" stroke="#10B981" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#065F46" font-size="10" font-weight="600">技术架构</text>
-            </g>
-            <g transform="translate(605, 182)">
-              <rect x="-36" y="-14" width="72" height="28" rx="14" fill="#D1FAE5" stroke="#10B981" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#065F46" font-size="10" font-weight="600">组织管理</text>
-            </g>
-            <g transform="translate(215, 318)">
-              <rect x="-42" y="-14" width="84" height="28" rx="14" fill="#D1FAE5" stroke="#10B981" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#065F46" font-size="10" font-weight="600">技术方案设计</text>
-            </g>
-            <g transform="translate(578, 318)">
-              <rect x="-42" y="-14" width="84" height="28" rx="14" fill="#D1FAE5" stroke="#10B981" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#065F46" font-size="10" font-weight="600">组织架构升级</text>
-            </g>
-            <g transform="translate(295, 370)">
-              <rect x="-42" y="-14" width="84" height="28" rx="14" fill="#D1FAE5" stroke="#10B981" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#065F46" font-size="10" font-weight="600">数据治理体系</text>
-            </g>
-            <g transform="translate(498, 372)">
-              <rect x="-48" y="-14" width="96" height="28" rx="14" fill="#D1FAE5" stroke="#10B981" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#065F46" font-size="10" font-weight="600">业务流程优化</text>
-            </g>
-
-            <!-- 标签（紫） -->
-            <g transform="translate(158, 95)">
-              <rect x="-32" y="-12" width="64" height="24" rx="12" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#6B21A8" font-size="10" font-weight="600">技术采购</text>
-            </g>
-            <g transform="translate(620, 88)">
-              <rect x="-32" y="-12" width="64" height="24" rx="12" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#6B21A8" font-size="10" font-weight="600">系统集成</text>
-            </g>
-            <g transform="translate(168, 348)">
-              <rect x="-32" y="-12" width="64" height="24" rx="12" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#6B21A8" font-size="10" font-weight="600">数据管理</text>
-            </g>
-            <g transform="translate(615, 348)">
-              <rect x="-32" y="-12" width="64" height="24" rx="12" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#6B21A8" font-size="10" font-weight="600">流程管理</text>
-            </g>
-            <g transform="translate(250, 420)">
-              <rect x="-32" y="-12" width="64" height="24" rx="12" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#6B21A8" font-size="10" font-weight="600">数据安全</text>
-            </g>
-            <g transform="translate(538, 422)">
-              <rect x="-32" y="-12" width="64" height="24" rx="12" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#6B21A8" font-size="10" font-weight="600">效率提升</text>
-            </g>
-            <g transform="translate(390, 425)">
-              <rect x="-32" y="-12" width="64" height="24" rx="12" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#6B21A8" font-size="10" font-weight="600">战略规划</text>
-            </g>
-            <g transform="translate(395, 370)">
-              <rect x="-36" y="-12" width="72" height="24" rx="12" fill="#FEF3C7" stroke="#F59E0B" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#92400E" font-size="10" font-weight="600">数字化转型</text>
-            </g>
-            <g transform="translate(395, 420)">
-              <rect x="-32" y="-12" width="64" height="24" rx="12" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#6B21A8" font-size="10" font-weight="600">业务创新</text>
-            </g>
-            <g transform="translate(322, 423)">
-              <rect x="-32" y="-12" width="64" height="24" rx="12" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="1.2" />
-              <text y="4" text-anchor="middle" fill="#6B21A8" font-size="10" font-weight="600">降本增效</text>
+            <!-- 节点 -->
+            <g class="nodes">
+              <g
+                v-for="n in lNodes"
+                :key="n.id"
+                :transform="`translate(${posMap[n.id].x},${posMap[n.id].y})`"
+                :class="{ dim: nodeDim(n.id) }"
+                class="gnode"
+                @pointerenter="hoveredId = n.id"
+                @pointerleave="hoveredId = null"
+                @pointerdown="onNodeDown($event, n.id)"
+                @click="selectedId = n.id"
+              >
+                <circle
+                  :r="n.r"
+                  :fill="nodeColor((graph?.nodes.find(x=>x.id===n.id)?.kbId) || '')"
+                  :stroke="selectedId === n.id ? '#0F172A' : '#fff'"
+                  :stroke-width="selectedId === n.id ? 2.5 : 1.5"
+                />
+                <text class="node-label" :y="n.r + 12" text-anchor="middle">{{ graph?.nodes.find(x=>x.id===n.id)?.label }}</text>
+              </g>
             </g>
           </g>
         </svg>
 
         <!-- 底部控制 + 图例 -->
-        <div class="canvas-footer">
+        <div v-if="graph && graph.nodes.length" class="canvas-footer">
           <div class="zoom-controls">
-            <button class="zc-btn"><Icon name="expand" :size="14" /></button>
-            <button class="zc-btn"><Icon name="minus" :size="14" /></button>
-            <span class="zoom-level">100%</span>
-            <button class="zc-btn"><Icon name="plus" :size="14" /></button>
-            <button class="zc-btn"><Icon name="gridview" :size="14" /></button>
+            <button class="zc-btn" title="缩小" @click="zoom(-1)"><Icon name="minus" :size="14" /></button>
+            <span class="zoom-level">{{ Math.round(k * 100) }}%</span>
+            <button class="zc-btn" title="放大" @click="zoom(1)"><Icon name="plus" :size="14" /></button>
+            <button class="zc-btn" title="复位" @click="resetView"><Icon name="expand" :size="14" /></button>
           </div>
           <div class="legend">
-            <span class="leg-item"><i class="leg-dot" style="background:#3B82F6"></i> 文档</span>
-            <span class="leg-item"><i class="leg-dot" style="background:#10B981"></i> 知识点</span>
-            <span class="leg-item"><i class="leg-dot" style="background:#8B5CF6"></i> 标签</span>
-            <span class="leg-item"><i class="leg-dot" style="background:#F59E0B"></i> 业务分类</span>
+            <span class="leg-item" v-for="b in presentKbs" :key="b.id">
+              <i class="leg-dot" :style="{ background: kbColor[b.id] }"></i> {{ b.name }}
+            </span>
             <span class="leg-divider"></span>
-            <span class="leg-line leg-dashed"></span> 关联
-            <span class="leg-line leg-arrow"></span> 引用
-            <span class="leg-line leg-solid"></span> 包含
+            <span class="leg-line"><i class="leg-arrow"></i> 关系</span>
           </div>
         </div>
-        <p class="canvas-hint">拖拽节点可移动，滚轮缩放画布</p>
+        <p v-if="graph && graph.nodes.length" class="canvas-hint">拖拽节点可移动 · 滚轮缩放 · 拖拽空白处平移 · 点击查看详情</p>
       </div>
 
       <!-- 右：数据面板 -->
       <aside class="stats-panel card">
         <div class="panel-head">
           <span class="panel-title">图谱数据统计</span>
-          <Icon name="alert" :size="14" class="info-hint" />
+          <Icon name="graph" :size="14" class="info-hint" />
         </div>
 
-        <!-- 统计数字网格 -->
+        <!-- 统计数字 -->
         <div class="stat-grid">
-          <div v-for="(s, i) in stats" :key="i" class="stat-cell">
-            <div class="sc-icon-wrap" :style="{ background: s.color + '14' }">
-              <Icon :name="s.icon" :size="18" :style="{ color: s.color }" />
-            </div>
-            <div class="sc-info">
-              <div class="sc-label">{{ s.label }}</div>
-              <div class="sc-value" :style="{ color: s.color }">{{ s.value }}</div>
+          <div class="stat-cell">
+            <div class="sc-icon-wrap" style="background:#3B82F614"><Icon name="graph" :size="18" style="color:#3B82F6" /></div>
+            <div class="sc-info"><div class="sc-label">实体节点</div><div class="sc-value" style="color:#3B82F6">{{ stats?.nodeCount ?? 0 }}</div></div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-icon-wrap" style="background:#10B98114"><Icon name="link" :size="18" style="color:#10B981" /></div>
+            <div class="sc-info"><div class="sc-label">关系边</div><div class="sc-value" style="color:#10B981">{{ stats?.edgeCount ?? 0 }}</div></div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-icon-wrap" style="background:#8B5CF614"><Icon name="folder" :size="18" style="color:#8B5CF6" /></div>
+            <div class="sc-info"><div class="sc-label">覆盖知识库</div><div class="sc-value" style="color:#8B5CF6">{{ stats?.kbCount ?? 0 }}</div></div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-icon-wrap" style="background:#F59E0B14"><Icon name="tag" :size="18" style="color:#F59E0B" /></div>
+            <div class="sc-info"><div class="sc-label">实体类型</div><div class="sc-value" style="color:#F59E0B">{{ Object.keys(stats?.typeCounts || {}).length }}</div></div>
+          </div>
+        </div>
+
+        <!-- 选中节点详情 -->
+        <div v-if="selectedNode" class="section-block detail-box">
+          <div class="section-title">实体详情</div>
+          <div class="detail-name">{{ selectedNode.label }}</div>
+          <div class="detail-meta">
+            <span class="detail-tag" :style="{ background: nodeColor(selectedNode.kbId) + '22', color: nodeColor(selectedNode.kbId) }">{{ kbName(selectedNode.kbId) }}</span>
+            <span v-if="selectedNode.type" class="detail-tag">{{ selectedNode.type }}</span>
+          </div>
+          <div class="detail-degree">关联度数：<strong>{{ degree[selectedNode.id] || 0 }}</strong></div>
+          <div v-if="selectedNeighbors.length" class="detail-neighbors">
+            <span class="dn-label">关联实体：</span>
+            <span v-for="(nb, i) in selectedNeighbors" :key="i" class="dn-chip">{{ nb }}</span>
+          </div>
+        </div>
+
+        <!-- 类型分布 -->
+        <div class="section-block">
+          <div class="section-title">实体类型分布</div>
+          <div class="type-bars">
+            <div v-for="(t, i) in typeBars" :key="i" class="type-bar">
+              <span class="tb-label">{{ t.label }}</span>
+              <span class="tb-track"><i class="tb-fill" :style="{ width: t.pct + '%' }"></i></span>
+              <span class="tb-count">{{ t.count }}</span>
             </div>
           </div>
         </div>
 
-        <!-- 热门节点 -->
+        <!-- 高关联节点 -->
         <div class="section-block">
-          <div class="section-title">热门节点 Top 5</div>
+          <div class="section-title">高关联实体 Top 6</div>
           <div class="hot-list">
-            <div v-for="(n, i) in hotNodes" :key="i" class="hot-item">
+            <div v-for="(item, i) in topNodes" :key="item.node.id" class="hot-item" @click="selectedId = item.node.id" @mouseenter="hoveredId = item.node.id" @mouseleave="hoveredId = null">
               <span class="hot-rank" :class="{ top3: i < 3 }">{{ i + 1 }}</span>
-              <span class="hot-dot" :style="{ background: n.color }"></span>
-              <span class="hot-name">{{ n.name }}</span>
-              <span class="hot-count">关联数：<strong>{{ n.count }}</strong></span>
+              <span class="hot-dot" :style="{ background: nodeColor(item.node.kbId) }"></span>
+              <span class="hot-name">{{ item.node.label }}</span>
+              <span class="hot-count">度数 <strong>{{ item.deg }}</strong></span>
             </div>
           </div>
         </div>
@@ -308,16 +489,15 @@ const recentNodes = [
         <!-- 最近新增 -->
         <div class="section-block">
           <div class="section-header">
-            <span class="section-title">最近新增的节点</span>
-            <a href="#" class="more-link">更多 &gt;</a>
+            <span class="section-title">最近新增的实体</span>
           </div>
           <div class="recent-list">
-            <div v-for="(n, i) in recentNodes" :key="i" class="recent-item">
-              <span class="recent-icon" :style="{ background: n.color + '18', color: n.color }">
-                <Icon :name="n.type === 'pdf' ? 'pdf' : n.type === 'excel' ? 'excel' : n.type === 'pptx' ? 'pptx' : 'doc'" :size="13" />
+            <div v-for="n in recentNodes" :key="n.id" class="recent-item" @click="selectedId = n.id" @mouseenter="hoveredId = n.id" @mouseleave="hoveredId = null">
+              <span class="recent-icon" :style="{ background: nodeColor(n.kbId) + '18', color: nodeColor(n.kbId) }">
+                <Icon name="graph" :size="13" />
               </span>
-              <span class="recent-name">{{ n.name }}</span>
-              <span class="recent-time">{{ n.time }}</span>
+              <span class="recent-name">{{ n.label }}</span>
+              <span class="recent-time">{{ (n.createdAt || '').slice(5, 10) }}</span>
             </div>
           </div>
         </div>
@@ -327,329 +507,131 @@ const recentNodes = [
 </template>
 
 <style scoped>
-.graph-page {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.page-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0;
-}
+.graph-page { display: flex; flex-direction: column; gap: 14px; }
+.page-title { font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0; }
 
 /* ---- 工具栏 ---- */
-.graph-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  gap: 12px;
-}
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.g-search {
-  position: relative;
-  width: 240px;
-}
+.graph-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; gap: 12px; }
+.toolbar-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.toolbar-right { display: flex; align-items: center; gap: 8px; }
+.g-search { position: relative; width: 260px; }
 .g-input {
-  width: 100%;
-  height: 34px;
-  padding: 0 34px 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: 13px;
+  width: 100%; height: 34px; padding: 0 34px 0 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 13px;
 }
 .g-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
-.g-search-icon {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-tertiary);
-  pointer-events: none;
+.g-search-icon { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--text-tertiary); pointer-events: none; }
+.g-select {
+  height: 34px; padding: 0 28px 0 12px; font-size: 13px; font-family: inherit;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--bg-surface); color: var(--text-primary); cursor: pointer;
 }
-
-.g-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-  background: var(--bg-surface);
-}
-.g-filter span { color: var(--text-primary); font-weight: 500; }
-.g-filter:hover { border-color: var(--brand); }
-
-.g-date {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  background: var(--bg-surface);
-}
-.date-ph { color: var(--text-placeholder); margin-left: 8px; }
-
+.g-select:focus { outline: none; border-color: var(--brand); }
 .g-reset { white-space: nowrap; }
 
-/* ---- 图布主体行 ---- */
-.graph-body {
-  display: grid;
-  grid-template-columns: 1fr 300px;
-  gap: 14px;
-  min-height: 520px;
+/* ---- 图布主体 ---- */
+.graph-body { display: grid; grid-template-columns: 1fr 300px; gap: 14px; min-height: 540px; }
+.canvas-area { display: flex; flex-direction: column; overflow: hidden; padding: 0; position: relative; }
+.canvas-state {
+  margin: auto; text-align: center; color: var(--text-tertiary); max-width: 360px; padding: 24px;
 }
+.empty-avatar {
+  width: 56px; height: 56px; border-radius: 50%; background: var(--brand-soft); color: var(--brand);
+  display: flex; align-items: center; justify-content: center; margin: 0 auto 14px;
+}
+.empty-title { font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px; }
+.empty-sub { font-size: 13px; line-height: 1.6; margin: 0; }
 
-.canvas-area {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 0;
-}
 .force-graph {
-  width: 100%;
-  flex: 1;
-  min-height: 420px;
-  cursor: grab;
+  width: 100%; flex: 1; min-height: 440px; cursor: grab; touch-action: none;
   background:
-    radial-gradient(circle at 30% 40%, rgba(1, 77, 178, 0.03) 0%, transparent 50%),
-    radial-gradient(circle at 70% 60%, rgba(16, 185, 129, 0.02) 0%, transparent 50%);
+    radial-gradient(circle at 30% 40%, rgba(59, 130, 246, 0.04) 0%, transparent 50%),
+    radial-gradient(circle at 70% 60%, rgba(16, 185, 129, 0.03) 0%, transparent 50%);
 }
 .force-graph:active { cursor: grabbing; }
-.edge-label { font-size: 10px; font-weight: 500; pointer-events: none; }
+.edge-label { font-size: 9px; font-weight: 500; fill: var(--text-tertiary); pointer-events: none; }
+.gnode { cursor: pointer; }
+.gnode circle { transition: stroke-width var(--dur-fast); }
+.gnode .node-label {
+  font-size: 9px; fill: var(--text-secondary); pointer-events: none; font-weight: 600;
+  paint-order: stroke; stroke: var(--bg-surface); stroke-width: 3px; stroke-linejoin: round;
+}
+.gnode.dim, .edges .dim { opacity: 0.12; transition: opacity var(--dur-fast); }
 
-/* 画布底部 */
 .canvas-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-surface);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; border-top: 1px solid var(--border); background: var(--bg-surface); flex-wrap: wrap; gap: 10px;
 }
-.zoom-controls {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
+.zoom-controls { display: flex; align-items: center; gap: 4px; }
 .zc-btn {
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-family: inherit;
+  width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-secondary); cursor: pointer; font-family: inherit;
 }
 .zc-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-.zoom-level {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-  min-width: 40px;
-  text-align: center;
-}
-
-.legend {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  flex-wrap: wrap;
-}
+.zoom-level { font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 42px; text-align: center; }
+.legend { display: flex; align-items: center; gap: 14px; font-size: 11px; color: var(--text-secondary); flex-wrap: wrap; }
 .leg-item { display: flex; align-items: center; gap: 4px; }
-.leg-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  display: inline-block;
-}
+.leg-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .leg-divider { width: 1px; height: 14px; background: var(--border); }
-.leg-line {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.leg-line::before {
-  content: '';
-  display: inline-block;
-  width: 20px;
-  height: 0;
-  border-top: 1.5px solid #94A3B8;
-}
-.leg-dashed::before { border-top-style: dashed; }
-.leg-arrow::before {
-  width: 20px;
-  border-top: 1.5px solid #94A3B8;
-  position: relative;
-}
-.leg-arrow::after {
-  content: '';
-  position: absolute;
-  right: -1px;
-  top: -4px;
-  border: 4px solid transparent;
-  border-left: 4px solid #94A3B8;
-}
-.leg-solid::before { border-top-style: solid; border-color: #CBD5E1; }
-
-.canvas-hint {
-  text-align: center;
-  font-size: 11px;
-  color: var(--text-placeholder);
-  padding: 6px;
-  margin: 0;
-}
+.leg-line { display: inline-flex; align-items: center; gap: 4px; }
+.leg-arrow { width: 20px; height: 0; border-top: 1.5px solid #94A3B8; position: relative; }
+.leg-arrow::after { content: ''; position: absolute; right: -1px; top: -4px; border: 4px solid transparent; border-left: 4px solid #94A3B8; }
+.canvas-hint { text-align: center; font-size: 11px; color: var(--text-placeholder); padding: 6px; margin: 0; }
 
 /* ---- 右侧统计面板 ---- */
-.stats-panel {
-  padding: 16px;
-  overflow-y: auto;
-}
-.panel-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 14px;
-}
+.stats-panel { padding: 16px; overflow-y: auto; }
+.panel-head { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
 .panel-title { font-size: 15px; font-weight: 700; }
-.info-hint { color: var(--text-tertiary); cursor: pointer; }
+.info-hint { color: var(--text-tertiary); cursor: pointer; margin-left: auto; }
 
-.stat-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-bottom: 18px;
-}
-.stat-cell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border-radius: var(--radius-md);
-  background: var(--bg-subtle);
-}
-.sc-icon-wrap {
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+.stat-cell { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: var(--radius-md); background: var(--bg-subtle); }
+.sc-icon-wrap { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .sc-label { font-size: 11px; color: var(--text-tertiary); }
 .sc-value { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.2; }
 
 .section-block { margin-bottom: 18px; }
-.section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .section-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
-.more-link { font-size: 12px; color: var(--brand); text-decoration: none; }
-.more-link:hover { text-decoration: underline; }
+
+.detail-box { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-subtle); }
+.detail-name { font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; }
+.detail-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.detail-tag { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill); font-weight: 600; }
+.detail-degree { font-size: 12px; color: var(--text-secondary); }
+.detail-degree strong { color: var(--text-primary); }
+.detail-neighbors { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.dn-label { font-size: 11px; color: var(--text-tertiary); }
+.dn-chip { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-secondary); }
+
+.type-bars { display: flex; flex-direction: column; gap: 7px; }
+.type-bar { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.tb-label { width: 56px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-track { flex: 1; height: 6px; border-radius: 3px; background: var(--bg-subtle); overflow: hidden; }
+.tb-fill { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--brand), #8B5CF6); }
+.tb-count { width: 28px; text-align: right; color: var(--text-tertiary); }
 
 .hot-list { display: flex; flex-direction: column; gap: 6px; }
-.hot-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: var(--radius-sm);
-  transition: background var(--dur-fast);
-}
+.hot-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: var(--radius-sm); transition: background var(--dur-fast); cursor: pointer; }
 .hot-item:hover { background: var(--bg-hover); }
-.hot-rank {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  background: var(--bg-subtle);
-  color: var(--text-tertiary);
-  flex-shrink: 0;
-}
+.hot-rank { width: 18px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; background: var(--bg-subtle); color: var(--text-tertiary); flex-shrink: 0; }
 .hot-rank.top3 { background: var(--brand-soft); color: var(--brand); }
-.hot-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.hot-name {
-  font-size: 12.5px;
-  color: var(--text-primary);
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.hot-count {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  white-space: nowrap;
-}
+.hot-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.hot-name { font-size: 12.5px; color: var(--text-primary); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hot-count { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
 .hot-count strong { color: var(--text-secondary); }
 
 .recent-list { display: flex; flex-direction: column; gap: 6px; }
-.recent-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 8px;
-  border-radius: var(--radius-sm);
-  transition: background var(--dur-fast);
-}
+.recent-item { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius-sm); transition: background var(--dur-fast); cursor: pointer; }
 .recent-item:hover { background: var(--bg-hover); }
-.recent-icon {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.recent-name {
-  font-size: 12px;
-  color: var(--text-primary);
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.recent-icon { width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.recent-name { font-size: 12px; color: var(--text-primary); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .recent-time { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
 
+/* 加载动画 */
+.canvas-state .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary); display: inline-block; margin: 0 3px; animation: blink 1.2s infinite ease-in-out; }
+.canvas-state .dot:nth-child(2) { animation-delay: 0.2s; }
+.canvas-state .dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
 </style>
