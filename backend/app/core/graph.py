@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from collections.abc import Sequence
 
 import numpy as np
@@ -28,6 +29,19 @@ from app.core.rag.embeddings import EmbeddingModel
 from app.db import DocChunk, Document, KGEdge, KGNode
 
 logger = logging.getLogger(__name__)
+
+# 图检索缓存：每个 kb 的节点/边按 kb_id 缓存（TTL），避免每个请求全表加载。
+# 写入侧（extract / delete_by_doc）会主动失效对应 kb 的缓存，保证一致性。
+_GRAPH_CACHE: dict[str, dict] = {}
+_GRAPH_TTL = 60  # 秒
+
+
+def _graph_cache_key(kb_id: str) -> str:
+    return f"g:{kb_id}"
+
+
+def _invalidate_graph(kb_id: str) -> None:
+    _GRAPH_CACHE.pop(_graph_cache_key(kb_id), None)
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -217,6 +231,7 @@ class GraphStore:
 
         if inserted_nodes or inserted_edges:
             await db.flush()
+            _invalidate_graph(kb_id)
         logger.info("graph extract doc=%s: +%d nodes, +%d edges", doc_title, inserted_nodes, inserted_edges)
 
     async def delete_by_doc(
@@ -234,6 +249,7 @@ class GraphStore:
             delete(KGNode).where(KGNode.kb_id == kb_id, KGNode.chunk_id.in_(chunk_ids))
         )
         await db.flush()
+        _invalidate_graph(kb_id)
 
     @staticmethod
     def _locate_chunk(label: str, chunks: Sequence[dict]):
@@ -255,14 +271,37 @@ class GraphStore:
     ) -> list[dict]:
         """图感知检索：问题向量 → 命中实体节点 → 1 跳邻居 → 收集相关 chunk。
 
+        节点/边按 kb_id 缓存（TTL），避免每个请求全表加载；写入侧
+        （extract / delete_by_doc）会主动失效对应 kb 的缓存，保证一致性。
         全程纯确定性计算，不调 LLM，即使 LLM/向量降级也能靠已有图谱工作。
         """
-        # 1) 取本 KB 全部节点
-        nodes = (
-            await db.execute(select(KGNode).where(KGNode.kb_id == kb_id))
-        ).scalars().all()
-        if not nodes:
-            return []
+        # 1) 取本 KB 节点/边（带 TTL 缓存，避免每请求全表扫描）
+        key = _graph_cache_key(kb_id)
+        now = time.monotonic()
+        entry = _GRAPH_CACHE.get(key)
+        if entry and now - entry["ts"] < _GRAPH_TTL:
+            node_list = entry["nodes"]
+            edge_list = entry["edges"]
+        else:
+            nodes = (
+                await db.execute(select(KGNode).where(KGNode.kb_id == kb_id))
+            ).scalars().all()
+            if not nodes:
+                return []
+            edges = (
+                await db.execute(select(KGEdge).where(KGEdge.kb_id == kb_id))
+            ).scalars().all()
+            # 转纯 dict 缓存，避免跨请求复用已过期（detached）的 ORM 对象
+            node_list = [
+                {"label": n.label, "chunk_id": n.chunk_id, "embedding": n.embedding}
+                for n in nodes
+                if n.embedding is not None
+            ]
+            edge_list = [
+                {"from_label": e.from_label, "to_label": e.to_label, "relation": e.relation}
+                for e in edges
+            ]
+            _GRAPH_CACHE[key] = {"ts": now, "nodes": node_list, "edges": edge_list}
 
         # 2) 问题向量，与节点向量做余弦，挑最相关的作为种子实体
         try:
@@ -272,36 +311,33 @@ class GraphStore:
             return []
 
         scored = sorted(
-            ((_cosine(n.embedding, q_emb), n) for n in nodes),
+            ((_cosine(nd["embedding"], q_emb), nd) for nd in node_list),
             key=lambda x: x[0],
             reverse=True,
         )
         # 相似度够高的直接当种子；若一个都没有（问法偏门），兜底取 top_k 最相关
-        seed_labels = [n.label for s, n in scored if s >= 0.55][:top_k]
+        seed_labels = [nd["label"] for s, nd in scored if s >= 0.55][:top_k]
         if not seed_labels:
-            seed_labels = [n.label for _, n in scored[:top_k]]
+            seed_labels = [nd["label"] for _, nd in scored[:top_k]]
 
         seed_set = set(seed_labels)
         # 3) 1 跳扩展：沿关系边把邻居也拉进来
         if seed_set:
-            edges = (
-                await db.execute(select(KGEdge).where(KGEdge.kb_id == kb_id))
-            ).scalars().all()
-            for e in edges:
-                if e.from_label in seed_set:
-                    seed_set.add(e.to_label)
-                if e.to_label in seed_set:
-                    seed_set.add(e.from_label)
+            for e in edge_list:
+                if e["from_label"] in seed_set:
+                    seed_set.add(e["to_label"])
+                if e["to_label"] in seed_set:
+                    seed_set.add(e["from_label"])
 
         # 4) 收集这些实体对应的 chunk_id（去重，保序）
-        node_by_label = {n.label: n for n in nodes if n.label in seed_set}
+        node_by_label = {nd["label"]: nd for nd in node_list if nd["label"] in seed_set}
         chunk_ids: list = []
         seen: set = set()
         for label in seed_set:
-            n = node_by_label.get(label)
-            if n and n.chunk_id not in seen:
-                chunk_ids.append(n.chunk_id)
-                seen.add(n.chunk_id)
+            nd = node_by_label.get(label)
+            if nd and nd["chunk_id"] not in seen:
+                chunk_ids.append(nd["chunk_id"])
+                seen.add(nd["chunk_id"])
         if not chunk_ids:
             return []
 

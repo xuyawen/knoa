@@ -29,6 +29,16 @@ export const useChatStore = defineStore('chat', () => {
   // 这样切筛选不会改变 TopBar 标题。
   const filterKb = ref<string | null>(null)
 
+  // 在途流式请求的中断控制器：切换会话 / 新建会话前先 abort，
+  // 避免旧流继续往新会话的 messages 里写 delta，造成会话污染。
+  let currentAbort: AbortController | null = null
+  function abortStream() {
+    if (currentAbort) {
+      currentAbort.abort()
+      currentAbort = null
+    }
+  }
+
   async function ask(question: string, knowledgeBase?: string | null, files?: ChatAttachment[]) {
     if (streaming.value || (!question.trim() && !files?.length)) return
 
@@ -50,9 +60,14 @@ export const useChatStore = defineStore('chat', () => {
     // （直接持有 push 前的本地引用会绕过代理、不触发重渲染）
     const lastMsg = () => messages.value[messages.value.length - 1]
 
+    // 本次问答专属的取消控制器；切会话 / 新建会话会 abort 它
+    const myAbort = new AbortController()
+    currentAbort = myAbort
+
     try {
-      for await (const event of streamAsk(question, knowledgeBase, sessionId.value || undefined, files)) {
+      for await (const event of streamAsk(question, knowledgeBase, sessionId.value || undefined, files, { signal: myAbort.signal })) {
         const m = lastMsg()
+        if (!m) continue   // 防御：异常重置后消息为空，跳过残留事件
         if (event.event === 'thinking') {
           // Agent 决策步骤：追加到当前消息的思考链
           if (!m.thinkingSteps) m.thinkingSteps = []
@@ -71,8 +86,10 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
     } catch (e) {
-      lastMsg().content += `\n\n[错误] ${e}`
+      const m = lastMsg()
+      if (m) m.content += `\n\n[错误] ${e}`
     } finally {
+      if (currentAbort === myAbort) currentAbort = null
       streaming.value = false
     }
   }
@@ -126,6 +143,9 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function startNewChat() {
+    // 先中断在途流式，避免旧流继续写进刚清空的 messages
+    abortStream()
+    streaming.value = false
     // 不再立即调用 createSession() 创建空记录；等用户发首条消息时由后端自动创建
     sessionId.value = ''
     messages.value = []
@@ -134,6 +154,9 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function switchSession(id: string) {
+    // 先中断在途流式，避免旧流把 delta 写进即将加载的新会话
+    abortStream()
+    streaming.value = false
     loadingHistory.value = true
     try {
       const detail = await getSession(id)

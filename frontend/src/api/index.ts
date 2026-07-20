@@ -272,20 +272,27 @@ export async function* streamAsk(
   knowledgeBase?: string | null,
   sessionId?: string | null,
   files?: ChatAttachment[],
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; signal?: AbortSignal },
 ): AsyncGenerator<SSEEvent> {
   // 客户端超时保护：Agentic RAG 多步决策链可能需要多次 LLM 调用（每轮 15~40s），
   // 90s 对复杂问题不够用，拉到 180s 给足余量
-  const controller = new AbortController()
+  const ac = new AbortController()
   const timeoutMs = opts?.timeoutMs ?? 180_000
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let timedOut = false
+  // 外部主动取消（切会话 / 新建会话）通过 signal 透传，复用同一个 ac 中断 fetch
+  const onExternalAbort = () => ac.abort()
+  if (opts?.signal) opts.signal.addEventListener('abort', onExternalAbort)
+  const timer = setTimeout(() => {
+    timedOut = true
+    ac.abort()
+  }, timeoutMs)
 
   try {
     const resp = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ question, knowledgeBase, sessionId, files: files ?? [] }),
-      signal: controller.signal,
+      signal: ac.signal,
     })
 
     if (!resp.ok || !resp.body) {
@@ -330,13 +337,15 @@ export async function* streamAsk(
       // 身份失效由全局弹窗统一处理，流直接结束，不追加错误文案
       return
     }
-    if (controller.signal.aborted) {
-      yield { event: 'error', data: { message: '请求超时，请稍后重试' } }
-    } else {
-      const msg = e instanceof Error ? e.message : String(e)
-      yield { event: 'error', data: { message: `网络错误：${msg}` } }
+    if (ac.signal.aborted) {
+      // 主动取消（切会话 / 新建会话）不提示；仅超时给文案
+      if (timedOut) yield { event: 'error', data: { message: '请求超时，请稍后重试' } }
+      return
     }
+    const msg = e instanceof Error ? e.message : String(e)
+    yield { event: 'error', data: { message: `网络错误：${msg}` } }
   } finally {
+    if (opts?.signal) opts.signal.removeEventListener('abort', onExternalAbort)
     clearTimeout(timer)
   }
 }

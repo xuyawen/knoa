@@ -1,3 +1,5 @@
+import time
+
 import jieba
 import numpy as np
 from rank_bm25 import BM25Okapi
@@ -14,6 +16,33 @@ except ImportError:
         def decorator(fn):
             return fn
         return decorator
+
+
+# BM25 / 召回索引缓存：按 KB 范围缓存已 tokenize 的 BM25 对象 + 过滤后的
+# chunk 列表（纯 dict），避免每个请求都全表 load + 重新 jieba 分词（jieba
+# cut_for_search 在大语料上很慢）。写侧（摄入 / 删除）变更后靠 TTL（60s）
+# 自然失效，简单且不会跨请求持有已过期的 ORM 对象。
+_BM25_CACHE: dict[str, dict] = {}
+_BM25_TTL = 60  # 秒
+
+
+def _cache_key(kb_id: str | None, kb_ids_filter: list[str] | None) -> str:
+    if kb_id:
+        return f"kb:{kb_id}"
+    if kb_ids_filter:
+        return "filt:" + ",".join(sorted(kb_ids_filter))
+    return "all"
+
+
+def _chunk_to_dict(c) -> dict:
+    """把 ORM DocChunk 转成纯 dict，便于跨请求缓存（避免复用不同会话的 ORM 对象）。"""
+    return {
+        "id": c.id,
+        "embedding": c.embedding,
+        "content": c.content,
+        "kb_id": c.kb_id,
+        "document_id": c.document_id,
+    }
 
 
 class HybridRetriever:
@@ -47,34 +76,44 @@ class HybridRetriever:
 
     @traceable(name="retrieve", tags=["retrieval"])
     async def retrieve(self, question: str, kb_id: str | None = None, top_k: int = 5) -> list[dict]:
-        chunks = await self._load_chunks(kb_id)
-        if not chunks:
-            return []
+        query_vec = np.array(await self.embedder.embed_query(question))
+
+        key = _cache_key(kb_id, self._kb_ids_filter)
+        now = time.monotonic()
+        entry = _BM25_CACHE.get(key)
+        if entry and now - entry["ts"] < _BM25_TTL:
+            # 命中缓存：复用已分词好的 BM25 与过滤后的 chunk 列表
+            chunks = entry["chunks"]
+            self._bm25 = entry["bm25"]
+            self._bm25_chunks = chunks
+        else:
+            raw = await self._load_chunks(kb_id)
+            if not raw:
+                return []
+            # 过滤维度不符/为空的脏 chunk（库里存在 8 维脏数据，会让
+            # chunk_embeddings @ query_vec 维度不匹配 -> 500）。chunks 同步
+            # 过滤以保持与 cosine_scores 的索引对齐（后续用索引回查 chunks）。
+            valid = [
+                _chunk_to_dict(c) for c in raw
+                if c.embedding is not None and len(c.embedding) == query_vec.shape[0]
+            ]
+            if not valid:
+                return []
+            chunks = valid
+            # 构建 BM25（jieba 分词是大头，靠缓存避免每请求重算）
+            tokenized = [list(jieba.cut_for_search(c["content"])) for c in chunks]
+            self._bm25 = BM25Okapi(tokenized)
+            self._bm25_chunks = chunks
+            _BM25_CACHE[key] = {"ts": now, "chunks": chunks, "bm25": self._bm25}
 
         # 1. 向量检索 (numpy 余弦相似度, 归一化向量直接点积)
-        query_vec = np.array(await self.embedder.embed_query(question))
-        # 过滤维度不符/为空的脏 chunk（库里存在 8 维脏数据，会让
-        # chunk_embeddings @ query_vec 维度不匹配 -> 500）。chunks 同步
-        # 过滤以保持与 cosine_scores 的索引对齐（后续用索引回查 chunks）。
-        valid = [
-            c for c in chunks
-            if c.embedding is not None and len(c.embedding) == query_vec.shape[0]
-        ]
-        if not valid:
-            return []
-        chunks = valid
-        chunk_embeddings = np.array([c.embedding for c in chunks])
+        chunk_embeddings = np.array([c["embedding"] for c in chunks])
         cosine_scores = chunk_embeddings @ query_vec  # 归一化向量点积 = 余弦
         vector_ranked = sorted(
             enumerate(cosine_scores), key=lambda x: x[1], reverse=True
         )[: top_k * 2]
 
         # 2. BM25 检索
-        if self._bm25 is None or len(chunks) != len(self._bm25_chunks):
-            self._bm25_chunks = chunks
-            tokenized = [list(jieba.cut_for_search(c.content)) for c in chunks]
-            self._bm25 = BM25Okapi(tokenized)
-
         tokens = list(jieba.cut_for_search(question))
         bm25_scores = self._bm25.get_scores(tokens)
         bm25_ranked = sorted(enumerate(bm25_scores), key=lambda x: x[1], reverse=True)[
@@ -83,7 +122,7 @@ class HybridRetriever:
 
         # 3. 预取 KB 名称和文档标题
         kb_names = await self._batch_get_kb_names()
-        doc_ids = {str(c.document_id) for c in chunks}
+        doc_ids = {str(c["document_id"]) for c in chunks}
         doc_titles = await self._batch_get_doc_titles(list(doc_ids))
 
         # 4. RRF 融合
@@ -92,14 +131,14 @@ class HybridRetriever:
 
         def add_chunk(idx, rank, distance):
             chunk = chunks[idx]
-            cid = str(chunk.id)
+            cid = str(chunk["id"])
             rrf_scores[cid] = rrf_scores.get(cid, 0) + 1.0 / (self.rrf_k + rank + 1)
             if cid not in chunk_map:
                 chunk_map[cid] = {
-                    "content": chunk.content,
-                    "kb_id": chunk.kb_id,
-                    "kb_name": kb_names.get(chunk.kb_id, chunk.kb_id),
-                    "doc_title": doc_titles.get(str(chunk.document_id), "未知文档"),
+                    "content": chunk["content"],
+                    "kb_id": chunk["kb_id"],
+                    "kb_name": kb_names.get(chunk["kb_id"], chunk["kb_id"]),
+                    "doc_title": doc_titles.get(str(chunk["document_id"]), "未知文档"),
                     "distance": distance,
                 }
 
