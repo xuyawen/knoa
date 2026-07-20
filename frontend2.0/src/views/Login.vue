@@ -174,9 +174,9 @@ async function handleLogin() {
   min-height: 0;
 }
 
-/* ========== 左侧品牌区（浅灰底 + 右竖线分界）========== */
+/* ========== 左侧品牌区（浅灰底 + 右竖线分界，占 5 份）========== */
 .login-brand {
-  flex: 1;
+  flex: 5;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -330,13 +330,13 @@ async function handleLogin() {
   transform: rotateY(90deg) translateZ(32px);
 }
 
-/* ========== 右侧登录区（白底）========== */
+/* ========== 右侧登录区（白底，占 4 份）========== */
 .login-right {
+  flex: 4;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 48px;
-  min-width: 480px;
   background: #FFFFFF;          /* 白底 */
 }
 
