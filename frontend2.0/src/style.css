@@ -150,10 +150,14 @@ html,
 body,
 #app {
   height: 100%;
+  border: none;
+  outline: none;
 }
 
 body {
   margin: 0;
+  border: none;
+  outline: none;
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.55;
