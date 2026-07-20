@@ -131,12 +131,12 @@ async function handleLogin() {
 </template>
 
 <style scoped>
-/* ========== 页面容器 — 淡蓝白渐变背景 ========== */
+/* ========== 页面容器 ========== */
 .login-page {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: linear-gradient(135deg, #F0F5FF 0%, #F7FAFC 45%, #FFFFFF 100%);
+  background: #FFFFFF;          /* 右侧白为主，左侧覆盖 */
 }
 
 /* ========== 顶部栏：仅 logo + 系统名（与 AppLayout 顶栏同款样式，无菜单）========== */
@@ -174,13 +174,15 @@ async function handleLogin() {
   min-height: 0;
 }
 
-/* ========== 左侧品牌区 ========== */
+/* ========== 左侧品牌区（浅灰底 + 右竖线分界）========== */
 .login-brand {
   flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: center;
   padding: 0 64px;
+  background: #F1F5F9;          /* 浅灰底 */
+  border-right: 2px solid #E2E8F0;  /* 红线位置的分界线 */
 }
 .brand-title {
   font-size: 30px;
@@ -328,13 +330,14 @@ async function handleLogin() {
   transform: rotateY(90deg) translateZ(32px);
 }
 
-/* ========== 右侧登录区 ========== */
+/* ========== 右侧登录区（白底）========== */
 .login-right {
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 48px;
   min-width: 480px;
+  background: #FFFFFF;          /* 白底 */
 }
 
 /* 登录卡片 — 浅色白底 */
