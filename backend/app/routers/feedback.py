@@ -4,7 +4,8 @@ from pydantic import Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import ChatMessage, MessageFeedback
+from app.core.security import get_current_user
+from app.db import ChatMessage, MessageFeedback, User
 from app.deps import get_db
 from app.models.knowledge import CamelModel
 
@@ -20,8 +21,9 @@ class FeedbackIn(CamelModel):
 async def create_feedback(
     payload: FeedbackIn,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """对一条回答提交/更新反馈（upsert）。"""
+    """对一条回答提交/更新反馈（upsert）；需登录。"""
     try:
         msg_id = uuid.UUID(payload.message_id)
     except ValueError:
@@ -52,8 +54,9 @@ async def create_feedback(
 async def delete_feedback(
     message_id: str,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """取消对某条回答的反馈。"""
+    """取消对某条回答的反馈；需登录。"""
     try:
         msg_id = uuid.UUID(message_id)
     except ValueError:

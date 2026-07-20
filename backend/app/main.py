@@ -5,9 +5,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from app.config import settings
+from app.config import settings, validate_production_settings
 from app.core.logging_config import request_id_var, setup_logging
 from app.core.metrics import (
     dec_active,
@@ -18,7 +18,7 @@ from app.core.metrics import (
 )
 from app.core.security import create_access_token, decode_access_token
 from app.database import AsyncSessionLocal
-from app.db import User
+from app.db import ChatSession, User
 from app.routers import (
     ask,
     auth,
@@ -36,14 +36,20 @@ from app.routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 生产环境配置强校验（弱密钥/弱口令/维度错配 → 直接启动失败，fail-fast）
+    validate_production_settings()
     # ponytail: embedding API 客户端即时创建, 无需预加载
     # 确保所有模型表已创建（幂等，已存在的表不受影响）
     from app.database import init_db
     await init_db()
     # Phase 2: 首次启动且无任何用户时，自动创建初始管理员（幂等）
     async with AsyncSessionLocal() as session:
-        exists = await session.scalar(select(User).limit(1))
-        if exists is None:
+        admin = await session.scalar(
+            select(User).where(User.username == settings.ADMIN_USERNAME)
+        )
+        if admin is None:
+            admin = await session.scalar(select(User).order_by(User.created_at).limit(1))
+        if admin is None:
             admin = User(
                 id=uuid.uuid4(),
                 username=settings.ADMIN_USERNAME,
@@ -53,6 +59,15 @@ async def lifespan(app: FastAPI):
             )
             session.add(admin)
             await session.commit()
+            await session.refresh(admin)
+        # 迁移遗留会话：user_id 为 NULL 的会话归属到该管理员，
+        # 避免上线会话隔离后旧会话对所有用户不可见（幂等，仅影响 NULL 行）。
+        await session.execute(
+            update(ChatSession)
+            .where(ChatSession.user_id.is_(None))
+            .values(user_id=str(admin.id))
+        )
+        await session.commit()
     yield
 
 

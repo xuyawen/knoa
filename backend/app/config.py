@@ -90,4 +90,49 @@ class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
+# 已知 OpenAI 兼容 embedding 模型 → 标准向量维度。
+# 用于生产启动期维度一致性校验（避免 EMBEDDING_DIM 与模型实际维度错配
+# 导致 pgvector 检索因维度不符全过滤空、直接失效）。
+_KNOWN_EMBEDDING_DIMS: dict[str, int] = {
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+    "text-embedding-ada-002": 1536,
+}
+
+
+def validate_production_settings() -> None:
+    """生产环境启动期强校验：发现仍在使用弱默认值/危险配置即直接抛异常阻止启动。
+
+    把「配置没改就上线」这类高危问题从「运行时悄悄出错」变成「启动即失败」，
+    避免带着 dev 密钥 / 弱口令 / 维度错配上线。仅在生产环境
+    （APP_ENV=production）生效，开发环境（默认 development）不干预，方便本地调试。
+    """
+    if settings.APP_ENV != "production":
+        return
+    errors: list[str] = []
+    if settings.JWT_SECRET == "dev-change-me":
+        errors.append(
+            "JWT_SECRET 仍为开发默认值 'dev-change-me'，生产环境必须替换为强随机密钥"
+        )
+    if settings.ADMIN_PASSWORD == "admin123":
+        errors.append(
+            "ADMIN_PASSWORD 仍为弱口令 'admin123'，生产环境必须替换为强密码"
+        )
+    if settings.EMBEDDING_API_KEY == "":
+        errors.append("EMBEDDING_API_KEY 为空，生产环境无法向量化，检索将全部失效")
+    if settings.LLM_API_KEY == "":
+        errors.append("LLM_API_KEY 为空，生产环境无法调用大模型")
+    expected = _KNOWN_EMBEDDING_DIMS.get(settings.EMBEDDING_MODEL)
+    if expected is not None and settings.EMBEDDING_DIM != expected:
+        errors.append(
+            f"EMBEDDING_DIM={settings.EMBEDDING_DIM} 与模型 "
+            f"{settings.EMBEDDING_MODEL} 的标准维度 {expected} 不一致，"
+            "将导致向量维度错配、检索全空"
+        )
+    if errors:
+        raise RuntimeError(
+            "生产环境配置校验未通过，已阻止启动：\n- " + "\n- ".join(errors)
+        )
+
+
 settings = Settings()

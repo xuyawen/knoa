@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db import KBPermission, User
+from app.db import KBPermission, KnowledgeBase, User
 from app.deps import get_db
 
 _bearer = HTTPBearer(auto_error=False)
@@ -138,3 +138,32 @@ def require_kb_access(min_level: str = "view"):
         return user
 
     return _dep
+
+
+async def get_accessible_kb_ids(db: AsyncSession, user: User) -> list[str]:
+    """返回当前用户对 view+ 可见的全部 KB id（用于「未指定 KB 时」的检索范围限定）。
+
+    - admin 角色：可见全部库；
+    - 其余用户：在 kb_permission 中有记录者 + 遗留「开放库」（该库无任何权限记录）可见；
+      严格隔离库（已有他人权限记录但自己不在其中）不可见。
+    语义与 get_kb_permission_level 的「遗留开放库」规则保持一致。
+    """
+    if user.role == "admin":
+        rows = (await db.execute(select(KnowledgeBase.id))).scalars().all()
+        return [str(x) for x in rows]
+    all_kb_ids = [
+        str(x) for x in (await db.execute(select(KnowledgeBase.id))).scalars().all()
+    ]
+    user_perm_kbs = {
+        str(r[0])
+        for r in (
+            await db.execute(
+                select(KBPermission.kb_id).where(KBPermission.user_id == user.id)
+            )
+        ).all()
+    }
+    strict_kb_ids = {str(r[0]) for r in (await db.execute(select(KBPermission.kb_id))).all()}
+    return [
+        kb for kb in all_kb_ids
+        if kb in user_perm_kbs or kb not in strict_kb_ids
+    ]

@@ -19,10 +19,20 @@ except ImportError:
 class HybridRetriever:
     """向量检索(numpy 余弦) + BM25 检索 + RRF 融合"""
 
-    def __init__(self, embedder: EmbeddingModel, db: AsyncSession, rrf_k: int = 60):
+    def __init__(
+        self,
+        embedder: EmbeddingModel,
+        db: AsyncSession,
+        rrf_k: int = 60,
+        kb_ids: "list[str] | None" = None,
+    ):
         self.embedder = embedder
         self.db = db
         self.rrf_k = rrf_k
+        # 实例级可访问 KB 范围（None = 不限，仅 admin/显式单库时使用）。
+        # 仅当每次检索未传入具体 kb_id 时生效，用于「未指定 KB 时」
+        # 把检索严格限定在该用户有权访问的 KB 集合内，防止跨库越权。
+        self._kb_ids_filter = kb_ids
         self._bm25: BM25Okapi | None = None
         self._bm25_chunks: list = []
 
@@ -30,6 +40,8 @@ class HybridRetriever:
         query = select(DocChunk)
         if kb_id:
             query = query.where(DocChunk.kb_id == kb_id)
+        elif self._kb_ids_filter:
+            query = query.where(DocChunk.kb_id.in_(self._kb_ids_filter))
         result = await self.db.execute(query)
         return list(result.scalars().all())
 

@@ -11,7 +11,11 @@ from app.core.rag.pipeline import RAGPipeline
 from app.core.rag.es_client import ESClient
 from app.core.rag.es_retriever import ESRetriever
 from app.core.rag.retriever import HybridRetriever
-from app.core.security import get_current_user, get_kb_permission_level
+from app.core.security import (
+    get_accessible_kb_ids,
+    get_current_user,
+    get_kb_permission_level,
+)
 from app.core.store.redis_store import RedisStore
 from app.config import settings
 from app.db import User
@@ -49,10 +53,17 @@ async def ask(
             )
 
     # 库级权限：问答目标 KB 必须对该用户可见
+    accessible_kb_ids: "list[str] | None" = None
     if req.knowledge_base:
         level = await get_kb_permission_level(db, req.knowledge_base, user)
         if level is None:
             raise HTTPException(status_code=403, detail="无权访问该知识库")
+    else:
+        # 未指定 KB：将检索范围严格限定为用户有权访问的 KB 列表，
+        # 防止已登录用户跨库检索其无权查看的知识库内容（P0-2）。
+        accessible_kb_ids = await get_accessible_kb_ids(db, user)
+        if not accessible_kb_ids:
+            raise HTTPException(status_code=403, detail="无权访问任何知识库")
 
     # 检索器选择：ES 可用且目标库已建索引 → ES 混合检索；
     # 否则回退 pgvector HybridRetriever（ES 未启用 / 索引不存在 / 网络异常都安全降级）
@@ -60,7 +71,10 @@ async def ask(
     if es.enabled and req.knowledge_base and await es.index_exists(req.knowledge_base):
         retriever = ESRetriever(embedder, es, settings.RRF_K)
     else:
-        retriever = HybridRetriever(embedder, db, settings.RRF_K)
+        # 未指定 KB 时，注入可访问范围做库级隔离过滤
+        retriever = HybridRetriever(
+            embedder, db, settings.RRF_K, kb_ids=accessible_kb_ids
+        )
     pipeline = RAGPipeline(
         retriever, llm, redis, db,
         user_id=str(user.id),
