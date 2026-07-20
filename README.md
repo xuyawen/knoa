@@ -46,7 +46,6 @@
 knoa/
 ├── docker-compose.yml          # 全栈编排：Postgres + Redis + backend + frontend（Phase 4）
 ├── docs/design-spec.md        # 设计规格（配色 / 字体 / 布局 / 接口）
-├── handoff/                   # 设计稿导出与解析脚本
 ├── backend/                   # FastAPI 后端
 │   ├── Dockerfile             # 后端镜像（python:3.12-slim）
 │   ├── pyproject.toml        # 依赖锁定（uv.lock）

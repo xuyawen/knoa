@@ -10,7 +10,7 @@ import {
   deleteSession,
   batchDeleteSessions,
 } from '@/api'
-import type { ChatMessage, ChatAttachment, SourceItem, SourceDetail, ChatSession } from '@/types/api'
+import type { ChatMessage, ChatAttachment, RawAttachment, SourceItem, SourceDetail, ChatSession } from '@/types/api'
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
@@ -169,11 +169,11 @@ export const useChatStore = defineStore('chat', () => {
         sources: m.sources ?? [],
         // 后端存 DB 用 snake_case(mime_type/data_b64)，前端类型用 camelCase；
         // 这里归一化，兼容两种命名，避免历史图片回显读不到字段
-        attachments: ((m.attachments ?? []) as any[]).map((a) => ({
-          kind: a.kind,
-          mimeType: a.mimeType ?? a.mime_type,
+        attachments: ((m.attachments ?? []) as RawAttachment[]).map((a) => ({
+          kind: (a.kind ?? 'image') as ChatAttachment['kind'],
+          mimeType: a.mimeType ?? a.mime_type ?? '',
           dataB64: a.dataB64 ?? a.data_b64,
-          name: a.name,
+          name: a.name ?? null,
         })) as ChatAttachment[],
         thinkingSteps: [],
         feedback: null,

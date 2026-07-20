@@ -323,9 +323,11 @@ export async function* streamAsk(
           if (line.startsWith('event:')) eventType = line.slice(6).trim()
           else if (line.startsWith('data:')) dataStr += line.slice(5).trim()
         }
-        if (eventType && dataStr) {
+        // SSE 规范：缺省 event 类型即 'message'。原先要求 eventType 非空会把这类
+        // 事件静默丢弃，改为回退到 'message'，与 SSEEvent 联合类型保持一致。
+        if (dataStr) {
           try {
-            yield { event: eventType, data: JSON.parse(dataStr) } as SSEEvent
+            yield { event: eventType || 'message', data: JSON.parse(dataStr) } as SSEEvent
           } catch {
             // skip malformed
           }

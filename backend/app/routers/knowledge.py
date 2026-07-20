@@ -16,7 +16,7 @@ from app.core.storage import get_object_store
 from app.config import settings
 from app.core.security import (
     get_current_user,
-    get_kb_permission_level,
+    LEVEL_ORDER,
     require_kb_access,
     require_roles,
 )
@@ -49,6 +49,33 @@ async def get_knowledge_bases(
         select(KnowledgeBase).order_by(KnowledgeBase.order, KnowledgeBase.created_at)
     )
     kbs = result.scalars().all()
+
+    # 库级权限：一次性聚合查询，替代原先「每库调一次 get_kb_permission_level」的 N+1
+    # （非 admin 用户下，原来每个 KB 触发 1~2 次 DB 查询）。
+    # perm_map: kb_id -> 用户自身最高权限；strict_kbs: 存在任意权限记录的库（严格隔离）。
+    perm_map: dict[str, str] = {}
+    strict_kbs: set[str] = set()
+    if user.role != "admin":
+        perms = (
+            await db.execute(
+                select(KBPermission).where(
+                    KBPermission.kb_id.in_([kb.id for kb in kbs]),
+                    KBPermission.user_id == user.id,
+                )
+            )
+        ).scalars().all()
+        for p in perms:
+            cur = perm_map.get(p.kb_id)
+            if cur is None or LEVEL_ORDER.get(p.level, 0) > LEVEL_ORDER.get(cur, 0):
+                perm_map[p.kb_id] = p.level
+        any_rows = (
+            await db.execute(
+                select(KBPermission.kb_id).where(
+                    KBPermission.kb_id.in_([kb.id for kb in kbs])
+                )
+            )
+        ).scalars().all()
+        strict_kbs = set(any_rows)
 
     # 一次聚合查询替代「每库 3 次查询」的 N+1 模式：
     # 按 kb_id 汇总 文档数 / 最新更新时间 / 待复核数。
@@ -83,8 +110,10 @@ async def get_knowledge_bases(
     kb_list = []
     health_list = []
     for kb in kbs:
-        # 库级权限过滤：无权限则对用户不可见
-        if await get_kb_permission_level(db, kb.id, user) is None:
+        # 库级权限过滤（权限已上方一次性聚合算出，避免每库一次查询的 N+1）：
+        #  - admin / 用户在 perm_map 中有记录 / 遗留开放库（无任何权限记录）→ 可见
+        #  - 严格隔离库（存在他人权限记录但用户无记录）→ 不可见
+        if user.role != "admin" and kb.id not in perm_map and kb.id in strict_kbs:
             continue
 
         stat = stats_map.get(kb.id)

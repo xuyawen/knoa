@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import Field
 
@@ -29,12 +30,12 @@ class UserCreateIn(CamelModel):
     username: str = Field(..., min_length=2, max_length=64)
     password: str = Field(..., min_length=6, max_length=128)
     display_name: str | None = None
-    role: str = "viewer"                         # admin | editor | viewer
+    role: Literal["admin", "editor", "viewer"] = "viewer"
 
 
 class UserUpdateIn(CamelModel):
     display_name: str | None = None
-    role: str | None = None
+    role: Literal["admin", "editor", "viewer"] | None = None
     is_active: bool | None = None
     password: str | None = None
 

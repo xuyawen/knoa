@@ -18,12 +18,15 @@ Provider 策略（优先级从高到低）：
 from __future__ import annotations
 
 import html
+import logging
 import re
 import urllib.parse
 
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class WebSearcher:
@@ -52,16 +55,16 @@ class WebSearcher:
             try:
                 return await self._search_bocha(query, max_results)
             except Exception as e:  # BoCha 失败降级到 Tavily / DDG，保证联网能力可用
-                print(f"[web_search] BoCha failed, fallback: {e}")
+                logger.warning("BoCha search failed, fallback: %s", e)
         if settings.TAVILY_API_KEY:
             try:
                 return await self._search_tavily(query, max_results)
             except Exception as e:
-                print(f"[web_search] Tavily failed, fallback to DDG: {e}")
+                logger.warning("Tavily search failed, fallback to DDG: %s", e)
         try:
             return await self._search_ddg(query, max_results)
         except Exception as e:
-            print(f"[web_search] DDG failed: {e}")
+            logger.warning("DDG search failed: %s", e)
             return []
 
     # ── Tavily（需 key）──

@@ -38,7 +38,7 @@ const parts = computed(() => {
 })
 
 const hasWebSource = computed(() =>
-  (props.message.sources || []).some((s: any) => s.sourceType === 'web'),
+  (props.message.sources || []).some((s) => s.sourceType === 'web'),
 )
 
 function stepIcon(action: string): string {
@@ -121,7 +121,7 @@ async function onCopy() {
         <span class="avatar"><Icon name="sparkle" :size="15" /></span>
         <span class="name">知海 · 运营知识助手</span>
           <!-- 有来源：显示 RAG/联网标签 -->
-          <span v-if="(message as any).sources?.length" class="tag" :class="{ web: hasWebSource }">
+          <span v-if="message.sources?.length" class="tag" :class="{ web: hasWebSource }">
             <span class="tag-dot" />
             {{ hasWebSource ? '联网参考' : 'RAG 溯源' }}
           </span>

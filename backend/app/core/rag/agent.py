@@ -42,6 +42,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -938,7 +939,13 @@ class AgenticRAGAgent:
 
     async def _get_or_create_session(self, session_id: str | None, question: str) -> ChatSession:
         if session_id:
-            result = await self.db.execute(select(ChatSession).where(ChatSession.id == uuid.UUID(session_id)))
+            # 前端传入的 session_id 可能非合法 UUID，先校验再查库，
+            # 否则 uuid.UUID() 抛 ValueError → 被顶层兜底成 500，应明确 400。
+            try:
+                sid = uuid.UUID(session_id)
+            except (ValueError, AttributeError, TypeError):
+                raise HTTPException(status_code=400, detail="无效的会话 ID")
+            result = await self.db.execute(select(ChatSession).where(ChatSession.id == sid))
             s = result.scalar_one_or_none()
             if s:
                 return s

@@ -237,14 +237,30 @@ class GraphStore:
     async def delete_by_doc(
         self, db: AsyncSession, kb_id: str, chunk_ids: list
     ) -> None:
-        """删除某文档关联的图谱节点（按 chunk_id 归属）。
+        """删除某文档关联的图谱节点与边（按 chunk_id 归属）。
 
-        删除文档时调用：先取该文档全部 chunk_id，再清掉引用这些
-        chunk 的 kg_node。kg_edge 以 label 为键（非 chunk_id），
-        删除节点后检索阶段靠「种子节点存在性」自然隔离，无需级联删边。
+        删除文档时调用：先取该文档全部 chunk_id，清掉引用这些
+        chunk 的 kg_node；同时级联清理引用这些节点 label 的 kg_edge，
+        否则会留下悬空脏边（两端实体已删、边却还在）。
         """
         if not chunk_ids:
             return
+        # 边以实体 label 字符串为键引用节点（非 chunk_id），故先取被删节点的 label，
+        # 再一并删除 from_label / to_label 命中这些 label 的边。
+        labels = (
+            await db.execute(
+                select(KGNode.label).where(
+                    KGNode.kb_id == kb_id, KGNode.chunk_id.in_(chunk_ids)
+                )
+            )
+        ).scalars().all()
+        if labels:
+            await db.execute(
+                delete(KGEdge).where(
+                    KGEdge.kb_id == kb_id,
+                    (KGEdge.from_label.in_(labels)) | (KGEdge.to_label.in_(labels)),
+                )
+            )
         await db.execute(
             delete(KGNode).where(KGNode.kb_id == kb_id, KGNode.chunk_id.in_(chunk_ids))
         )

@@ -168,20 +168,25 @@ class MemoryStore:
         rows = await self._load_user_memories(user_id, db)
         texts = [m["content"] for m in memories]
         new_embs = await self.embedder.embed(texts)
+        # 记录本次 save 中已被「更新」覆盖的旧记忆下标：
+        # 避免多条新记忆命中同一条旧记忆时互相覆盖、丢内容（保第一条更新，
+        # 后续命中的改为新建一行，两条记忆都保留）。
+        consumed: set[int] = set()
         for m, emb in zip(memories, new_embs):
-            # 找一个最相似的旧记忆
+            # 找一个最相似的旧记忆（已在本轮被覆盖的旧记忆不再参与匹配）
             best_idx, best_sim = -1, -1.0
             for i, r in enumerate(rows):
-                if not r.embedding:
+                if i in consumed or not r.embedding:
                     continue
                 sim = _cosine(emb, r.embedding)
                 if sim > best_sim:
                     best_sim, best_idx = sim, i
-            if best_idx >= 0 and best_sim >= settings.MEMORY_SIM_THRESHOLD:
+            if best_idx >= 0 and best_idx not in consumed and best_sim >= settings.MEMORY_SIM_THRESHOLD:
                 # 更新而非新增（冲突消解：偏好变了就覆盖旧的）
                 rows[best_idx].content = m["content"]
                 rows[best_idx].embedding = emb
                 rows[best_idx].meta_type = m.get("type")
+                consumed.add(best_idx)
                 continue
             db.add(
                 Memory(

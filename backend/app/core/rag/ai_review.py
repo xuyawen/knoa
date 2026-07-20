@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import numpy as np
 from sqlalchemy import select
@@ -10,6 +11,8 @@ from app.core.llm.openai_compat import OpenAICompatProvider
 from app.core.rag.chunker import MarkdownChunker
 from app.core.rag.embeddings import EmbeddingModel
 from app.db import DocChunk, Document, KnowledgeBase
+
+logger = logging.getLogger(__name__)
 
 # 相似度阈值：超过即判定为疑似重复，纳入 AI 建议
 SIMILARITY_THRESHOLD = 0.82
@@ -77,7 +80,7 @@ async def ai_review_document(
             qvecs = np.array(await embedder.embed([c["content"] for c in chunks]), dtype=float)
         except Exception as e:  # 嵌入不可用则跳过相似度，仅走 LLM 定性
             qvecs = np.array([])
-            print(f"[ai_review] embedding failed: {e}")
+            logger.warning("embedding failed, skip similarity: %s", e)
         if qvecs.size:
             existing = (
                 await db.execute(
@@ -154,7 +157,7 @@ async def ai_review_document(
         quality_notes = parsed.get("quality_notes") or []
         suggested_kb = parsed.get("suggested_kb") or None
     except Exception as e:  # LLM 不可用 → 降级，不阻断审核流程
-        print(f"[ai_review] LLM 调用失败，降级为人工复核: {e}")
+        logger.warning("LLM call failed, degrade to manual review: %s", e)
         verdict = "manual_review"
         summary = "AI 分析服务暂时不可用，已降级为人工复核，请人工判断。"
         duplicates = []

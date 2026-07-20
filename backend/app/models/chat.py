@@ -4,6 +4,11 @@ from pydantic import Field, model_validator
 
 from app.models.knowledge import CamelModel
 
+# 多模态附件上限（与 P1-4 上传 20MB 对齐）：
+# base64 约为原始字节的 4/3，20MB 原始 ≈ 28MB base64 字符串。
+MAX_FILE_B64_LEN = 28_000_000
+MAX_FILES_PER_ASK = 5
+
 
 class ChatFile(CamelModel):
     """多模态输入文件（一期仅 image；audio/video 由 MODEL_CAPABILITIES 开关控制）。
@@ -14,7 +19,7 @@ class ChatFile(CamelModel):
 
     kind: Literal["image", "audio", "video"]
     mime_type: str
-    data_b64: str
+    data_b64: str = Field(..., max_length=MAX_FILE_B64_LEN)
     name: str | None = None
 
 
@@ -28,6 +33,8 @@ class AskRequest(CamelModel):
     def _check_non_empty(self) -> "AskRequest":
         if not self.question.strip() and not self.files:
             raise ValueError("请输入问题或上传图片")
+        if len(self.files) > MAX_FILES_PER_ASK:
+            raise ValueError(f"单次最多上传 {MAX_FILES_PER_ASK} 个附件")
         return self
 
 

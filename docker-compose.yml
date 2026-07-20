@@ -102,6 +102,11 @@ services:
       - backend
     expose:
       - "80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
     deploy:
       resources:
@@ -124,6 +129,11 @@ services:
       - ./deploy/nginx/certs:/etc/nginx/certs:ro
       - ./deploy/nginx/certbot:/var/www/certbot:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -152,6 +162,11 @@ services:
       - ./deploy/backup/pg-backup.sh:/usr/local/bin/pg-backup.sh:ro
     command: ["sh", "-c", "while true; do /usr/local/bin/pg-backup.sh; sleep 86400; done"]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knoa -h postgres"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits:

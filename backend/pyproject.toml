@@ -39,6 +39,9 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# test_agnes.py 是需连「活后端」(127.0.0.1:8000) 的手动集成脚本，
+# 不应进入 CI 单测套件；显式忽略，避免被误收集或漏收集时语义不清。
+addopts = "--ignore=test_agnes.py"
 # 默认 fixture loop scope = session：让 prepare_test_db 这种
 # session 级异步 fixture 能拿到 session 级 loop runner（否则
 # ScopeMismatch）。真正「跟着测试走」的 db_session / client /

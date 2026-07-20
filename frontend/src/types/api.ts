@@ -143,6 +143,16 @@ export interface ChatAttachment {
   name?: string | null
 }
 
+/** 兼容历史数据：早期后端曾在 DB 存 snake_case(mime_type/data_b64)。 */
+export interface RawAttachment {
+  kind?: 'image' | 'audio' | 'video'
+  mimeType?: string
+  mime_type?: string
+  dataB64?: string
+  data_b64?: string
+  name?: string | null
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -200,3 +210,4 @@ export type SSEEvent =
   | { event: 'delta'; data: { content: string } }
   | { event: 'done'; data: { messageId: string; citations: number[]; sessionId: string } }
   | { event: 'error'; data: { message: string } }
+  | { event: 'message'; data: unknown }
