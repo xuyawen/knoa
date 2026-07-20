@@ -35,4 +35,10 @@ EXPOSE 8000
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# 以非 root 用户运行（降低容器被攻破后的影响面；uvicorn 绑 8000 无需特权端口）
+RUN groupadd --system appgroup \
+    && useradd --system --gid appgroup appuser \
+    && chown -R appuser:appgroup /app
+USER appuser
+
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

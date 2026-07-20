@@ -19,7 +19,8 @@ services:
     container_name: knoa-postgres
     environment:
       POSTGRES_USER: knoa
-      POSTGRES_PASSWORD: knoa
+      # 口令通过环境变量覆盖（默认 knoa 仅本地开发）；生产请在根 .env 设强口令
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-knoa}
       POSTGRES_DB: knoa
     volumes:
       - knoa_pgdata:/var/lib/postgresql/data
@@ -57,11 +58,15 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: knoa-backend
+    # 生产密钥（JWT_SECRET / ADMIN_PASSWORD 等）应放在独立的、git 忽略的
+    # 环境文件里（如根 .env 或 deploy/.env，compose 会自动加载）；
+    # 切勿把 dev-change-me / admin123 这类默认值带上生产。
     env_file:
       - ./backend/.env
     environment:
       # 容器内通过服务名访问，覆盖 .env 里的 localhost:5433 等
-      DATABASE_URL: postgresql+asyncpg://knoa:knoa@postgres:5432/knoa
+      # 口令与 postgres 服务保持一致（默认 knoa 仅本地开发）
+      DATABASE_URL: postgresql+asyncpg://knoa:${POSTGRES_PASSWORD:-knoa}@postgres:5432/knoa
       REDIS_URL: redis://redis:6379/0
       SSL_ENABLED: "False"                    # TLS 由 edge 终止，backend 明文 HTTP
       CORS_ORIGINS: "https://knoa.example.com"   # 改成你的域名（必须与访问站点的 Origin 一致）
@@ -138,7 +143,7 @@ services:
       PGHOST: postgres
       PGPORT: "5432"
       PGUSER: knoa
-      PGPASSWORD: knoa
+      PGPASSWORD: ${POSTGRES_PASSWORD:-knoa}
       PGDATABASE: knoa
       BACKUP_DIR: /backups
       BACKUP_RETENTION_DAYS: "7"

@@ -79,6 +79,15 @@ jobs:
       - name: Import app (catch import-time errors)
         run: uv run python -c "from app.main import app; print('app import ok:', app.title)"
 
+      # P1-13：代码质量 / 依赖安全扫描（非阻塞，仅报告不阻断流水线）
+      - name: Lint (ruff, non-blocking)
+        continue-on-error: true
+        run: uvx ruff@latest check app
+
+      - name: Dependency audit (pip-audit, non-blocking)
+        continue-on-error: true
+        run: uv run --with pip-audit pip-audit
+
       # 关键守卫：迁移能在真实 Postgres 上跑通，且模型与迁移一致（无待生成迁移）
       - name: Apply Alembic migrations
         run: |
