@@ -1,7 +1,7 @@
 """Phase 2 鉴权路由：登录、当前用户、用户管理（仅 admin）。"""
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,7 @@ from app.core.security import (
 )
 from app.db import ChatSession, KBPermission, Memory, User
 from app.deps import get_db
+from app.config import settings
 from app.models.auth import (
     ChangePasswordIn,
     LoginIn,
@@ -35,13 +36,36 @@ def _to_out(u: User) -> UserOut:
     )
 
 
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=settings.COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.JWT_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(settings.COOKIE_NAME, path="/")
+
+
 @router.post("/auth/login", response_model=TokenOut)
-async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
+async def login(payload: LoginIn, response: Response, db: AsyncSession = Depends(get_db)):
     user = await db.scalar(select(User).where(User.username == payload.username))
     if user is None or not user.verify_password(payload.password) or not user.is_active:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = create_access_token(str(user.id), user.username, user.role)
+    _set_auth_cookie(response, token)
     return TokenOut(access_token=token, user=_to_out(user))
+
+
+@router.post("/auth/logout")
+async def logout(response: Response):
+    _clear_auth_cookie(response)
+    return {"detail": "已退出登录"}
 
 
 @router.get("/auth/me", response_model=UserOut)

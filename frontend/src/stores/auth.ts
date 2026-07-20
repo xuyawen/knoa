@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { getMe, login as apiLogin } from '@/api/auth'
-import { getToken, setToken } from '@/api/http'
+import { getMe, login as apiLogin, logout as apiLogout } from '@/api/auth'
 import type { UserOut } from '@/types/api'
 
 const USER_KEY = 'knoa_user'
@@ -16,7 +15,6 @@ export interface CurrentUser {
 }
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref<string | null>(getToken())
   const user = ref<CurrentUser | null>(
     (() => {
       const raw = localStorage.getItem(USER_KEY)
@@ -24,12 +22,13 @@ export const useAuthStore = defineStore('auth', () => {
     })(),
   )
 
-  const isAuthed = computed(() => !!token.value)
+  // 登录态由「后端能否凭 HttpOnly Cookie 解出当前用户」决定，
+  // 不再依赖前端持有的明文 token（防 XSS 窃取）。
+  const isAuthed = computed(() => !!user.value)
   const isAdmin = computed(() => user.value?.role === 'admin')
   const isEditor = computed(() => user.value?.role === 'admin' || user.value?.role === 'editor')
 
   function persist() {
-    setToken(token.value)
     if (user.value) localStorage.setItem(USER_KEY, JSON.stringify(user.value))
     else localStorage.removeItem(USER_KEY)
   }
@@ -47,14 +46,14 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(username: string, password: string) {
     const res = await apiLogin(username, password)
-    token.value = res.accessToken
+    // 令牌已由后端写入 HttpOnly Cookie，前端不持有明文 token
     user.value = _map(res.user)
     persist()
   }
 
   async function fetchMe() {
-    if (!token.value) return
     try {
+      // 令牌在 HttpOnly Cookie 中，由后端校验；无有效 cookie 会 401 → 走退出逻辑
       user.value = _map(await getMe())
       persist()
     } catch {
@@ -62,11 +61,12 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  function logout() {
-    token.value = null
+  async function logout() {
+    // 清掉后端 HttpOnly Cookie（失效当前会话）
+    await apiLogout().catch(() => {})
     user.value = null
     persist()
   }
 
-  return { token, user, isAuthed, isAdmin, isEditor, login, fetchMe, logout }
+  return { user, isAuthed, isAdmin, isEditor, login, fetchMe, logout }
 })

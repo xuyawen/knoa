@@ -45,6 +45,11 @@ export async function getMe(): Promise<UserOut> {
   return resp.json()
 }
 
+/** 退出登录：后端清除 HttpOnly Cookie（前端 fetch 带 credentials:'include'）。 */
+export async function logout(): Promise<void> {
+  await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() })
+}
+
 /** 用户列表（仅 admin）。 */
 export async function getUserList(): Promise<UserOut[]> {
   const resp = await fetch('/api/auth/users', { headers: authHeaders() })

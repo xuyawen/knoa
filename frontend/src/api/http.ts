@@ -13,9 +13,10 @@ export function setToken(token: string | null) {
 // 前端可观测：非 401 的接口异常上报后端 /api/events（401 由 token 失效逻辑单独处理）
 import { report } from '../lib/monitor'
 
+// 鉴权统一走 HttpOnly Cookie（由浏览器自动随请求携带，JS 读不到，防 XSS 窃取）。
+// 因此这里不再注入 Authorization 头；跨域时 fetch 需 credentials:'include'（见 trackedFetch）。
 export function authHeaders(): Record<string, string> {
-  const token = getToken()
-  return token ? { Authorization: `Bearer ${token}` } : {}
+  return {}
 }
 
 // ── 统一 token 失效拦截 ──
@@ -98,6 +99,8 @@ async function trackedFetch(
 
   const mergedInit: RequestInit = {
     ...init,
+    // 携带 HttpOnly Cookie（含跨域场景）
+    credentials: 'include',
     signal: mergeSignals(signals),
   }
 
@@ -113,9 +116,8 @@ async function trackedFetch(
     if (resp.status >= 500) {
       report({ type: 'http.server_error', message: `${reqUrl(input)} -> ${resp.status}`, level: 'error' })
     }
-    // 后端每次有效认证请求都会重签 24h 令牌（滑动令牌），回写即可
-    const sliding = resp.headers.get('X-Access-Token')
-    if (sliding) setToken(sliding)
+    // 后端每次有效认证请求都会重签 24h 令牌（滑动令牌），并通过
+    // Set-Cookie 回写 HttpOnly Cookie（前端 JS 读不到，无需在此处理）
     return resp
   } catch (err) {
     if (err instanceof TokenExpiredError) throw err

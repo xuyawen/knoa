@@ -11,16 +11,13 @@ import json
 import time
 from typing import Awaitable, Callable
 
-from fastapi import Depends, HTTPException
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import KBPermission, KnowledgeBase, User
 from app.deps import get_db
-
-_bearer = HTTPBearer(auto_error=False)
 
 # 权限级别排序，数值越大权限越高
 LEVEL_ORDER = {"view": 1, "edit": 2, "admin": 3}
@@ -70,13 +67,28 @@ def decode_access_token(token: str) -> dict:
     return payload
 
 
+def extract_token(request: Request) -> str | None:
+    """从 HttpOnly Cookie 或 Authorization 头取令牌（Cookie 优先，防 XSS 窃取）。
+
+    前端走 Cookie（JS 读不到）；API / 压测客户端仍可带 Authorization 头。
+    """
+    cookie = request.cookies.get(settings.COOKIE_NAME)
+    if cookie:
+        return cookie
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[len("Bearer "):].strip()
+    return None
+
+
 async def get_current_user(
-    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    if creds is None or not creds.credentials:
+    token = extract_token(request)
+    if not token:
         raise HTTPException(status_code=401, detail="未提供认证令牌")
-    payload = decode_access_token(creds.credentials)
+    payload = decode_access_token(token)
     user = await db.scalar(select(User).where(User.id == payload["sub"]))
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="用户不存在或已停用")

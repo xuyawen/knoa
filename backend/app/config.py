@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     # App
     APP_ENV: str = "development"
     CORS_ORIGINS: str = "http://localhost:5173"
+    # CORS：携带凭据（HttpOnly Cookie）时必须显式指定源，不能用 "*"
+    CORS_ALLOW_CREDENTIALS: bool = True
+    # 鉴权 Cookie（P1-8：token 改 HttpOnly Cookie，防 XSS 窃取）
+    COOKIE_NAME: str = "knoa_token"
+    COOKIE_SECURE: bool = True      # 仅 HTTPS 传输；本地 http 开发可设为 false
+    COOKIE_SAMESITE: str = "lax"
     LOG_LEVEL: str = "INFO"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

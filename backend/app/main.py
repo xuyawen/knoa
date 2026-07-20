@@ -16,7 +16,7 @@ from app.core.metrics import (
     normalize_path,
     record,
 )
-from app.core.security import create_access_token, decode_access_token
+from app.core.security import create_access_token, decode_access_token, extract_token
 from app.database import AsyncSessionLocal
 from app.deps import get_es
 from app.db import ChatSession, User
@@ -88,6 +88,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Access-Token"],
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
 )
 
 # 滑动过期中间件：携带有效令牌的认证请求，在剩余有效期低于总寿命
@@ -103,10 +104,9 @@ SLIDING_REFRESH_RATIO = 0.30
 
 @app.middleware("http")
 async def sliding_session(request: Request, call_next):
-    auth = request.headers.get("Authorization", "")
+    raw = extract_token(request)
     new_token: str | None = None
-    if auth.startswith("Bearer "):
-        raw = auth[len("Bearer "):].strip()
+    if raw:
         try:
             payload = decode_access_token(raw)
             total = settings.JWT_EXPIRE_MINUTES * 60
@@ -123,6 +123,16 @@ async def sliding_session(request: Request, call_next):
     response = await call_next(request)
     if new_token:
         response.headers[SLIDING_TOKEN_HEADER] = new_token
+        # 同步刷新 HttpOnly Cookie（滑动令牌，前端 JS 读不到）
+        response.set_cookie(
+            key=settings.COOKIE_NAME,
+            value=new_token,
+            httponly=True,
+            secure=settings.COOKIE_SECURE,
+            samesite=settings.COOKIE_SAMESITE,
+            max_age=settings.JWT_EXPIRE_MINUTES * 60,
+            path="/",
+        )
     return response
 
 
