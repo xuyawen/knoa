@@ -120,11 +120,6 @@ function clearFilters() {}
         </div>
       </div>
     </div>
-
-    <!-- 收起菜单 -->
-    <button class="collapse-btn">
-      <Icon name="collapse" :size="14" /> 收起菜单
-    </button>
   </div>
 </template>
 
@@ -366,19 +361,4 @@ function clearFilters() {}
 }
 .meta-scope { color: var(--brand); font-weight: 500; }
 
-.collapse-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: transparent;
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-family: inherit;
-  width: fit-content;
-}
-.collapse-btn:hover { background: var(--bg-hover); }
 </style>

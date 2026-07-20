@@ -323,11 +323,6 @@ const recentNodes = [
         </div>
       </aside>
     </div>
-
-    <!-- 收起菜单 -->
-    <button class="collapse-btn">
-      <Icon name="collapse" :size="14" /> 收起菜单
-    </button>
   </div>
 </template>
 
@@ -657,19 +652,4 @@ const recentNodes = [
 }
 .recent-time { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
 
-.collapse-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: transparent;
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-family: inherit;
-  width: fit-content;
-}
-.collapse-btn:hover { background: var(--bg-hover); }
 </style>

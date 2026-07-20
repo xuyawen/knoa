@@ -203,11 +203,6 @@ const operations = [
         </tbody>
       </table>
     </div>
-
-    <!-- 收起菜单 -->
-    <button class="collapse-btn">
-      <Icon name="collapse" :size="14" /> 收起菜单
-    </button>
   </div>
 </template>
 
@@ -463,24 +458,4 @@ const operations = [
 }
 .doc-link:hover { text-decoration: underline; }
 .no-doc { color: var(--text-tertiary); }
-
-.collapse-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: transparent;
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-family: inherit;
-  transition: all var(--dur-fast);
-  width: fit-content;
-}
-.collapse-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
 </style>
