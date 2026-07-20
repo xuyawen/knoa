@@ -29,14 +29,18 @@ export const useChatStore = defineStore('chat', () => {
   // 这样切筛选不会改变 TopBar 标题。
   const filterKb = ref<string | null>(null)
 
-  // 在途流式请求的中断控制器：切换会话 / 新建会话前先 abort，
-  // 避免旧流继续往新会话的 messages 里写 delta，造成会话污染。
+  // 在途流式请求的中断控制器：用户主动停止 / 切换会话 / 新建会话前先 abort，
+  // 避免旧流继续往 messages 里写 delta，造成会话污染或误写其他会话。
   let currentAbort: AbortController | null = null
-  function abortStream() {
+  function stopStreaming() {
     if (currentAbort) {
       currentAbort.abort()
       currentAbort = null
     }
+    // 标记最后一条 assistant 消息为「已停止」：保留已生成内容，
+    // 仅提示用户这是中断的不完整回答（未收到 done 事件，不会被落库 / 评分）
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant') last.stopped = true
   }
 
   async function ask(question: string, knowledgeBase?: string | null, files?: ChatAttachment[]) {
@@ -144,7 +148,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function startNewChat() {
     // 先中断在途流式，避免旧流继续写进刚清空的 messages
-    abortStream()
+    stopStreaming()
     streaming.value = false
     // 不再立即调用 createSession() 创建空记录；等用户发首条消息时由后端自动创建
     sessionId.value = ''
@@ -155,7 +159,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function switchSession(id: string) {
     // 先中断在途流式，避免旧流把 delta 写进即将加载的新会话
-    abortStream()
+    stopStreaming()
     streaming.value = false
     loadingHistory.value = true
     try {
@@ -241,7 +245,7 @@ export const useChatStore = defineStore('chat', () => {
     activeSourceDetail, loadingSource,
     sessions, historyOpen, loadingHistory,
     filterKb,
-    ask, locateSource, clearActiveSource, openSource, closeSourceDetail,
+    ask, stopStreaming, locateSource, clearActiveSource, openSource, closeSourceDetail,
     loadSessions, toggleHistory, closeHistory, startNewChat, switchSession,
     removeSession, removeSessions,
     rateMessage }

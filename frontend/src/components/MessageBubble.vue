@@ -20,6 +20,11 @@ const isThinking = computed(
   () => props.message.role === 'assistant' && props.message.content === '' && chat.streaming,
 )
 
+// 用户中途点「停止」后：标记已中断、保留已生成内容（回答不完整）
+const isStopped = computed(
+  () => props.message.role === 'assistant' && !!props.message.stopped && !chat.streaming,
+)
+
 const parts = computed(() => {
   if (props.message.role !== 'assistant') return null
   // trimStart：清掉数据前导的换行/空格。否则 white-space:pre-wrap 会把 content 开头的 \n 渲染成"文字上方大量空白"
@@ -181,6 +186,10 @@ async function onCopy() {
           @rate="onRate"
           @copy="onCopy"
         />
+        <span v-if="isStopped" class="stopped-hint">
+          <Icon name="alert-triangle" :size="11" />
+          已停止生成（回答不完整）
+        </span>
       </template>
     </div>
   </div>
@@ -432,4 +441,13 @@ async function onCopy() {
   padding: 0;
 }
 .collapsed .steps-list { display: none; }
+.stopped-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #d97706;
+  opacity: 0.85;
+}
 </style>

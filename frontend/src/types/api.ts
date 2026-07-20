@@ -163,6 +163,7 @@ export interface ChatMessage {
   thinkingSteps?: ThinkingStep[]  // Agentic RAG 决策链（仅 assistant）
   messageId?: string            // 服务端真实消息 id（来自 done 事件）
   feedback?: 'up' | 'down' | null  // 本地/服务端反馈状态
+  stopped?: boolean               // 用户中途停止生成（保留已生成内容，标记不完整）
 }
 
 export interface FeedbackPayload {

@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useChatStore } from '@/stores/chat'
 import Icon from './Icon.vue'
 import type { ChatAttachment } from '@/types/api'
+
+const chat = useChatStore()
+// 等待 AI 回复期间，发送按钮切换为「停止」按钮
+const isStreaming = computed(() => chat.streaming)
 
 const text = ref('')
 const attachments = ref<ChatAttachment[]>([])
@@ -55,6 +60,10 @@ function send() {
   attachments.value = []
 }
 
+function stop() {
+  chat.stopStreaming()
+}
+
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
@@ -100,7 +109,23 @@ function onKey(e: KeyboardEvent) {
         @keydown="onKey"
         rows="3"
       />
-      <button class="send" @click="send" title="发送" :disabled="!text.trim() && !attachments.length">
+      <button
+        v-if="isStreaming"
+        class="send stop"
+        @click="stop"
+        title="停止生成"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="6" y="6" width="12" height="12" rx="2.5" />
+        </svg>
+      </button>
+      <button
+        v-else
+        class="send"
+        @click="send"
+        title="发送"
+        :disabled="!text.trim() && !attachments.length"
+      >
         <Icon name="send" :size="18" />
       </button>
     </div>
@@ -223,6 +248,12 @@ textarea::placeholder {
 }
 .send:hover:not(:disabled) {
   background: var(--brand-hover);
+}
+.send.stop {
+  background: #ef4444;
+}
+.send.stop:hover {
+  background: #dc2626;
 }
 .send:active:not(:disabled) {
   transform: scale(0.94);

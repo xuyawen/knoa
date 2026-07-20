@@ -90,6 +90,10 @@ async def ask(
             session_id=req.session_id,
             files=[f.model_dump(by_alias=False) for f in req.files] or None,
         ):
+            # 客户端断开（用户点了「停止」）→ 优雅退出，不再继续烧 LLM 算力
+            if await request.is_disconnected():
+                logger.info("ask stream client disconnected, stop early", extra={"request_id": rid})
+                break
             n += 1
             yield {
                 "event": event["event"],
