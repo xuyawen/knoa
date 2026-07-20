@@ -183,7 +183,8 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
 .layout {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background: var(--bg-page);
   border: none;
   outline: none;
