@@ -1,73 +1,318 @@
 <script setup lang="ts">
-// 文档管理 — 按 640(3).png 截图 1:1 还原。
+// 文档管理 — 按 640(3).png 截图 1:1 还原，接真实文档生命周期。
 defineProps<{ activeTab?: number }>()
 
-import { ref } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
+import AppModal from '@/components/ui/AppModal.vue'
+import { useKnowledgeStore } from '@/stores/knowledge'
+import { useToastStore } from '@/stores/toast'
+import {
+  getDocuments,
+  uploadDocument,
+  approveDocument,
+  rejectDocument,
+  deleteDocument,
+  aiReviewDocument,
+  getDocument,
+} from '@/api'
+import type { DocumentItem, DocumentDetail, AIReview } from '@/types/api'
 
-const viewMode = ref<'list' | 'grid'>('list')
+const knowledge = useKnowledgeStore()
+const toast = useToastStore()
+
+const selectedKb = ref<string>('')
+const docs = ref<DocumentItem[]>([])
+const loading = ref(false)
+const uploading = ref(false)
+const deleting = ref(false)
+
 const searchQuery = ref('')
+const viewMode = ref<'list' | 'grid'>('list')
 
-const files = [
-  { name: '2024年产品需求文档.pdf', type: 'PDF', icon: 'pdf', color: '#EF4444', time: '2024-05-20 14:30:22', user: '张三', status: '解析完成', statusType: 'success', scope: '仅本人可见' },
-  { name: '企业知识库使用手册.docx', type: 'DOCX', icon: 'doc', color: '#3B82F6', time: '2024-05-20 11:20:15', user: '李四', status: '解析完成', statusType: 'success', scope: '部门可见' },
-  { name: 'Q2市场数据分析报告.xlsx', type: 'XLSX', icon: 'excel', color: '#10B981', time: '2024-05-19 16:45:30', user: '王五', status: '解析完成', statusType: 'success', scope: '部门可见' },
-  { name: '新员工入职培训.pptx', type: 'PPTX', icon: 'pptx', color: '#F59E0B', time: '2024-05-19 09:15:45', user: '赵六', status: '解析中', statusType: 'warning', scope: '公司可见' },
-  { name: '信息安全管理制度.pdf', type: 'PDF', icon: 'pdf', color: '#EF4444', time: '2024-05-18 17:20:33', user: '张三', status: '解析完成', statusType: 'success', scope: '公司可见' },
-  { name: '项目管理流程规范.docx', type: 'DOCX', icon: 'doc', color: '#3B82F6', time: '2024-05-18 10:05:12', user: '李四', status: '解析失败', statusType: 'danger', scope: '部门可见' },
-  { name: '客户服务协议模版.pdf', type: 'PDF', icon: 'pdf', color: '#EF4444', time: '2024-05-17 15:30:25', user: '王五', status: '解析完成', statusType: 'success', scope: '公开可见' },
-  { name: '年度预算计划表.xlsx', type: 'XLSX', icon: 'excel', color: '#10B981', time: '2024-05-17 11:10:08', user: '赵六', status: '解析完成', statusType: 'success', scope: '仅本人可见' },
-]
+// 选择（批量删）
+const selectedIds = ref<string[]>([])
+// 分页
+const currentPage = ref(1)
+const pageSize = ref(10)
+
+// 弹窗
+const previewDoc = ref<DocumentDetail | null>(null)
+const previewLoading = ref(false)
+const aiReview = ref<AIReview | null>(null)
+const aiReviewLoading = ref(false)
+
+/* ---------- 数据加载 ---------- */
+async function loadDocs() {
+  if (!selectedKb.value) {
+    docs.value = []
+    return
+  }
+  loading.value = true
+  selectedIds.value = []
+  try {
+    docs.value = await getDocuments(selectedKb.value)
+  } catch (e: any) {
+    docs.value = []
+    toast.error(`加载文档失败：${e?.message || e}`)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(async () => {
+  if (!knowledge.loaded) await knowledge.load()
+  if (knowledge.bases.length) {
+    selectedKb.value = knowledge.bases[0].id
+    await loadDocs()
+  }
+})
+
+watch(selectedKb, async () => {
+  currentPage.value = 1
+  selectedIds.value = []
+  await loadDocs()
+})
+
+/* ---------- 过滤 + 分页 ---------- */
+const filteredDocs = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return docs.value
+  return docs.value.filter((d) => d.title.toLowerCase().includes(q))
+})
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(filteredDocs.value.length / pageSize.value)),
+)
+
+const pagedDocs = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredDocs.value.slice(start, start + pageSize.value)
+})
+
+watch([filteredDocs, pageSize], () => {
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+})
 
 function clearSearch() {
   searchQuery.value = ''
+}
+
+/* ---------- 工具 ---------- */
+function statusType(s: string): 'success' | 'warning' | 'danger' {
+  if (s === '已审核') return 'success'
+  if (s === '待复核') return 'warning'
+  return 'danger'
+}
+
+function fileMeta(type: string): { icon: string; color: string } {
+  if (type === 'PDF') return { icon: 'pdf', color: '#EF4444' }
+  if (type === 'DOCX') return { icon: 'doc', color: '#3B82F6' }
+  return { icon: 'doc', color: '#64748B' }
+}
+
+function fmtTime(iso: string): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+function readFileB64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => {
+      const res = r.result as string
+      const comma = res.indexOf(',')
+      resolve(comma >= 0 ? res.slice(comma + 1) : res)
+    }
+    r.onerror = () => reject(r.error)
+    r.readAsDataURL(file)
+  })
+}
+
+/* ---------- 上传 ---------- */
+async function onUploadFiles(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  if (!files.length) return
+  if (!selectedKb.value) {
+    toast.warning('请先在上方选择知识库')
+    input.value = ''
+    return
+  }
+  uploading.value = true
+  let ok = 0
+  for (const f of files) {
+    try {
+      const b64 = await readFileB64(f)
+      await uploadDocument(selectedKb.value, f.name, b64)
+      ok++
+    } catch (err: any) {
+      toast.error(`上传失败：${f.name} - ${err?.message || err}`)
+    }
+  }
+  uploading.value = false
+  input.value = ''
+  if (ok) {
+    toast.success(`成功上传 ${ok} 篇文档`)
+    await loadDocs()
+  }
+}
+
+/* ---------- 审核 / 删除 ---------- */
+async function onApprove(doc: DocumentItem) {
+  if (!selectedKb.value) return
+  try {
+    await approveDocument(selectedKb.value, doc.id)
+    toast.success(`已通过审核：${doc.title}`)
+    await loadDocs()
+  } catch (e: any) {
+    toast.error(`操作失败：${e?.message || e}`)
+  }
+}
+
+async function onReject(doc: DocumentItem) {
+  if (!selectedKb.value) return
+  try {
+    await rejectDocument(selectedKb.value, doc.id)
+    toast.success(`已驳回：${doc.title}`)
+    await loadDocs()
+  } catch (e: any) {
+    toast.error(`操作失败：${e?.message || e}`)
+  }
+}
+
+async function onDelete(doc: DocumentItem) {
+  if (!selectedKb.value) return
+  if (!confirm(`确认删除文档「${doc.title}」？该操作会级联清理向量与图谱数据。`)) return
+  deleting.value = true
+  try {
+    await deleteDocument(selectedKb.value, doc.id)
+    toast.success(`已删除：${doc.title}`)
+    await loadDocs()
+  } catch (e: any) {
+    toast.error(`删除失败：${e?.message || e}`)
+  } finally {
+    deleting.value = false
+  }
+}
+
+/* ---------- 预览 ---------- */
+async function onPreview(doc: DocumentItem) {
+  if (!selectedKb.value) return
+  previewLoading.value = true
+  previewDoc.value = null
+  try {
+    previewDoc.value = await getDocument(selectedKb.value, doc.id)
+  } catch (e: any) {
+    toast.error(`预览失败：${e?.message || e}`)
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+/* ---------- AI 审核 ---------- */
+async function onAiReview(doc: DocumentItem) {
+  if (!selectedKb.value) return
+  aiReviewLoading.value = true
+  aiReview.value = null
+  try {
+    aiReview.value = await aiReviewDocument(selectedKb.value, doc.id)
+  } catch (e: any) {
+    toast.error(`AI 审核失败：${e?.message || e}`)
+  } finally {
+    aiReviewLoading.value = false
+  }
+}
+
+/* ---------- 批量选择 / 删除 ---------- */
+function toggleSelect(id: string) {
+  const i = selectedIds.value.indexOf(id)
+  if (i >= 0) selectedIds.value.splice(i, 1)
+  else selectedIds.value.push(id)
+}
+function isSelected(id: string) {
+  return selectedIds.value.includes(id)
+}
+function toggleSelectAllOnPage() {
+  const pageIds = pagedDocs.value.map((d) => d.id)
+  const allSelected = pageIds.every((id) => selectedIds.value.includes(id))
+  if (allSelected) {
+    selectedIds.value = selectedIds.value.filter((id) => !pageIds.includes(id))
+  } else {
+    const set = new Set(selectedIds.value)
+    pageIds.forEach((id) => set.add(id))
+    selectedIds.value = Array.from(set)
+  }
+}
+function clearSelection() {
+  selectedIds.value = []
+}
+
+async function onBatchDelete() {
+  if (!selectedIds.value.length || !selectedKb.value) return
+  const n = selectedIds.value.length
+  if (!confirm(`确认批量删除选中的 ${n} 篇文档？该操作不可恢复。`)) return
+  deleting.value = true
+  let ok = 0
+  for (const id of [...selectedIds.value]) {
+    try {
+      await deleteDocument(selectedKb.value, id)
+      ok++
+    } catch (e: any) {
+      toast.error(`删除失败：${e?.message || e}`)
+    }
+  }
+  deleting.value = false
+  selectedIds.value = []
+  toast.success(`已删除 ${ok}/${n} 篇文档`)
+  await loadDocs()
+}
+
+/* ---------- 分页跳转 ---------- */
+function goPage(p: number) {
+  if (p >= 1 && p <= totalPages.value) currentPage.value = p
 }
 </script>
 
 <template>
   <div class="docs-page">
-    <!-- 页面标题 -->
     <h2 class="page-title">文档管理</h2>
 
     <!-- ====== 工具栏 ====== -->
     <div class="toolbar card">
       <div class="toolbar-left">
-        <!-- 搜索框 -->
+        <!-- 知识库选择（文档按 KB 组织） -->
+        <div class="kb-select">
+          <Icon name="folder" :size="14" class="kb-icon" />
+          <select v-model="selectedKb" :disabled="loading" class="kb-select-el">
+            <option v-if="!knowledge.bases.length" value="">（暂无知识库）</option>
+            <option v-for="b in knowledge.bases" :key="b.id" :value="b.id">{{ b.name }}</option>
+          </select>
+          <Icon name="chevron-down" :size="11" class="kb-caret" />
+        </div>
+
+        <!-- 搜索 -->
         <div class="search-box">
           <Icon name="search" :size="14" class="search-icon" />
-          <input v-model="searchQuery" type="text" placeholder="搜索文档名称、内容、上传人等" class="search-input" />
+          <input v-model="searchQuery" type="text" placeholder="搜索文档名称" class="search-input" />
           <button v-if="searchQuery" class="search-clear" @click="clearSearch">
             <Icon name="close" :size="12" />
           </button>
         </div>
 
-        <!-- 操作按钮组 -->
-        <button class="btn btn-primary btn-sm">
-          <Icon name="upload" :size="13" /> 批量上传
-        </button>
-        <button class="btn btn-ghost btn-sm">
-          <Icon name="folder" :size="13" /> 新建文件夹
-        </button>
-
-        <!-- 筛选下拉 -->
-        <div class="toolbar-select">
-          <span>筛选</span> <Icon name="chevron-down" :size="11" />
-        </div>
-        <div class="toolbar-select">
-          <span>文件类型</span> <Icon name="chevron-down" :size="11" />
-        </div>
-        <div class="toolbar-select">
-          <span>解析状态</span> <Icon name="chevron-down" :size="11" />
-        </div>
-        <div class="toolbar-select">
-          <span>权限范围</span> <Icon name="chevron-down" :size="11" />
-        </div>
-        <div class="toolbar-select">
-          <span>更多筛选</span> <Icon name="chevron-down" :size="11" />
-        </div>
+        <!-- 上传 -->
+        <label class="btn btn-primary btn-sm upload-btn" :class="{ 'is-loading': uploading }">
+          <Icon name="upload" :size="13" /> {{ uploading ? '上传中…' : '上传文档' }}
+          <input type="file" multiple accept=".md,.txt,.docx,.pdf" class="file-hidden" @change="onUploadFiles" />
+        </label>
 
         <!-- 刷新 -->
-        <button class="icon-btn" title="刷新"><Icon name="refresh" :size="15" /></button>
+        <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDocs">
+          <Icon name="refresh" :size="15" :class="{ spin: loading }" />
+        </button>
       </div>
 
       <div class="toolbar-right">
@@ -80,75 +325,165 @@ function clearSearch() {
       </div>
     </div>
 
-    <!-- ====== 文件表格 ====== -->
-    <div class="file-table-wrap card">
+    <!-- ====== 批量操作条 ====== -->
+    <Transition name="slide-down">
+      <div v-if="selectedIds.length" class="batch-bar card">
+        <span class="batch-count">已选 <b>{{ selectedIds.length }}</b> 篇</span>
+        <button class="btn btn-danger btn-sm" :disabled="deleting" @click="onBatchDelete">
+          <Icon name="trash" :size="13" /> 批量删除
+        </button>
+        <button class="btn btn-ghost btn-sm" @click="clearSelection">取消选择</button>
+      </div>
+    </Transition>
+
+    <!-- ====== 列表 / 网格 ====== -->
+    <div class="file-table-wrap card" v-if="viewMode === 'list'">
       <table class="file-table">
         <thead>
           <tr>
-            <th class="col-check"><input type="checkbox" /></th>
+            <th class="col-check">
+              <input
+                type="checkbox"
+                :checked="!!pagedDocs.length && pagedDocs.every((d) => isSelected(d.id))"
+                @change="toggleSelectAllOnPage"
+              />
+            </th>
             <th>文档名称</th>
             <th>文件类型</th>
-            <th>上传时间 <Icon name="chevron-down" :size="11" style="vertical-align:middle;opacity:.5"/></th>
-            <th>上传人</th>
+            <th>上传时间</th>
             <th>文档解析状态</th>
-            <th>权限范围</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(f, i) in files" :key="i">
-            <td class="col-check"><input type="checkbox" /></td>
+          <tr v-for="d in pagedDocs" :key="d.id" :class="{ 'row-selected': isSelected(d.id) }">
+            <td class="col-check">
+              <input type="checkbox" :checked="isSelected(d.id)" @change="toggleSelect(d.id)" />
+            </td>
             <td>
               <div class="file-name-cell">
-                <span class="file-icon-sm" :style="{ background: f.color + '18', color: f.color }">
-                  <Icon :name="f.icon === 'pdf' ? 'pdf' : f.icon === 'excel' ? 'excel' : f.icon === 'pptx' ? 'pptx' : 'doc'" :size="15" />
+                <span class="file-icon-sm" :style="{ background: fileMeta(d.type).color + '18', color: fileMeta(d.type).color }">
+                  <Icon :name="fileMeta(d.type).icon" :size="15" />
                 </span>
-                <span class="file-name">{{ f.name }}</span>
+                <span class="file-name" :title="d.title">{{ d.title }}</span>
               </div>
             </td>
-            <td><span class="type-text">{{ f.type }}</span></td>
-            <td class="col-time">{{ f.time }}</td>
-            <td>{{ f.user }}</td>
-            <td>
-              <span class="status-badge" :class="f.statusType">{{ f.status }}</span>
-            </td>
-            <td><span class="scope-badge">{{ f.scope }}</span></td>
+            <td><span class="type-text">{{ d.type }}</span></td>
+            <td class="col-time">{{ fmtTime(d.updatedAt) }}</td>
+            <td><span class="status-badge" :class="statusType(d.status)">{{ d.status }}</span></td>
             <td>
               <div class="row-actions">
-                <button class="action-btn" title="预览"><Icon name="eye" :size="15" /></button>
-                <button class="action-btn" title="下载"><Icon name="download" :size="15" /></button>
-                <button class="action-btn" title="更多"><Icon name="more" :size="16" /></button>
+                <button class="action-btn" title="预览" @click="onPreview(d)"><Icon name="eye" :size="15" /></button>
+                <button class="action-btn" title="通过审核" @click="onApprove(d)"><Icon name="check" :size="15" /></button>
+                <button class="action-btn" title="驳回" @click="onReject(d)"><Icon name="close" :size="15" /></button>
+                <button class="action-btn" title="AI 审核" @click="onAiReview(d)"><Icon name="sparkles" :size="15" /></button>
+                <button class="action-btn" title="删除" @click="onDelete(d)"><Icon name="trash" :size="15" /></button>
               </div>
+            </td>
+          </tr>
+          <tr v-if="!loading && !pagedDocs.length">
+            <td colspan="6" class="empty-cell">
+              {{ selectedKb ? '该知识库暂无文档，点击「上传文档」添加' : '请选择左侧知识库' }}
             </td>
           </tr>
         </tbody>
       </table>
     </div>
 
+    <!-- 网格视图 -->
+    <div class="file-grid" v-else>
+      <div
+        v-for="d in pagedDocs"
+        :key="d.id"
+        class="doc-card"
+        :class="{ 'row-selected': isSelected(d.id) }"
+        @click="toggleSelect(d.id)"
+      >
+        <div class="doc-card-top">
+          <span class="file-icon-sm" :style="{ background: fileMeta(d.type).color + '18', color: fileMeta(d.type).color }">
+            <Icon :name="fileMeta(d.type).icon" :size="18" />
+          </span>
+          <span class="status-badge mini" :class="statusType(d.status)">{{ d.status }}</span>
+        </div>
+        <div class="doc-card-title" :title="d.title">{{ d.title }}</div>
+        <div class="doc-card-meta">{{ d.type }} · {{ fmtTime(d.updatedAt) }}</div>
+        <div class="doc-card-actions" @click.stop>
+          <button class="action-btn" title="预览" @click="onPreview(d)"><Icon name="eye" :size="15" /></button>
+          <button class="action-btn" title="通过审核" @click="onApprove(d)"><Icon name="check" :size="15" /></button>
+          <button class="action-btn" title="驳回" @click="onReject(d)"><Icon name="close" :size="15" /></button>
+          <button class="action-btn" title="AI 审核" @click="onAiReview(d)"><Icon name="sparkles" :size="15" /></button>
+          <button class="action-btn" title="删除" @click="onDelete(d)"><Icon name="trash" :size="15" /></button>
+        </div>
+      </div>
+      <div v-if="!loading && !pagedDocs.length" class="grid-empty">
+        {{ selectedKb ? '该知识库暂无文档' : '请选择左侧知识库' }}
+      </div>
+    </div>
+
     <!-- ====== 分页 ====== -->
-    <div class="pagination-bar card">
-      <div class="page-info">共 128 条</div>
+    <div class="pagination-bar card" v-if="filteredDocs.length">
+      <div class="page-info">共 {{ filteredDocs.length }} 条</div>
       <div class="page-size">
-        <select class="select page-size-select">
-          <option>10条/页</option>
-          <option>20条/页</option>
-          <option>50条/页</option>
+        <select class="select page-size-select" v-model.number="pageSize">
+          <option :value="10">10条/页</option>
+          <option :value="20">20条/页</option>
+          <option :value="50">50条/页</option>
         </select>
       </div>
       <div class="page-numbers">
-        <button class="pg active">1</button>
-        <button class="pg">2</button>
-        <button class="pg">3</button>
-        <button class="pg">4</button>
-        <button class="pg">5</button>
-        <span class="pg-dots">...</span>
-        <button class="pg">13</button>
-        <button class="pg-arrow">&gt;</button>
-      </div>
-      <div class="page-jump">
-        跳至 <input type="text" value="1" class="jump-input" /> 页
+        <button class="pg" :disabled="currentPage === 1" @click="goPage(currentPage - 1)">&lt;</button>
+        <button
+          v-for="p in totalPages"
+          :key="p"
+          class="pg"
+          :class="{ active: p === currentPage }"
+          @click="goPage(p)"
+        >{{ p }}</button>
+        <button class="pg" :disabled="currentPage === totalPages" @click="goPage(currentPage + 1)">&gt;</button>
       </div>
     </div>
+
+    <!-- ====== 预览弹窗 ====== -->
+    <AppModal :show="!!previewDoc" title="文档预览" wide @close="previewDoc = null">
+      <div v-if="previewLoading" class="modal-hint">加载中…</div>
+      <template v-else-if="previewDoc">
+        <div class="preview-meta">
+          <span class="type-text">{{ previewDoc.type }}</span>
+          <span class="col-time">{{ fmtTime(previewDoc.updatedAt) }}</span>
+          <span class="status-badge mini" :class="statusType(previewDoc.status)">{{ previewDoc.status }}</span>
+        </div>
+        <pre class="preview-body">{{ previewDoc.contentMd || '（无内容）' }}</pre>
+      </template>
+    </AppModal>
+
+    <!-- ====== AI 审核弹窗 ====== -->
+    <AppModal :show="!!aiReview" title="AI 辅助审核" wide @close="aiReview = null">
+      <div v-if="aiReviewLoading" class="modal-hint">AI 分析中…</div>
+      <template v-else-if="aiReview">
+        <div class="ai-verdict" :class="aiReview.verdict">
+          建议：{{ aiReview.verdict === 'approve' ? '通过' : aiReview.verdict === 'reject' ? '驳回' : '人工复核' }}
+        </div>
+        <p class="ai-summary">{{ aiReview.summary }}</p>
+        <div v-if="aiReview.similarityFindings?.length" class="ai-section">
+          <h4>相似文档</h4>
+          <ul class="ai-list">
+            <li v-for="(f, i) in aiReview.similarityFindings" :key="i">
+              <span class="ai-sim">相似度 {{ (f.similarity * 100).toFixed(0) }}%</span>
+              <span class="ai-doc">{{ f.docTitle }}</span>
+              <p class="ai-snippet">{{ f.snippet }}</p>
+            </li>
+          </ul>
+        </div>
+        <div v-if="aiReview.qualityNotes?.length" class="ai-section">
+          <h4>质量建议</h4>
+          <ul class="ai-list"><li v-for="(q, i) in aiReview.qualityNotes" :key="i">{{ q }}</li></ul>
+        </div>
+        <div v-if="aiReview.outdatedFindings?.length" class="ai-section">
+          <h4>过时内容</h4>
+          <ul class="ai-list"><li v-for="(o, i) in aiReview.outdatedFindings" :key="i">{{ o }}</li></ul>
+        </div>
+      </template>
+    </AppModal>
   </div>
 </template>
 
@@ -172,6 +507,7 @@ function clearSearch() {
   justify-content: space-between;
   padding: 12px 16px;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .toolbar-left {
   display: flex;
@@ -186,10 +522,41 @@ function clearSearch() {
   margin-left: auto;
 }
 
+/* 知识库选择 */
+.kb-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.kb-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+.kb-select-el {
+  height: 34px;
+  padding: 0 28px 0 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  max-width: 200px;
+}
+.kb-select-el:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+.kb-caret {
+  position: absolute;
+  right: 10px;
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
 /* 搜索框 */
 .search-box {
   position: relative;
-  width: 260px;
+  width: 240px;
 }
 .search-icon {
   position: absolute;
@@ -231,27 +598,17 @@ function clearSearch() {
 }
 .search-clear:hover { background: var(--bg-hover); }
 
-/* 工具栏下拉模拟 */
-.toolbar-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: 12px;
-  color: var(--text-secondary);
+/* 上传按钮（label 包裹 input） */
+.upload-btn { position: relative; overflow: hidden; cursor: pointer; }
+.file-hidden {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
   cursor: pointer;
-  white-space: nowrap;
-  background: var(--bg-surface);
-  transition: all var(--dur-fast);
+  width: 100%;
 }
-.toolbar-select:hover {
-  border-color: var(--brand);
-  color: var(--text-primary);
-}
+.upload-btn.is-loading { opacity: 0.7; pointer-events: none; }
 
-/* 视图切换 */
 .view-toggle {
   display: flex;
   align-items: center;
@@ -267,6 +624,25 @@ function clearSearch() {
 }
 .view-toggle:hover { background: var(--bg-hover); color: var(--text-secondary); }
 .view-toggle.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.icon-btn:disabled { opacity: 0.5; cursor: default; }
+.spin { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 批量条 */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-left: 3px solid var(--brand);
+}
+.batch-count { font-size: 13px; color: var(--text-secondary); }
+.batch-count b { color: var(--text-primary); }
+.btn-danger { background: #DC2626; color: #fff; border-color: #DC2626; }
+.btn-danger:hover { background: #B91C1C; }
+.btn-danger:disabled { opacity: 0.6; }
+.slide-down-enter-active, .slide-down-leave-active { transition: all 0.2s var(--ease-out); }
+.slide-down-enter-from, .slide-down-leave-to { opacity: 0; transform: translateY(-6px); }
 
 /* ---- 文件表格 ---- */
 .file-table-wrap { overflow-x: auto; }
@@ -291,14 +667,15 @@ function clearSearch() {
   vertical-align: middle;
 }
 .file-table tr:last-child td { border-bottom: none; }
+.row-selected { background: var(--brand-soft); }
 .col-check { width: 38px; text-align: center; }
 .col-check input[type='checkbox'] { accent-color: var(--brand); width: 15px; height: 15px; }
 
-/* 文件名单元格 */
 .file-name-cell {
   display: flex;
   align-items: center;
   gap: 8px;
+  max-width: 360px;
 }
 .file-icon-sm {
   display: inline-flex;
@@ -312,11 +689,13 @@ function clearSearch() {
 .file-name {
   font-weight: 500;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .type-text { color: var(--text-secondary); }
 .col-time { color: var(--text-tertiary); white-space: nowrap; }
 
-/* 状态标签 */
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -328,18 +707,8 @@ function clearSearch() {
 .status-badge.success { background: #D1FAE5; color: #065F46; }
 .status-badge.warning { background: #FEF3C7; color: #92400E; }
 .status-badge.danger { background: #FEE2E2; color: #991B1B; }
+.status-badge.mini { padding: 1px 8px; font-size: 11px; }
 
-/* 权限范围标签 */
-.scope-badge {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: var(--radius-pill);
-  font-size: 12px;
-  color: var(--brand);
-  background: var(--brand-soft);
-}
-
-/* 行操作按钮 */
 .row-actions {
   display: flex;
   align-items: center;
@@ -359,6 +728,54 @@ function clearSearch() {
 }
 .action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
+.empty-cell {
+  text-align: center;
+  color: var(--text-tertiary);
+  padding: 32px 0 !important;
+}
+
+/* ---- 网格视图 ---- */
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.doc-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: pointer;
+  transition: all var(--dur-fast);
+}
+.doc-card:hover { border-color: var(--brand); box-shadow: var(--shadow-pop); }
+.doc-card.row-selected { border-color: var(--brand); background: var(--brand-soft); }
+.doc-card-top { display: flex; align-items: center; justify-content: space-between; }
+.doc-card-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doc-card-meta { font-size: 12px; color: var(--text-tertiary); }
+.doc-card-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 2px;
+  opacity: 0.85;
+}
+.grid-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--text-tertiary);
+  padding: 40px 0;
+}
+
 /* ---- 分页 ---- */
 .pagination-bar {
   display: flex;
@@ -376,11 +793,7 @@ function clearSearch() {
   border-color: var(--border);
   border-radius: var(--radius-sm);
 }
-.page-numbers {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
+.page-numbers { display: flex; align-items: center; gap: 4px; }
 .pg {
   min-width: 30px;
   height: 30px;
@@ -396,17 +809,49 @@ function clearSearch() {
   padding: 0 8px;
   font-family: inherit;
 }
-.pg:hover { border-color: var(--brand); color: var(--brand); }
+.pg:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
 .pg.active { background: var(--brand); color: #fff; border-color: var(--brand); }
-.pg-dots { color: var(--text-tertiary); padding: 0 4px; }
-.pg-arrow { font-family: inherit; }
-.jump-input {
-  width: 40px;
-  height: 30px;
-  text-align: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
+.pg:disabled { opacity: 0.4; cursor: default; }
+
+/* ---- 弹窗内容 ---- */
+.modal-hint { color: var(--text-tertiary); text-align: center; padding: 20px 0; }
+.preview-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
 }
-.jump-input:focus { outline: none; border-color: var(--brand); }
+.preview-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  max-height: 52vh;
+  overflow-y: auto;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  margin: 0;
+  color: var(--text-secondary);
+}
+.ai-verdict {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.ai-verdict.approve { background: #D1FAE5; color: #065F46; }
+.ai-verdict.reject { background: #FEE2E2; color: #991B1B; }
+.ai-verdict.manual_review, .ai-verdict.manual { background: #FEF3C7; color: #92400E; }
+.ai-summary { margin: 0 0 14px; color: var(--text-secondary); line-height: 1.6; }
+.ai-section h4 { font-size: 13px; color: var(--text-primary); margin: 14px 0 6px; }
+.ai-list { margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.ai-list li { margin-bottom: 8px; }
+.ai-sim { color: var(--brand); font-weight: 600; margin-right: 8px; }
+.ai-doc { font-weight: 500; color: var(--text-primary); }
+.ai-snippet { margin: 4px 0 0; color: var(--text-tertiary); font-size: 12px; }
 </style>
