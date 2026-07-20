@@ -5,10 +5,12 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useToastStore } from '@/stores/toast'
 import Icon from '@/components/ui/Icon.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
+const toast = useToastStore()
 
 const form = ref({ username: '', password: '', remember: false })
 const showPwd = ref(false)
@@ -19,9 +21,11 @@ async function handleLogin() {
   loading.value = true
   try {
     await auth.login(form.value.username, form.value.password)
-    router.push('/dashboard')
+    // 成功后跳回原目标页（守卫带上的 redirect）或默认大盘
+    const redirect = (router.currentRoute.value.query.redirect as string) || '/dashboard'
+    router.push(redirect)
   } catch (e) {
-    // 静默失败，壳阶段
+    toast.error(e instanceof Error ? e.message : '登录失败，请重试')
   } finally {
     loading.value = false
   }

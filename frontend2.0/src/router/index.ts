@@ -1,8 +1,9 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 
 // 路由表：认证页（Login）在布局外；其余业务页挂在 AppLayout 下。
-// 注意：当前为"界面壳"阶段，auth 守卫用 mock 登录态，默认已登录以便浏览全部页面。
-// 功能接入阶段再把守卫换成真实 token 校验。
+// auth 守卫以 HttpOnly Cookie 为准：进入受保护页前，若无登录态则尝试用已有
+// Cookie 还原（仅一次）；还原失败跳登录页（带 redirect 回跳参数）。
 import Login from '@/views/Login.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Dashboard from '@/views/Dashboard.vue'
@@ -35,6 +36,26 @@ const router = createRouter({
   history: createWebHistory(),
   routes,
   scrollBehavior: () => ({ top: 0 }),
+})
+
+// 登录态引导：仅一次用 HttpOnly Cookie 尝试还原；失败跳登录页。
+let bootstrapped = false
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+  // 公开页（登录）无需鉴权
+  if (to.meta.public) return true
+
+  if (!auth.isLoggedIn) {
+    if (!bootstrapped) {
+      await auth.fetchMe()
+      bootstrapped = true
+    }
+    if (!auth.isLoggedIn) {
+      return { path: '/login', query: { redirect: to.fullPath } }
+    }
+  }
+  return true
 })
 
 export default router
