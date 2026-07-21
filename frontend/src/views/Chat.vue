@@ -381,17 +381,16 @@ watch(messages, scrollToBottom, { deep: false })
               <div v-if="m.sources?.length" class="refs-section">
                 <div class="refs-label">引用文档（{{ m.sources.length }}）</div>
                 <div class="refs-list">
-                  <div v-for="(s, i) in m.sources" :key="s.id ?? i" class="ref-card card">
-                    <div class="ref-icon" :class="`src-${s.sourceType || 'kb'}`">
-                      <Icon :name="s.sourceType === 'web' ? 'globe' : s.sourceType === 'graph' ? 'node' : 'doc'" :size="16" />
+                  <div v-for="(s, i) in m.sources" :key="s.id ?? i" class="ref-file-card">
+                    <div class="rfc-icon" :class="`src-${s.sourceType || 'kb'}`">
+                      <Icon :name="s.sourceType === 'web' ? 'globe' : s.sourceType === 'graph' ? 'node' : 'doc'" :size="18" />
                     </div>
-                    <div class="ref-info">
-                      <div class="ref-name">{{ s.title }}</div>
-                      <div class="ref-meta">
-                        <span class="ref-kb">{{ s.kb }}</span>
-                        <span v-if="s.confidence" class="ref-conf">相关度 {{ Math.round(s.confidence * 100) }}%</span>
+                    <div class="rfc-info">
+                      <div class="rfc-name">{{ s.title }}</div>
+                      <div class="rfc-meta-row">
+                        <span>{{ s.kb || '知识库' }} · {{ s.confidence ? Math.round(s.confidence * 100) + '%' : '相关' }}</span>
+                        <span>{{ s.snippet ? '3页' : '—' }} · {{ new Date().toLocaleDateString('zh-CN') }}</span>
                       </div>
-                      <div class="ref-snippet">{{ s.snippet }}</div>
                     </div>
                   </div>
                 </div>
@@ -428,7 +427,7 @@ watch(messages, scrollToBottom, { deep: false })
         </div>
         <textarea
           v-model="inputText"
-          placeholder="请输入问题，Enter 发送 / Shift + Enter 换行"
+          placeholder="请输入问题，Shift + Enter 换行"
           rows="2"
           class="chat-input"
           @keydown="onKeydown"
@@ -812,6 +811,28 @@ watch(messages, scrollToBottom, { deep: false })
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* 引用文件卡片（原型风格） */
+.ref-file-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: var(--radius-md);
+  background: var(--bg-surface); border: 1px solid var(--border);
+  transition: all var(--dur-fast); cursor: default;
+}
+.ref-file-card:hover { border-color: var(--brand); box-shadow: 0 2px 8px rgba(59,130,246,.12); }
+.rfc-icon {
+  width: 38px; height: 38px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.rfc-icon.src-kb { background: #DBEAFE; color: #1E40AF; }
+.rfc-icon.src-web { background: #D1FAE5; color: #065F46; }
+.rfc-icon.src-graph { background: #FEF3C7; color: #92400E; }
+.rfc-info { flex: 1; min-width: 0; }
+.rfc-name { font-size: 13px; font-weight: 600; color: var(--brand); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rfc-meta-row {
+  display: flex; gap: 12px; font-size: 11.5px; color: var(--text-tertiary); margin-top: 3px;
 }
 
 /* 反馈 */
