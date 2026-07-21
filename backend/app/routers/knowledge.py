@@ -508,20 +508,23 @@ async def delete_document(
     # 2) 删图谱节点（按 chunk_id 归属）
     await GraphStore().delete_by_doc(db, kb_id, chunk_ids)
 
-    # 3) 删 DocChunk（FK 必须在删 Document 前清，否则违反外键）
+    # 3) 删 DocumentTask（FK 必须在删 DocChunk/Document 前清）
+    await db.execute(delete(DocumentTask).where(DocumentTask.document_id == doc.id))
+
+    # 4) 删 DocChunk（FK 必须在删 Document 前清，否则违反外键）
     await db.execute(delete(DocChunk).where(DocChunk.document_id == doc.id))
 
-    # 4) 删 ES 索引里的该文档 chunk（ES 不可用时静默跳过）
+    # 5) 删 ES 索引里的该文档 chunk（ES 不可用时静默跳过）
     await ESClient().delete_by_doc(kb_id, str(doc.id))
 
-    # 5) 删对象存储原始文件（缺失不阻断删除）
+    # 6) 删对象存储原始文件（缺失不阻断删除）
     store = get_object_store()
     try:
         await store.delete(doc.source_path)
     except Exception:
         pass
 
-    # 6) 删文档本身
+    # 7) 删文档本身
     await db.delete(doc)
     await db.commit()
 
@@ -569,6 +572,8 @@ async def _delete_kb_cascade(db: AsyncSession, kb_id: str) -> None:
             await GraphStore().delete_by_doc(db, kb_id, chunk_ids)
         except Exception:
             pass
+        # 先清 DocumentTask，再清 DocChunk，最后删 Document，避免 FK 冲突
+        await db.execute(delete(DocumentTask).where(DocumentTask.document_id == doc.id))
         # 删 DocChunk（FK 必须在删 Document 前清，否则违反外键）
         await db.execute(delete(DocChunk).where(DocChunk.document_id == doc.id))
         # 删 ES 索引，连接失败静默跳过

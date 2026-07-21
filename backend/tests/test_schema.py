@@ -1,4 +1,4 @@
-"""迁移契约测试：Alembic upgrade head 必须建出全部 12 张业务表 + alembic_version。"""
+"""迁移契约测试：Alembic upgrade head 必须建出全部 14 张业务表 + alembic_version。"""
 import os
 
 import asyncpg
@@ -16,5 +16,5 @@ async def test_alembic_creates_all_tables():
         )
     finally:
         await conn.close()
-    # 12 张业务表 + alembic_version = 13
-    assert n == 13, f"期望 13 张表，实际 {n}"
+    # 14 张业务表 + alembic_version = 15
+    assert n == 15, f"期望 15 张表（14 业务表 + alembic_version），实际 {n}"
