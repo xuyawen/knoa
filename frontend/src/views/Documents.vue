@@ -580,6 +580,9 @@ function goPage(p: number) {
   color: var(--text-primary);
   cursor: pointer;
   max-width: 200px;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
 }
 .kb-select-el:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 .kb-caret {
@@ -828,6 +831,12 @@ function goPage(p: number) {
   font-size: 12px;
   border-color: var(--border);
   border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
 }
 .page-numbers { display: flex; align-items: center; gap: 4px; }
 .pg {

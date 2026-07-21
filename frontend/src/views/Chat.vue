@@ -979,6 +979,9 @@ watch(messages, scrollToBottom, { deep: false })
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
 }
 .select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 </style>

@@ -658,6 +658,9 @@ onMounted(async () => {
   height: 34px; padding: 0 28px 0 12px; font-size: 13px; font-family: inherit;
   border: 1px solid var(--border); border-radius: var(--radius-md);
   background: var(--bg-surface); color: var(--text-primary); cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
 }
 .g-select:focus { outline: none; border-color: var(--brand); }
 .g-reset { white-space: nowrap; }
