@@ -94,6 +94,9 @@ class DocumentOut(CamelModel):
     tags: list[str] = []
     category: str | None = None
     department_id: str | None = None
+    uploader_name: str | None = None       # P0：真实上传人（冗余显示名）
+    scope: str = "public"                  # P0：权限范围 private|department|company|public
+    parse_status: str = "pending"          # P0：解析状态 pending|parsing|done|failed
 
 
 class DocumentDetailOut(CamelModel):
@@ -116,6 +119,7 @@ class DocumentUploadIn(CamelModel):
     tags: list[str] | None = None          # 标签（架构图1 标签体系）
     category: str | None = None             # 分类
     department_id: str | None = None        # 归属部门（架构图2/5 部门隔离）
+    scope: str | None = "public"            # P0：权限范围 private|department|company|public
 
 
 class KBCreateIn(CamelModel):

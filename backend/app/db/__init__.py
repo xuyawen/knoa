@@ -48,6 +48,15 @@ class Document(Base):
     tags: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list, server_default="[]")
     category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("department.id"), nullable=True)
+    # P0：真实三要素（前端不再造假）
+    # 上传人：冗余 display_name 避免每次 join app_user；id 用于"我的文档"过滤
+    uploader_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"), nullable=True)
+    uploader_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # 权限范围：private(仅本人) | department(部门) | company(公司) | public(公开)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False, default="public", server_default="public")
+    # 解析状态：pending(待解析) | parsing(解析中) | done(完成) | failed(失败)
+    # ponytail: 与 DocumentTask.status 同步，列表展示用，避免每次 join task
+    parse_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", server_default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     kb: Mapped["KnowledgeBase"] = relationship(back_populates="documents")

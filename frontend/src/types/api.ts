@@ -53,6 +53,9 @@ export interface DocumentItem {
   updatedAt: string
   originalFilename?: string | null
   fileSize?: number | null
+  uploaderName?: string | null   // P0：真实上传人显示名
+  scope?: string                  // P0：权限范围 private|department|company|public
+  parseStatus?: string            // P0：解析状态 pending|parsing|done|failed
 }
 
 export interface DocumentDetail {

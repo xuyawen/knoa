@@ -7,7 +7,6 @@ import CustomSelect from '@/components/ui/CustomSelect.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
-import { useAuthStore } from '@/stores/auth'
 import {
   getDocuments,
   uploadDocument,
@@ -21,7 +20,6 @@ import type { DocumentItem, DocumentDetail, AIReview } from '@/types/api'
 
 const knowledge = useKnowledgeStore()
 const toast = useToastStore()
-const auth = useAuthStore()
 
 const props = defineProps<{ section?: string }>()
 const section = computed(() => props.section ?? 'mine')
@@ -144,11 +142,25 @@ function statusType(s: string): 'success' | 'warning' | 'danger' {
   return 'danger'
 }
 
-function statusLabel(s: string): string {
-  if (s === '已审核') return '解析完成'
-  if (s === '待复核') return '解析中'
-  if (s === '已拒绝') return '解析失败'
-  return s
+// P0：真实解析状态映射（后端 parseStatus 字段，替代原 status 李代桃僵）
+function parseStatusType(s: string | undefined): 'success' | 'warning' | 'danger' {
+  if (s === 'done') return 'success'
+  if (s === 'failed') return 'danger'
+  return 'warning' // pending | parsing
+}
+function parseStatusLabel(s: string | undefined): string {
+  if (s === 'done') return '解析完成'
+  if (s === 'parsing') return '解析中'
+  if (s === 'failed') return '解析失败'
+  return '待解析' // pending
+}
+
+// P0：真实权限范围映射
+function scopeLabel(s: string | undefined): string {
+  if (s === 'private') return '仅本人可见'
+  if (s === 'department') return '部门可见'
+  if (s === 'company') return '公司可见'
+  return '公开可见' // public | 默认
 }
 
 function fileMeta(type: string): { icon: string; color: string } {
@@ -427,9 +439,9 @@ function goPage(p: number) {
             </td>
             <td><span class="type-text">{{ d.type }}</span></td>
             <td class="col-time">{{ fmtTime(d.updatedAt) }}</td>
-            <td class="col-uploader">{{ auth.user?.displayName || '—' }}</td>
-            <td><span class="status-tag" :class="statusType(d.status)">{{ statusLabel(d.status) }}</span></td>
-            <td><span class="scope-tag">公开可见</span></td>
+            <td class="col-uploader">{{ d.uploaderName || '—' }}</td>
+            <td><span class="status-tag" :class="parseStatusType(d.parseStatus)">{{ parseStatusLabel(d.parseStatus) }}</span></td>
+            <td><span class="scope-tag" :class="{ 'scope-private': d.scope === 'private' }">{{ scopeLabel(d.scope) }}</span></td>
             <td>
               <div class="row-actions">
                 <button class="action-btn" title="预览" @click="onPreview(d)"><Icon name="eye" :size="15" /></button>

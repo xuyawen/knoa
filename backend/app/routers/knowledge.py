@@ -216,13 +216,24 @@ async def create_knowledge_base(
 @router.get("/knowledge-bases/{kb_id}/documents", response_model=list[DocumentOut])
 async def list_documents(
     kb_id: str,
+    scope: str | None = None,
+    department_id: str | None = None,
+    mine: bool = False,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_kb_access("view")),
+    user: User = Depends(require_kb_access("view")),
 ):
-    """列出某知识库下的文档。"""
-    result = await db.execute(
-        select(Document).where(Document.kb_id == kb_id).order_by(Document.created_at.desc())
-    )
+    """列出某知识库下的文档。可选过滤（P0 准备，前端 P3/P5 使用，默认全返回）。"""
+    stmt = select(Document).where(Document.kb_id == kb_id)
+    if scope:
+        stmt = stmt.where(Document.scope == scope)
+    if department_id:
+        try:
+            stmt = stmt.where(Document.department_id == uuid.UUID(department_id))
+        except Exception:
+            pass  # 非法 department_id 忽略过滤，不报错
+    if mine:
+        stmt = stmt.where(Document.uploader_id == user.id)
+    result = await db.execute(stmt.order_by(Document.created_at.desc()))
     docs = result.scalars().all()
     return [_doc_out(d) for d in docs]
 
@@ -232,7 +243,7 @@ async def upload_document(
     kb_id: str,
     payload: DocumentUploadIn,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_kb_access("edit")),
+    user: User = Depends(require_kb_access("edit")),
 ):
     """上传单篇文档（.md / .txt / .docx / .pdf）—— 方案 A（延迟摄入）。
 
@@ -281,6 +292,10 @@ async def upload_document(
 
     # 4) 方案 A：只建 Document(status=待复核)，不摄入
     title = _extract_title(parsed.text, filename)
+    # P0：权限范围校验（信任边界），非法值归 public
+    scope = payload.scope or "public"
+    if scope not in ("private", "department", "company", "public"):
+        scope = "public"
     doc = Document(
         kb_id=kb_id,
         title=title,
@@ -289,6 +304,11 @@ async def upload_document(
         status="待复核",
         original_filename=filename,
         file_size=len(raw),
+        # P0：真实三要素
+        uploader_id=user.id,
+        uploader_name=user.display_name,
+        scope=scope,
+        parse_status="pending",
     )
     # 标签 / 分类 / 归属部门（架构图1/2/5：随上传透传）
     if payload.tags is not None:
@@ -333,6 +353,9 @@ def _doc_out(d: Document) -> DocumentOut:
         tags=d.tags or [],
         category=d.category,
         department_id=str(d.department_id) if d.department_id else None,
+        uploader_name=d.uploader_name,
+        scope=d.scope,
+        parse_status=d.parse_status,
     )
 
 
@@ -384,6 +407,7 @@ async def approve_document(
     doc.status = "已审核"
     doc.reviewed_at = datetime.now(timezone.utc)
     doc.reviewed_by = str(user.id)
+    doc.parse_status = "done"  # P0：审核通过即解析完成
     await db.flush()
 
     # 处理任务：进入处理中（前端据此推进进度条）
@@ -433,6 +457,7 @@ async def reject_document(
     doc.status = "已拒绝"
     doc.reviewed_at = datetime.now(timezone.utc)
     doc.reviewed_by = str(user.id)
+    doc.parse_status = "failed"  # P0：驳回即解析失败（不进检索库）
     # 处理任务：标记为失败（已驳回）
     task = await db.scalar(
         select(DocumentTask)

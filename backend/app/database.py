@@ -86,6 +86,17 @@ async def _migrate_columns(conn) -> None:
         ("category", "VARCHAR(50)"),
         ("department_id", "UUID"),
     ]
+    # P0：文档真实三要素（上传人/权限范围/解析状态），老库升级兜底补列
+    doc_cols_p0 = [
+        ("uploader_id", "UUID"),
+        ("uploader_name", "VARCHAR(100)"),
+        ('"scope"', "VARCHAR(20) NOT NULL DEFAULT 'public'"),
+        ('"parse_status"', "VARCHAR(20) NOT NULL DEFAULT 'pending'"),
+    ]
+    for name, typ in doc_cols_p0:
+        await conn.execute(
+            text(f"ALTER TABLE document ADD COLUMN IF NOT EXISTS {name} {typ}")
+        )
     for name, typ in doc_cols:
         await conn.execute(
             text(f"ALTER TABLE document ADD COLUMN IF NOT EXISTS {name} {typ}")
@@ -98,6 +109,23 @@ async def _migrate_columns(conn) -> None:
         await conn.execute(
             text(f"ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS {name} {typ}")
         )
+
+
+async def _backfill_doc_fields(conn) -> None:
+    """P0 老库回填：parse_status 与文档 status 对齐，补 uploader_name 缺省。
+
+    幂等：只修正 parse_status='pending' 的明显不一致行，不动已正确值；
+    scope 由 server_default 'public' 自动兜底，无需此处处理。
+    """
+    await conn.execute(text(
+        "UPDATE document SET parse_status='done' WHERE status='已审核' AND parse_status='pending'"
+    ))
+    await conn.execute(text(
+        "UPDATE document SET parse_status='failed' WHERE status='已拒绝' AND parse_status='pending'"
+    ))
+    await conn.execute(text(
+        "UPDATE document SET uploader_name='系统' WHERE uploader_name IS NULL"
+    ))
 
 
 async def _seed_departments() -> None:
@@ -132,5 +160,6 @@ async def init_db():
     # 幂等补列（create_all 不给已有表补列；alembic 无迁移时也兜底）
     async with engine.begin() as conn:
         await _migrate_columns(conn)
+        await _backfill_doc_fields(conn)
     # 灌入基础部门数据（幂等）
     await _seed_departments()
