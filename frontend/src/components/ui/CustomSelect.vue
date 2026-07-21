@@ -125,7 +125,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
   width: 100%;
   max-height: 260px;
   overflow-y: auto;
-  background: var(--bg-elevated);
+  background: var(--bg-surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
