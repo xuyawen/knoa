@@ -17,6 +17,9 @@ class KnowledgeBase(Base):
     name: Mapped[str] = mapped_column(String(100))
     icon: Mapped[str] = mapped_column(String(50))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 标签/分类（架构图1：标签分类系统）
+    tags: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list, server_default="[]")
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # order 是 SQL 保留字；name="order" + quote=True 编译为带引号的 "order"
     order: Mapped[int] = mapped_column(Integer, name="order", default=0, server_default="0", nullable=False, quote=True)
     pending_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -40,6 +43,11 @@ class Document(Base):
     # 审核留痕：approve/reject 时写入（谁、何时）
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # 标签/分类/部门归属（架构图2/5：文档维度权限 + 标签体系）
+    # ponytail: tags 存 JSONB 数组，department_id 自引用 department 表做部门隔离
+    tags: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list, server_default="[]")
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("department.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     kb: Mapped["KnowledgeBase"] = relationship(back_populates="documents")
@@ -210,4 +218,38 @@ class KGEdge(Base):
     from_label: Mapped[str] = mapped_column(String(200))   # 起点实体 label
     to_label: Mapped[str] = mapped_column(String(200))     # 终点实体 label
     relation: Mapped[str] = mapped_column(String(100))     # 关系（属于 / 导致 / 需要 / 影响...）
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Department(Base):
+    """部门（架构图2/5：文档权限隔离的部门维度）。树形结构，parent_id 自引用。"""
+    __tablename__ = "department"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(100))                                  # 部门名称（如"产品部"）
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("department.id"), nullable=True)  # 树形结构
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # ponytail: 关系延迟到真正需要树遍历时再补（back_populates），当前仅存 parent_id
+
+
+class DocumentTask(Base):
+    """文档异步处理任务（架构图6 处理管线）。上传即建 task，前端轮询进度条。
+
+    status: pending/processing/completed/failed；progress 0-100；current_step 描述当前步骤。
+    """
+    __tablename__ = "document_task"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("document.id"), nullable=True)
+    kb_id: Mapped[str | None] = mapped_column(ForeignKey("knowledge_base.id"), nullable=True)
+    filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ponytail: 状态机只这几态，落库前在代码里校验取值
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending")
+    progress: Mapped[int] = mapped_column(Integer, default=0, server_default="0")   # 0-100 百分比
+    current_step: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

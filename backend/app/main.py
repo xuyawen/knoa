@@ -23,6 +23,7 @@ from app.db import ChatSession, User
 from app.routers import (
     ask,
     auth,
+    departments,
     events,
     feedback,
     graph,
@@ -32,6 +33,7 @@ from app.routers import (
     metrics,
     sessions,
     sources,
+    tasks,
     trending,
 )
 
@@ -176,3 +178,5 @@ app.include_router(memory.router, prefix="/api")
 app.include_router(metrics.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(graph.router, prefix="/api")
+app.include_router(departments.router, prefix="/api")
+app.include_router(tasks.router, prefix="/api")

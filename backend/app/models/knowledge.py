@@ -17,6 +17,8 @@ class KnowledgeBaseOut(CamelModel):
     document_count: int = 0
     pending_count: int = 0
     description: str | None = None
+    tags: list[str] = []
+    category: str | None = None
 
 
 class HealthItemOut(CamelModel):
@@ -89,6 +91,9 @@ class DocumentOut(CamelModel):
     updated_at: str
     original_filename: str | None = None
     file_size: int | None = None
+    tags: list[str] = []
+    category: str | None = None
+    department_id: str | None = None
 
 
 class DocumentDetailOut(CamelModel):
@@ -108,12 +113,17 @@ class DocumentUploadIn(CamelModel):
     filename: str
     content: str | None = None       # 文本路径（md/txt 直传文本，向后兼容）
     content_b64: str | None = None    # 二进制路径（docx/pdf 传 base64 原始字节）
+    tags: list[str] | None = None          # 标签（架构图1 标签体系）
+    category: str | None = None             # 分类
+    department_id: str | None = None        # 归属部门（架构图2/5 部门隔离）
 
 
 class KBCreateIn(CamelModel):
     name: str
     icon: str | None = None
     description: str | None = None
+    tags: list[str] | None = None
+    category: str | None = None
 
 
 class KBUpdateIn(CamelModel):
@@ -121,6 +131,8 @@ class KBUpdateIn(CamelModel):
     name: str | None = None
     icon: str | None = None
     description: str | None = None
+    tags: list[str] | None = None
+    category: str | None = None
 
 
 class KBReorderIn(CamelModel):
@@ -131,3 +143,19 @@ class KBReorderIn(CamelModel):
 class KBBatchDeleteIn(CamelModel):
     """批量删除知识库：ids 为待删库 id 列表。"""
     ids: list[str]
+
+
+class DocumentTaskOut(CamelModel):
+    """文档处理任务（架构图6：异步处理状态跟踪，前端轮询进度条）。"""
+    id: str
+    document_id: str | None = None
+    kb_id: str | None = None
+    filename: str | None = None
+    status: str                      # pending | processing | completed | failed
+    progress: int = 0               # 0-100
+    current_step: str | None = None
+    error_message: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    created_at: str
+    document_title: str | None = None

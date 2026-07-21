@@ -3,7 +3,7 @@ import logging
 import os
 import sys
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -80,6 +80,37 @@ async def _migrate_columns(conn) -> None:
         await conn.execute(
             text(f"ALTER TABLE chat_session ADD COLUMN IF NOT EXISTS {name} {typ}")
         )
+    # 架构图 A3：Document 标签/分类/部门，KnowledgeBase 标签/分类（幂等补列）
+    doc_cols = [
+        ("tags", "JSONB"),
+        ("category", "VARCHAR(50)"),
+        ("department_id", "UUID"),
+    ]
+    for name, typ in doc_cols:
+        await conn.execute(
+            text(f"ALTER TABLE document ADD COLUMN IF NOT EXISTS {name} {typ}")
+        )
+    kb_cols2 = [
+        ("tags", "JSONB"),
+        ("category", "VARCHAR(50)"),
+    ]
+    for name, typ in kb_cols2:
+        await conn.execute(
+            text(f"ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS {name} {typ}")
+        )
+
+
+async def _seed_departments() -> None:
+    """首次启动灌入常见部门（架构图2/5 文档权限隔离维度）。库空才插，幂等。"""
+    from app.db import Department
+    async with AsyncSessionLocal() as session:
+        cnt = await session.scalar(select(func.count()).select_from(Department))
+        if cnt:
+            return
+        # ponytail: 扁平顶层部门即可，树形靠 parent_id 后续自由建
+        for i, name in enumerate(["产品部", "市场部", "财务部", "HR", "管理层", "运维部"], 1):
+            session.add(Department(name=name, sort_order=i))
+        await session.commit()
 
 
 async def init_db():
@@ -101,3 +132,5 @@ async def init_db():
     # 幂等补列（create_all 不给已有表补列；alembic 无迁移时也兜底）
     async with engine.begin() as conn:
         await _migrate_columns(conn)
+    # 灌入基础部门数据（幂等）
+    await _seed_departments()

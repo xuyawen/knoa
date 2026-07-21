@@ -20,7 +20,7 @@ from app.core.security import (
     require_kb_access,
     require_roles,
 )
-from app.db import DocChunk, Document, KBPermission, KnowledgeBase, User
+from app.db import DocChunk, Document, DocumentTask, KBPermission, KnowledgeBase, User
 from app.deps import get_db, get_embedder, get_llm, get_es
 from app.models.knowledge import (
     AIReviewOut,
@@ -160,6 +160,8 @@ async def get_knowledge_bases(
                 document_count=doc_count or 0,
                 pending_count=pending_count or 0,
                 description=kb.description,
+                tags=kb.tags or [],
+                category=kb.category,
             )
         )
         health_list.append(
@@ -191,6 +193,10 @@ async def create_knowledge_base(
         icon=payload.icon or "📚",
         description=payload.description,
     )
+    if payload.tags is not None:
+        kb.tags = payload.tags
+    if payload.category:
+        kb.category = payload.category
     # 先落库并提交，再写库级权限。
     # 异步连接池下「同一 commit 内多表写入」可能落到不同物理连接，
     # 导致子表外键看不到未提交的父行而失败；先提交父行可保证
@@ -201,7 +207,10 @@ async def create_knowledge_base(
     db.add(KBPermission(kb_id=kb_id, user_id=user.id, level="admin"))
     await db.commit()
     await db.refresh(kb)
-    return KnowledgeBaseOut(id=kb.id, name=kb.name, icon=kb.icon)
+    return KnowledgeBaseOut(
+        id=kb.id, name=kb.name, icon=kb.icon, description=kb.description,
+        tags=kb.tags or [], category=kb.category,
+    )
 
 
 @router.get("/knowledge-bases/{kb_id}/documents", response_model=list[DocumentOut])
@@ -281,7 +290,29 @@ async def upload_document(
         original_filename=filename,
         file_size=len(raw),
     )
+    # 标签 / 分类 / 归属部门（架构图1/2/5：随上传透传）
+    if payload.tags is not None:
+        doc.tags = payload.tags
+    if payload.category:
+        doc.category = payload.category
+    if payload.department_id:
+        try:
+            doc.department_id = uuid.UUID(payload.department_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="department_id 非法")
     db.add(doc)
+    # 先 flush 让 doc.id 生成，否则 task.document_id 会拿到 None（FK 落空）
+    await db.flush()
+    # 建立处理任务记录（架构图6：异步处理状态跟踪，前端轮询进度）
+    task = DocumentTask(
+        document_id=doc.id,
+        kb_id=kb_id,
+        filename=filename,
+        status="pending",
+        progress=0,
+        current_step="等待审核",
+    )
+    db.add(task)
     await db.commit()
     await db.refresh(doc)
 
@@ -299,6 +330,9 @@ def _doc_out(d: Document) -> DocumentOut:
         updated_at=d.updated_at.isoformat() if d.updated_at else "",
         original_filename=d.original_filename,
         file_size=d.file_size,
+        tags=d.tags or [],
+        category=d.category,
+        department_id=str(d.department_id) if d.department_id else None,
     )
 
 
@@ -352,6 +386,18 @@ async def approve_document(
     doc.reviewed_by = str(user.id)
     await db.flush()
 
+    # 处理任务：进入处理中（前端据此推进进度条）
+    task = await db.scalar(
+        select(DocumentTask)
+        .where(DocumentTask.document_id == doc.id)
+        .order_by(DocumentTask.created_at.desc())
+    )
+    if task is not None:
+        task.status = "processing"
+        task.progress = 50
+        task.current_step = "向量化中"
+        task.started_at = datetime.now(timezone.utc)
+
     # 触发摄入：与 seed / upload 共用同一套 chunk/embed/ES/图谱逻辑
     ingester = DocumentIngester(
         embedder,
@@ -362,6 +408,13 @@ async def approve_document(
         graph=GraphStore(llm, embedder),
     )
     await ingester.ingest_existing(doc, db)
+
+    if task is not None:
+        task.status = "completed"
+        task.progress = 100
+        task.current_step = "完成"
+        task.completed_at = datetime.now(timezone.utc)
+    await db.commit()
     await db.refresh(doc)
     return _doc_out(doc)
 
@@ -380,6 +433,16 @@ async def reject_document(
     doc.status = "已拒绝"
     doc.reviewed_at = datetime.now(timezone.utc)
     doc.reviewed_by = str(user.id)
+    # 处理任务：标记为失败（已驳回）
+    task = await db.scalar(
+        select(DocumentTask)
+        .where(DocumentTask.document_id == doc.id)
+        .order_by(DocumentTask.created_at.desc())
+    )
+    if task is not None:
+        task.status = "failed"
+        task.current_step = "已驳回"
+        task.completed_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(doc)
     return _doc_out(doc)
@@ -543,10 +606,15 @@ async def update_knowledge_base(
         kb.icon = payload.icon
     if payload.description is not None:
         kb.description = payload.description
+    if payload.tags is not None:
+        kb.tags = payload.tags
+    if payload.category is not None:
+        kb.category = payload.category
     await db.commit()
     await db.refresh(kb)
     return KnowledgeBaseOut(
-        id=kb.id, name=kb.name, icon=kb.icon, description=kb.description
+        id=kb.id, name=kb.name, icon=kb.icon, description=kb.description,
+        tags=kb.tags or [], category=kb.category,
     )
 
 
