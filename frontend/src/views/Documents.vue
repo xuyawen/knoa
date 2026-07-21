@@ -3,6 +3,7 @@
 // section 由路由决定（mine/public/department/archive）。
 import { ref, computed, onMounted, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
+import CustomSelect from '@/components/ui/CustomSelect.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
@@ -68,6 +69,10 @@ async function loadDocs() {
     loading.value = false
   }
 }
+
+const kbOptions = computed(() =>
+  knowledge.bases.map((b) => ({ label: b.name, value: b.id })),
+)
 
 onMounted(async () => {
   if (!knowledge.loaded) await knowledge.load()
@@ -305,14 +310,13 @@ function goPage(p: number) {
     <div class="toolbar card">
       <div class="toolbar-left">
         <!-- 知识库选择（文档按 KB 组织） -->
-        <div class="kb-select">
-          <Icon name="folder" :size="14" class="kb-icon" />
-          <select v-model="selectedKb" :disabled="loading" class="kb-select-el">
-            <option v-if="!knowledge.bases.length" value="">（暂无知识库）</option>
-            <option v-for="b in knowledge.bases" :key="b.id" :value="b.id">{{ b.name }}</option>
-          </select>
-          <Icon name="chevron-down" :size="11" class="kb-caret" />
-        </div>
+        <CustomSelect
+          v-model="selectedKb"
+          :options="kbOptions"
+          placeholder="选择知识库"
+          :disabled="loading"
+          width="180px"
+        />
 
         <!-- 搜索 -->
         <div class="search-box">
@@ -556,40 +560,6 @@ function goPage(p: number) {
   align-items: center;
   gap: 4px;
   margin-left: auto;
-}
-
-/* 知识库选择 */
-.kb-select {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-.kb-icon {
-  position: absolute;
-  left: 10px;
-  color: var(--text-tertiary);
-  pointer-events: none;
-}
-.kb-select-el {
-  height: 34px;
-  padding: 0 28px 0 32px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  cursor: pointer;
-  max-width: 200px;
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-}
-.kb-select-el:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
-.kb-caret {
-  position: absolute;
-  right: 10px;
-  color: var(--text-tertiary);
-  pointer-events: none;
 }
 
 /* 搜索框 */
