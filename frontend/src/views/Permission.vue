@@ -329,7 +329,7 @@ const roleMatrix = [
 </template>
 
 <style scoped>
-.page { padding: 0; }
+.page { padding: 20px 24px; }
 .flex { display: flex; }
 .items-center { align-items: center; }
 .page-head { margin-bottom: 18px; }
