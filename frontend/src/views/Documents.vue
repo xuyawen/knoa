@@ -7,6 +7,7 @@ import CustomSelect from '@/components/ui/CustomSelect.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
+import { useAuthStore } from '@/stores/auth'
 import {
   getDocuments,
   uploadDocument,
@@ -20,6 +21,7 @@ import type { DocumentItem, DocumentDetail, AIReview } from '@/types/api'
 
 const knowledge = useKnowledgeStore()
 const toast = useToastStore()
+const auth = useAuthStore()
 
 const props = defineProps<{ section?: string }>()
 const section = computed(() => props.section ?? 'mine')
@@ -39,6 +41,32 @@ const deleting = ref(false)
 
 const searchQuery = ref('')
 const viewMode = ref<'list' | 'grid'>('list')
+
+// 筛选
+const filterType = ref<string>('')
+const filterStatus = ref<string>('')
+const filterScope = ref<string>('')
+const typeOptions = [
+  { label: '全部类型', value: '' },
+  { label: 'PDF', value: 'PDF' },
+  { label: 'Word', value: 'DOCX' },
+  { label: 'Excel', value: 'XLSX' },
+  { label: 'PPT', value: 'PPTX' },
+  { label: 'Markdown', value: 'MD' },
+]
+const statusOptions = [
+  { label: '全部状态', value: '' },
+  { label: '解析完成', value: '已审核' },
+  { label: '解析中', value: '待复核' },
+  { label: '解析失败', value: '已拒绝' },
+]
+const scopeOptions = [
+  { label: '全部权限', value: '' },
+  { label: '仅本人可见', value: 'self' },
+  { label: '部门可见', value: 'dept' },
+  { label: '公司可见', value: 'company' },
+  { label: '公开可见', value: 'public' },
+]
 
 // 选择（批量删）
 const selectedIds = ref<string[]>([])
@@ -69,10 +97,6 @@ async function loadDocs() {
     loading.value = false
   }
 }
-
-const kbOptions = computed(() =>
-  knowledge.bases.map((b) => ({ label: b.name, value: b.id })),
-)
 
 onMounted(async () => {
   if (!knowledge.loaded) await knowledge.load()
@@ -116,14 +140,25 @@ function clearSearch() {
 /* ---------- 工具 ---------- */
 function statusType(s: string): 'success' | 'warning' | 'danger' {
   if (s === '已审核') return 'success'
-  if (s === '待复核') return 'warning'
+  if (s === '待复核' || s === '解析中') return 'warning'
   return 'danger'
 }
 
+function statusLabel(s: string): string {
+  if (s === '已审核') return '解析完成'
+  if (s === '待复核') return '解析中'
+  if (s === '已拒绝') return '解析失败'
+  return s
+}
+
 function fileMeta(type: string): { icon: string; color: string } {
-  if (type === 'PDF') return { icon: 'pdf', color: '#EF4444' }
-  if (type === 'DOCX') return { icon: 'doc', color: '#3B82F6' }
-  return { icon: 'doc', color: '#64748B' }
+  const t = (type || '').toUpperCase()
+  if (t.includes('PDF')) return { icon: 'pdf', color: '#EF4444' }
+  if (t.includes('DOC')) return { icon: 'doc', color: '#3B82F6' }
+  if (t.includes('XLS')) return { icon: 'excel', color: '#22C55E' }
+  if (t.includes('PPT')) return { icon: 'pptx', color: '#F59E0B' }
+  if (t.includes('MD') || t.includes('TXT')) return { icon: 'file', color: '#64748B' }
+  return { icon: 'file', color: '#94A3B8' }
 }
 
 function fmtTime(iso: string): string {
@@ -309,29 +344,25 @@ function goPage(p: number) {
     <!-- ====== 工具栏 ====== -->
     <div class="toolbar card">
       <div class="toolbar-left">
-        <!-- 知识库选择（文档按 KB 组织） -->
-        <CustomSelect
-          v-model="selectedKb"
-          :options="kbOptions"
-          placeholder="选择知识库"
-          :disabled="loading"
-          width="180px"
-        />
-
         <!-- 搜索 -->
         <div class="search-box">
           <Icon name="search" :size="14" class="search-icon" />
-          <input v-model="searchQuery" type="text" placeholder="搜索文档名称" class="search-input" />
+          <input v-model="searchQuery" type="text" placeholder="搜索文档名称、内容、上传人等" class="search-input" />
           <button v-if="searchQuery" class="search-clear" @click="clearSearch">
             <Icon name="close" :size="12" />
           </button>
         </div>
 
-        <!-- 上传 -->
+        <!-- 批量上传 -->
         <label class="btn btn-primary btn-sm upload-btn" :class="{ 'is-loading': uploading }">
-          <Icon name="upload" :size="13" /> {{ uploading ? '上传中…' : '上传文档' }}
+          <Icon name="upload" :size="13" /> {{ uploading ? '上传中…' : '批量上传' }}
           <input type="file" multiple accept=".md,.txt,.docx,.pdf" class="file-hidden" @change="onUploadFiles" />
         </label>
+
+        <!-- 筛选下拉组 -->
+        <CustomSelect v-model="filterType" :options="typeOptions" placeholder="文件类型" width="110px" />
+        <CustomSelect v-model="filterStatus" :options="statusOptions" placeholder="解析状态" width="110px" />
+        <CustomSelect v-model="filterScope" :options="scopeOptions" placeholder="权限范围" width="110px" />
 
         <!-- 刷新 -->
         <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDocs">
@@ -374,8 +405,10 @@ function goPage(p: number) {
             </th>
             <th>文档名称</th>
             <th>文件类型</th>
-            <th>上传时间</th>
+            <th class="col-sort">上传时间 <Icon name="arrow-up-down" :size="11" /></th>
+            <th>上传人</th>
             <th>文档解析状态</th>
+            <th>权限范围</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -394,7 +427,9 @@ function goPage(p: number) {
             </td>
             <td><span class="type-text">{{ d.type }}</span></td>
             <td class="col-time">{{ fmtTime(d.updatedAt) }}</td>
-            <td><span class="status-badge" :class="statusType(d.status)">{{ d.status }}</span></td>
+            <td class="col-uploader">{{ auth.user?.displayName || '—' }}</td>
+            <td><span class="status-tag" :class="statusType(d.status)">{{ statusLabel(d.status) }}</span></td>
+            <td><span class="scope-tag">公开可见</span></td>
             <td>
               <div class="row-actions">
                 <button class="action-btn" title="预览" @click="onPreview(d)"><Icon name="eye" :size="15" /></button>
@@ -406,7 +441,7 @@ function goPage(p: number) {
             </td>
           </tr>
           <tr v-if="!loading && !pagedDocs.length">
-            <td colspan="6" class="empty-cell">
+            <td colspan="8" class="empty-cell">
               {{ selectedKb ? '该知识库暂无文档，点击「上传文档」添加' : '请选择左侧知识库' }}
             </td>
           </tr>
@@ -702,16 +737,39 @@ function goPage(p: number) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.type-text { color: var(--text-secondary); }
+.type-text { color: var(--text-secondary); font-weight: 500; }
 .col-time { color: var(--text-tertiary); white-space: nowrap; }
+.col-sort { white-space: nowrap; color: var(--text-secondary); cursor: pointer; user-select: none; }
+.col-sort:hover { color: var(--brand); }
+.col-uploader { color: var(--text-secondary); }
 
-.status-badge {
+/* 状态标签（原型风格） */
+.status-tag {
   display: inline-flex;
   align-items: center;
-  padding: 2px 10px;
+  padding: 3px 11px;
   border-radius: var(--radius-pill);
   font-size: 12px;
   font-weight: 500;
+}
+.status-tag.success { background: rgba(34,197,94,.10); color: #16a34a; }
+.status-tag.warning { background: rgba(245,158,11,.12); color: #d97706; }
+.status-tag.danger { background: rgba(239,68,68,.10); color: #dc2626; }
+
+/* 权限范围标签 */
+.scope-tag {
+  display: inline-flex;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  background: rgba(59,130,246,.10);
+  color: #2563eb;
+}
+
+/* 兼容旧 .status-badge */
+.status-badge {
+  display: inline-flex; align-items: center; padding: 2px 10px;
+  border-radius: var(--radius-pill); font-size: 12px; font-weight: 500;
 }
 .status-badge.success { background: #D1FAE5; color: #065F46; }
 .status-badge.warning { background: #FEF3C7; color: #92400E; }
