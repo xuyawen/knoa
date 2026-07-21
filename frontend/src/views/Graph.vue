@@ -5,6 +5,7 @@
 // section 由路由决定（global/nodes/relations/stats）。
 import { ref, computed, onMounted, nextTick } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
+import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useToastStore } from '@/stores/toast'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { getGraph } from '@/api'
@@ -40,6 +41,24 @@ const selectedKb = ref<string | null>(null)
 const searchTerm = ref('')
 const selectedId = ref<string | null>(null)
 const hoveredId = ref<string | null>(null)
+
+// 工具栏筛选
+const gFilterType = ref('')
+const gFilterBiz = ref('')
+const gFilterTime = ref('')
+const nodeTypeOpts = [
+  { label: '全部', value: '' }, { label: '文档', value: 'doc' },
+  { label: '知识点', value: 'concept' }, { label: '标签', value: 'tag' },
+  { label: '业务分类', value: 'biz' },
+]
+const bizCatOpts = [
+  { label: '全部', value: '' }, { label: '制度规范', value: 'policy' },
+  { label: '培训资料', value: 'training' }, { label: '产品文档', value: 'product' },
+]
+const timeRangeOpts = [
+  { label: '全部时间', value: '' }, { label: '近 7 天', value: '7d' },
+  { label: '近 30 天', value: '30d' }, { label: '近 90 天', value: '90d' },
+]
 
 /* ---- 力导向布局 ---- */
 interface LNode { id: string; x: number; y: number; deg: number; r: number }
@@ -190,6 +209,24 @@ const presentKbs = computed(() => {
 
 /* ---- 统计面板派生数据 ---- */
 const stats = computed(() => graph.value?.stats)
+
+// 按类型统计节点数
+const docNodeCount = computed(() => {
+  const tc = graph.value?.stats.typeCounts || {}
+  return Object.entries(tc).filter(([k]) => k.includes('文档') || k.includes('doc')).reduce((s, [,v]) => s + v, 0) || graph.value?.nodes.length || 0
+})
+const conceptCount = computed(() => {
+  const tc = graph.value?.stats.typeCounts || {}
+  return Object.entries(tc).filter(([k]) => k.includes('知识') || k.includes('概念')).reduce((s, [,v]) => s + v, 0) || 0
+})
+const tagCount = computed(() => {
+  const tc = graph.value?.stats.typeCounts || {}
+  return Object.entries(tc).filter(([k]) => k.includes('标签')).reduce((s, [,v]) => s + v, 0) || 0
+})
+const bizCatCount = computed(() => {
+  const tc = graph.value?.stats.typeCounts || {}
+  return Object.entries(tc).filter(([k]) => k.includes('业务') || k.includes('分类')).reduce((s, [,v]) => s + v, 0) || 0
+})
 const typeBars = computed(() => {
   const tc = graph.value?.stats.typeCounts || {}
   const entries = Object.entries(tc).sort((a, b) => b[1] - a[1])
@@ -322,18 +359,20 @@ onMounted(async () => {
     <div class="graph-toolbar card">
       <div class="toolbar-left">
         <div class="g-search">
-          <input v-model="searchTerm" type="text" placeholder="搜索实体名称高亮关联…" class="g-input" />
+          <input v-model="searchTerm" type="text" placeholder="请输入关键词搜索图谱…" class="g-input" />
           <Icon name="search" :size="15" class="g-search-icon" />
         </div>
-        <select v-model="selectedKb" class="g-select" @change="fetchGraph">
-          <option :value="null">全部分类</option>
-          <option v-for="b in knowledge.bases" :key="b.id" :value="b.id">{{ b.name }}</option>
-        </select>
+        <CustomSelect v-model="gFilterType" :options="nodeTypeOpts" placeholder="节点类型" width="105px" />
+        <CustomSelect v-model="gFilterBiz" :options="bizCatOpts" placeholder="业务分类" width="110px" />
+        <CustomSelect v-model="gFilterTime" :options="timeRangeOpts" placeholder="创建时间" width="115px" />
         <button class="btn btn-ghost btn-sm g-reset" @click="resetAll">重置</button>
       </div>
       <div class="toolbar-right">
         <button class="btn btn-primary btn-sm" :disabled="loading" @click="fetchGraph">
-          <Icon name="refresh" :size="13" /> {{ loading ? '加载中…' : '刷新' }}
+          <Icon name="search" :size="13" /> 搜索
+        </button>
+        <button class="btn btn-outline btn-sm" title="导出图谱">
+          <Icon name="download" :size="13" /> 导出图谱
         </button>
       </div>
     </div>
@@ -438,6 +477,18 @@ onMounted(async () => {
           </div>
         </div>
         <p v-if="graph && graph.nodes.length" class="canvas-hint">拖拽节点可移动 · 滚轮缩放 · 拖拽空白处平移 · 点击查看详情</p>
+
+        <!-- 图例 -->
+        <div v-if="graph && graph.nodes.length" class="graph-legend">
+          <span class="leg-item"><i class="leg-dot" style="background:#3b82f6"></i> 文档</span>
+          <span class="leg-item"><i class="leg-dot" style="background:#22c55e"></i> 知识点</span>
+          <span class="leg-item"><i class="leg-dot" style="background:#a855f7"></i> 标签</span>
+          <span class="leg-item"><i class="leg-dot" style="background:#f59e0b"></i> 业务分类</span>
+          <span class="leg-divider"></span>
+          <span class="leg-item leg-line"><i class="leg-line-dash" style="border-color:#94a3b8"></i> 关联</span>
+          <span class="leg-item leg-line"><i class="leg-line-solid" style="border-color:#3b82f6"></i> 引用</span>
+          <span class="leg-item leg-line"><i class="leg-line-solid" style="border-color:#22c55e"></i> 包含</span>
+        </div>
       </div>
 
       <!-- 右：数据面板 -->
@@ -447,23 +498,31 @@ onMounted(async () => {
           <Icon name="graph" :size="14" class="info-hint" />
         </div>
 
-        <!-- 统计数字 -->
+        <!-- 统计数字（原型 #6 风格） -->
         <div class="stat-grid">
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#3B82F614"><Icon name="graph" :size="18" style="color:#3B82F6" /></div>
-            <div class="sc-info"><div class="sc-label">实体节点</div><div class="sc-value" style="color:#3B82F6">{{ stats?.nodeCount ?? 0 }}</div></div>
+            <div class="sc-icon-wrap" style="background:#3B82F614"><Icon name="graph" :size="18" style="color:#3b82f6"/></div>
+            <div class="sc-info"><div class="sc-label">节点总数</div><div class="sc-value" style="color:#3b82f6">{{ stats?.nodeCount ?? 0 }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#10B98114"><Icon name="link" :size="18" style="color:#10B981" /></div>
-            <div class="sc-info"><div class="sc-label">关系边</div><div class="sc-value" style="color:#10B981">{{ stats?.edgeCount ?? 0 }}</div></div>
+            <div class="sc-icon-wrap" style="background:#10B98114"><Icon name="link" :size="18" style="color:#10b981"/></div>
+            <div class="sc-info"><div class="sc-label">关系总数</div><div class="sc-value" style="color:#10b981">{{ stats?.edgeCount ?? 0 }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#8B5CF614"><Icon name="folder" :size="18" style="color:#8B5CF6" /></div>
-            <div class="sc-info"><div class="sc-label">覆盖知识库</div><div class="sc-value" style="color:#8B5CF6">{{ stats?.kbCount ?? 0 }}</div></div>
+            <div class="sc-icon-wrap" style="background:#3B82F614"><Icon name="doc" :size="18" style="color:#3b82f6"/></div>
+            <div class="sc-info"><div class="sc-label">文档节点</div><div class="sc-value" style="color:#3b82f6">{{ docNodeCount }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#F59E0B14"><Icon name="tag" :size="18" style="color:#F59E0B" /></div>
-            <div class="sc-info"><div class="sc-label">实体类型</div><div class="sc-value" style="color:#F59E0B">{{ Object.keys(stats?.typeCounts || {}).length }}</div></div>
+            <div class="sc-icon-wrap" style="background:#22c55e14"><Icon name="lightbulb" :size="18" style="color:#22c55e"/></div>
+            <div class="sc-info"><div class="sc-label">知识点</div><div class="sc-value" style="color:#22c55e">{{ conceptCount }}</div></div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-icon-wrap" style="background:#a855f714"><Icon name="tag" :size="18" style="color:#a855f7"/></div>
+            <div class="sc-info"><div class="sc-label">标签</div><div class="sc-value" style="color:#a855f7">{{ tagCount }}</div></div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-icon-wrap" style="background:#f59e0b14"><Icon name="folder" :size="18" style="color:#f59e0b"/></div>
+            <div class="sc-info"><div class="sc-label">业务分类</div><div class="sc-value" style="color:#f59e0b">{{ bizCatCount }}</div></div>
           </div>
         </div>
 
@@ -714,6 +773,32 @@ onMounted(async () => {
 .leg-arrow { width: 20px; height: 0; border-top: 1.5px solid #94A3B8; position: relative; }
 .leg-arrow::after { content: ''; position: absolute; right: -1px; top: -4px; border: 4px solid transparent; border-left: 4px solid #94A3B8; }
 .canvas-hint { text-align: center; font-size: 11px; color: var(--text-placeholder); padding: 6px; margin: 0; }
+
+/* 图例 */
+.graph-legend {
+  display: flex; align-items: center; gap: 16px;
+  padding: 10px 16px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--text-secondary); flex-wrap: wrap;
+}
+.leg-item { display: inline-flex; align-items: center; gap: 5px; }
+.leg-dot {
+  width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex-shrink: 0;
+}
+.leg-divider { width: 1px; height: 14px; background: var(--border); }
+.leg-line .leg-line-dash, .leg-line .leg-line-solid {
+  display: inline-block; width: 20px; height: 0; border-top-width: 2px; border-style: solid;
+}
+.leg-line .leg-line-dash { border-style: dashed; }
+
+/* 导出按钮 */
+.btn-outline {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 32px; padding: 0 12px; border-radius: var(--radius-md);
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-secondary); font-size: 12.5px; cursor: pointer;
+  font-family: inherit; transition: all var(--dur-fast);
+}
+.btn-outline:hover { border-color: var(--brand); color: var(--brand); }
 
 /* ---- 右侧统计面板 ---- */
 .stats-panel { padding: 16px; overflow-y: auto; }
