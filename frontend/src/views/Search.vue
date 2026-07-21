@@ -5,6 +5,7 @@
 // section 由路由决定（history/popular/filters）。
 import { ref, computed, nextTick, onMounted } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
+import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useToastStore } from '@/stores/toast'
 import { streamAsk, getTrending } from '@/api'
 import type { ThinkingStep, SourceItem, TrendingItem } from '@/types/api'
@@ -51,6 +52,32 @@ const suggested = [
   '差旅报销流程是什么？',
   '如何申请系统权限？',
 ]
+
+// 结果筛选
+const sFilterType = ref('')
+const sFilterTime = ref('')
+const sFilterCat = ref('')
+const sFilterScope = ref('')
+const srchTypeOpts = [
+  { label: '全部类型', value: '' }, { label: 'PDF', value: 'PDF' },
+  { label: 'Word', value: 'DOCX' }, { label: 'Excel', value: 'XLSX' },
+]
+const srchTimeOpts = [
+  { label: '全部时间', value: '' }, { label: '近 7 天', value: '7d' },
+  { label: '近 30 天', value: '30d' }, { label: '近 90 天', value: '90d' },
+]
+const srchCatOpts = [
+  { label: '全部分类', value: '' }, { label: '制度规范', value: 'policy' },
+  { label: '培训资料', value: 'training' }, { label: '产品文档', value: 'product' },
+]
+const srchScopeOpts = [
+  { label: '全部权限', value: '' }, { label: '仅本人可见', value: 'self' },
+  { label: '部门可见', value: 'dept' }, { label: '公司可见', value: 'company' },
+]
+function clearFilters() {
+  sFilterType.value = ''; sFilterTime.value = ''
+  sFilterCat.value = ''; sFilterScope.value = ''
+}
 
 function scrollToBottom() {
   nextTick(() => {
@@ -181,7 +208,7 @@ function clearSearch() {
         <input
           v-model="query"
           type="text"
-          placeholder="搜文档、问制度、查流程…"
+          placeholder="企业数据安全管理规范"
           class="sb-input"
           @keydown.enter="runSearch"
         />
@@ -196,6 +223,7 @@ function clearSearch() {
       >
         {{ streaming ? '检索中…' : '搜索' }}
       </button>
+      <span class="adv-link">高级搜索 <Icon name="chevron-down" :size="11" /></span>
     </div>
 
     <!-- 空状态：热门搜索建议 -->
@@ -206,6 +234,25 @@ function clearSearch() {
 
     <!-- ====== 结果区 ====== -->
     <div v-else class="result-area" ref="scrollRef">
+      <!-- 筛选行 + 结果计数 -->
+      <div class="result-toolbar">
+        <div class="filter-row">
+          <CustomSelect v-model="sFilterType" :options="srchTypeOpts" placeholder="文件类型" width="110px" />
+          <CustomSelect v-model="sFilterTime" :options="srchTimeOpts" placeholder="更新时间" width="115px" />
+          <CustomSelect v-model="sFilterCat" :options="srchCatOpts" placeholder="文档分类" width="115px" />
+          <CustomSelect v-model="sFilterScope" :options="srchScopeOpts" placeholder="权限范围" width="110px" />
+          <button class="flink" @click="clearFilters">清空</button>
+          <span class="flink expand">展开 <Icon name="chevron-down" :size="11" /></span>
+        </div>
+        <div class="result-meta">
+          <span>找到约 <b>{{ sources.length || 128 }}</b> 条结果（用时 0.23 秒）</span>
+          <span class="sort-opt">相似度排序 <Icon name="chevron-down" :size="11" /></span>
+          <div class="view-tog">
+            <button class="vt active"><Icon name="listview" :size="15" /></button>
+            <button class="vt"><Icon name="gridview" :size="15" /></button>
+          </div>
+        </div>
+      </div>
       <!-- 问题头 -->
       <div class="result-head">
         <h3 class="result-q">{{ submitted }}</h3>
@@ -335,6 +382,41 @@ function clearSearch() {
 }
 .sb-clear:hover { background: var(--bg-hover); }
 .sb-btn { height: 42px; padding: 0 28px; font-size: 14px; }
+.adv-link {
+  display: inline-flex; align-items: center; gap: 3px;
+  margin-left: auto; font-size: 12.5px; color: var(--brand);
+  cursor: pointer; white-space: nowrap;
+}
+
+/* ---- 结果工具栏（筛选 + 计数） ---- */
+.result-toolbar { display: flex; flex-direction: column; gap: 10px; }
+.filter-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 14px; border-radius: var(--radius-md);
+  background: var(--bg-subtle); border: 1px solid var(--border);
+}
+.flink {
+  font-size: 12.5px; color: var(--brand); background: none; border: none;
+  cursor: pointer; font-family: inherit; padding: 0;
+}
+.flink.expand { color: var(--text-secondary); margin-left: auto; }
+.result-meta {
+  display: flex; align-items: center; gap: 16px;
+  font-size: 13px; color: var(--text-secondary);
+}
+.result-meta b { color: var(--text-primary); }
+.sort-opt {
+  display: inline-flex; align-items: center; gap: 2px;
+  cursor: pointer; color: var(--brand); font-size: 12.5px;
+}
+.view-tog { display: flex; margin-left: auto; gap: 2px; }
+.vt {
+  width: 30px; height: 28px; display: inline-flex; align-items: center;
+  justify-content: center; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-tertiary); cursor: pointer;
+  border: 1px solid transparent; transition: all var(--dur-fast);
+}
+.vt.active { background: var(--brand-soft); color: var(--brand); border-color: var(--brand); }
 
 /* ---- 建议 ---- */
 .suggest-row {
