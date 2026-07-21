@@ -2,13 +2,35 @@
 // 智能搜索 — 搜索即问答：复用 /api/ask 流式接口，
 // 把输入当作问题直接检索，结果以「AI 答案 + 溯源卡片」呈现。
 // 去掉了原 mock 中无后端支撑的假筛选下拉与假统计数。
-defineProps<{ activeTab?: number }>()
-
-import { ref, nextTick } from 'vue'
+// section 由路由决定（history/popular/filters）。
+import { ref, computed, nextTick, onMounted } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import { useToastStore } from '@/stores/toast'
-import { streamAsk } from '@/api'
-import type { ThinkingStep, SourceItem } from '@/types/api'
+import { streamAsk, getTrending } from '@/api'
+import type { ThinkingStep, SourceItem, TrendingItem } from '@/types/api'
+
+const props = defineProps<{ section?: string }>()
+const section = computed(() => props.section ?? 'history')
+
+// 热门搜索（真实 trending 数据）
+const trending = ref<TrendingItem[]>([])
+onMounted(async () => {
+  try {
+    trending.value = await getTrending()
+  } catch {
+    trending.value = []
+  }
+})
+
+// 搜索筛选（交互 UI，后端筛选能力建设中）
+const sourceOptions = ['知识库', '联网搜索', '知识图谱']
+const sourceSel = ref<Set<string>>(new Set(['知识库']))
+function toggleSource(o: string) {
+  const next = new Set(sourceSel.value)
+  if (next.has(o)) next.delete(o)
+  else next.add(o)
+  sourceSel.value = next
+}
 
 const toast = useToastStore()
 
@@ -102,7 +124,57 @@ function clearSearch() {
   <div class="search-page">
     <h2 class="page-title">智能搜索</h2>
 
-    <!-- ====== 搜索栏 ====== -->
+    <!-- ====== 热门搜索（真实 trending）====== -->
+    <template v-if="section === 'popular'">
+      <div class="card popular-card">
+        <div class="panel-head">
+          <span class="panel-title">热门搜索榜</span>
+          <Icon name="fire" :size="14" class="info-hint" />
+        </div>
+        <ul v-if="trending.length" class="popular-list">
+          <li v-for="(t, i) in trending" :key="t.question">
+            <span class="rank" :class="'rk-' + Math.min(i + 1, 3)">{{ i + 1 }}</span>
+            <span class="q">{{ t.question }}</span>
+            <span class="cnt">{{ t.count }}</span>
+          </li>
+        </ul>
+        <div v-else class="empty-hint">暂无热门搜索数据</div>
+      </div>
+    </template>
+
+    <!-- ====== 搜索筛选（交互 UI）====== -->
+    <template v-else-if="section === 'filters'">
+      <div class="card filter-card">
+        <div class="panel-head">
+          <span class="panel-title">搜索筛选</span>
+          <Icon name="filter" :size="14" class="info-hint" />
+        </div>
+        <p class="filter-desc">配置检索范围与来源类型，提交搜索时生效（后端筛选能力建设中）。</p>
+        <div class="filter-group">
+          <div class="filter-label">来源类型</div>
+          <div class="filter-toggles">
+            <button
+              v-for="opt in sourceOptions"
+              :key="opt"
+              class="filter-toggle"
+              :class="{ on: sourceSel.has(opt) }"
+              @click="toggleSource(opt)"
+            >{{ opt }}</button>
+          </div>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">时间范围</div>
+          <div class="filter-toggles">
+            <button class="filter-toggle on">不限</button>
+            <button class="filter-toggle">近 7 天</button>
+            <button class="filter-toggle">近 30 天</button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ====== 搜索历史 / 默认：搜索即问答 ====== -->
+    <template v-else>
     <div class="search-bar-row card">
       <div class="search-input-wrap">
         <Icon name="search" :size="17" class="sb-icon" />
@@ -197,6 +269,7 @@ function clearSearch() {
         </button>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
@@ -437,4 +510,55 @@ function clearSearch() {
   transition: all var(--dur-fast);
 }
 .btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* 热门搜索榜 */
+.popular-card { padding: 20px; }
+.popular-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.popular-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  transition: background var(--dur-fast);
+}
+.popular-list li:hover { background: var(--bg-hover); }
+.rank {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg-subtle);
+  color: var(--text-tertiary);
+}
+.rank.rk-1 { background: var(--brand); color: #fff; }
+.rank.rk-2 { background: var(--brand-soft); color: var(--brand); }
+.rank.rk-3 { background: var(--warning-soft); color: var(--warning); }
+.q { flex: 1; font-size: 13.5px; color: var(--text-primary); }
+.cnt { font-size: 12px; font-weight: 600; color: var(--brand); background: var(--brand-soft); padding: 2px 9px; border-radius: var(--radius-pill); }
+
+/* 搜索筛选 */
+.filter-card { padding: 20px; max-width: 640px; }
+.filter-desc { margin: 0 0 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.filter-group { margin-bottom: 18px; }
+.filter-label { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 10px; }
+.filter-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
+.filter-toggle {
+  padding: 7px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--dur-fast);
+}
+.filter-toggle:hover { border-color: var(--brand); color: var(--brand); }
+.filter-toggle.on { background: var(--brand); color: #fff; border-color: var(--brand); }
 </style>

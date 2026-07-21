@@ -2,8 +2,7 @@
 // 知识图谱 — 接真实 /api/graph（kg_node / kg_edge）。
 // 用客户端力导向布局渲染实体关系图，支持拖拽 / 缩放 / 平移 / 悬浮高亮 / 点击查看。
 // 右侧统计面板全部取自接口真实数据（节点/边/库数、类型分布、按度数 Top、最近新增）。
-defineProps<{ activeTab?: number }>()
-
+// section 由路由决定（global/nodes/relations/stats）。
 import { ref, computed, onMounted, nextTick } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import { useToastStore } from '@/stores/toast'
@@ -13,6 +12,26 @@ import type { GraphData, GraphNode, GraphEdge } from '@/types/api'
 
 const toast = useToastStore()
 const knowledge = useKnowledgeStore()
+
+const props = defineProps<{ section?: string }>()
+const section = computed(() => props.section ?? 'global')
+
+// 关系检索（relations 分区）
+const relTerm = ref('')
+function nodeLabel(id: string): string {
+  return graph.value?.nodes.find((n) => n.id === id)?.label || id
+}
+const filteredEdges = computed(() => {
+  const t = relTerm.value.trim().toLowerCase()
+  const edges = graph.value?.edges || []
+  if (!t) return edges
+  return edges.filter(
+    (e) =>
+      e.relation.toLowerCase().includes(t) ||
+      nodeLabel(e.source).toLowerCase().includes(t) ||
+      nodeLabel(e.target).toLowerCase().includes(t),
+  )
+})
 
 const graph = ref<GraphData | null>(null)
 const loading = ref(false)
@@ -297,6 +316,8 @@ onMounted(async () => {
   <div class="graph-page">
     <h2 class="page-title">知识图谱</h2>
 
+    <!-- ====== 全局图谱 ====== -->
+    <template v-if="section === 'global'">
     <!-- ====== 工具栏 ====== -->
     <div class="graph-toolbar card">
       <div class="toolbar-left">
@@ -503,6 +524,118 @@ onMounted(async () => {
         </div>
       </aside>
     </div>
+    </template>
+
+    <!-- ====== 节点管理 ====== -->
+    <template v-else-if="section === 'nodes'">
+      <div class="card node-card">
+        <div class="panel-head">
+          <span class="panel-title">实体节点（{{ graph?.nodes.length || 0 }}）</span>
+          <Icon name="node" :size="14" class="info-hint" />
+        </div>
+        <div class="node-scroll">
+          <table class="node-table">
+            <thead>
+              <tr><th>实体</th><th>类型</th><th>知识库</th><th>度数</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="n in graph?.nodes" :key="n.id" @click="selectedId = n.id">
+                <td class="col-name">{{ n.label }}</td>
+                <td>{{ n.type || '—' }}</td>
+                <td>{{ kbName(n.kbId) }}</td>
+                <td>{{ degree[n.id] || 0 }}</td>
+              </tr>
+              <tr v-if="!graph || !graph.nodes.length">
+                <td colspan="4" class="empty-hint">暂无实体节点</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
+
+    <!-- ====== 关系检索 ====== -->
+    <template v-else-if="section === 'relations'">
+      <div class="card rel-card">
+        <div class="panel-head">
+          <span class="panel-title">关系检索</span>
+          <Icon name="link" :size="14" class="info-hint" />
+        </div>
+        <div class="g-search" style="margin-bottom: 14px">
+          <input v-model="relTerm" type="text" placeholder="搜索关系名称 / 实体…" class="g-input" />
+          <Icon name="search" :size="15" class="g-search-icon" />
+        </div>
+        <div class="rel-list">
+          <div v-for="(e, i) in filteredEdges" :key="i" class="rel-item">
+            <span class="rel-src">{{ nodeLabel(e.source) }}</span>
+            <span class="rel-arrow">{{ e.relation }}</span>
+            <span class="rel-tgt">{{ nodeLabel(e.target) }}</span>
+          </div>
+          <div v-if="!filteredEdges.length" class="empty-hint">暂无匹配的关系</div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ====== 图谱统计 ====== -->
+    <template v-else>
+      <div class="stats-page">
+        <div class="stat-grid wide">
+          <div class="stat-cell">
+            <div class="sc-icon-wrap" style="background:#3B82F614"><Icon name="graph" :size="18" style="color:#3B82F6" /></div>
+            <div class="sc-info"><div class="sc-label">实体节点</div><div class="sc-value" style="color:#3B82F6">{{ stats?.nodeCount ?? 0 }}</div></div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-icon-wrap" style="background:#10B98114"><Icon name="link" :size="18" style="color:#10B981" /></div>
+            <div class="sc-info"><div class="sc-label">关系边</div><div class="sc-value" style="color:#10B981">{{ stats?.edgeCount ?? 0 }}</div></div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-icon-wrap" style="background:#8B5CF614"><Icon name="folder" :size="18" style="color:#8B5CF6" /></div>
+            <div class="sc-info"><div class="sc-label">覆盖知识库</div><div class="sc-value" style="color:#8B5CF6">{{ stats?.kbCount ?? 0 }}</div></div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-icon-wrap" style="background:#F59E0B14"><Icon name="tag" :size="18" style="color:#F59E0B" /></div>
+            <div class="sc-info"><div class="sc-label">实体类型</div><div class="sc-value" style="color:#F59E0B">{{ Object.keys(stats?.typeCounts || {}).length }}</div></div>
+          </div>
+        </div>
+
+        <div class="card stat-block">
+          <div class="section-title">实体类型分布</div>
+          <div class="type-bars">
+            <div v-for="(t, i) in typeBars" :key="i" class="type-bar">
+              <span class="tb-label">{{ t.label }}</span>
+              <span class="tb-track"><i class="tb-fill" :style="{ width: t.pct + '%' }"></i></span>
+              <span class="tb-count">{{ t.count }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card stat-block">
+            <div class="section-title">高关联实体 Top 6</div>
+            <div class="hot-list">
+              <div v-for="(item, i) in topNodes" :key="item.node.id" class="hot-item" @click="selectedId = item.node.id">
+                <span class="hot-rank" :class="{ top3: i < 3 }">{{ i + 1 }}</span>
+                <span class="hot-dot" :style="{ background: nodeColor(item.node.kbId) }"></span>
+                <span class="hot-name">{{ item.node.label }}</span>
+                <span class="hot-count">度数 <strong>{{ item.deg }}</strong></span>
+              </div>
+            </div>
+          </div>
+          <div class="card stat-block">
+            <div class="section-title">最近新增的实体</div>
+            <div class="recent-list">
+              <div v-for="n in recentNodes" :key="n.id" class="recent-item" @click="selectedId = n.id">
+                <span class="recent-icon" :style="{ background: nodeColor(n.kbId) + '18', color: nodeColor(n.kbId) }">
+                  <Icon name="graph" :size="13" />
+                </span>
+                <span class="recent-name">{{ n.label }}</span>
+                <span class="recent-time">{{ (n.createdAt || '').slice(5, 10) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -634,4 +767,45 @@ onMounted(async () => {
 .canvas-state .dot:nth-child(2) { animation-delay: 0.2s; }
 .canvas-state .dot:nth-child(3) { animation-delay: 0.4s; }
 @keyframes blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+
+/* ---- 节点管理 ---- */
+.node-card { padding: 16px; }
+.node-scroll { overflow-x: auto; }
+.node-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.node-table th {
+  text-align: left; padding: 10px 14px; background: var(--bg-subtle);
+  color: var(--text-secondary); font-weight: 600; font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.node-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
+.node-table tr:last-child td { border-bottom: none; }
+.node-table tbody tr { cursor: pointer; transition: background var(--dur-fast); }
+.node-table tbody tr:hover { background: var(--bg-hover); }
+.col-name { font-weight: 600; }
+.empty-hint { padding: 24px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+
+/* ---- 关系检索 ---- */
+.rel-card { padding: 16px; max-width: 760px; }
+.rel-list { display: flex; flex-direction: column; gap: 8px; }
+.rel-item {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 13px;
+}
+.rel-src { font-weight: 600; color: var(--text-primary); }
+.rel-arrow {
+  padding: 2px 10px; border-radius: var(--radius-pill);
+  background: var(--brand-soft); color: var(--brand); font-size: 12px; font-weight: 600;
+}
+.rel-tgt { color: var(--text-secondary); }
+
+/* ---- 图谱统计 ---- */
+.stats-page { display: flex; flex-direction: column; gap: 14px; }
+.stat-grid.wide { grid-template-columns: repeat(4, 1fr); }
+.stat-block { padding: 16px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+@media (max-width: 900px) {
+  .stat-grid.wide { grid-template-columns: 1fr 1fr; }
+  .grid-2 { grid-template-columns: 1fr; }
+}
 </style>

@@ -10,9 +10,13 @@ import { computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import Icon from '@/components/ui/Icon.vue'
+import ComingSoon from '@/components/ui/ComingSoon.vue'
 
 const kb = useKnowledgeStore()
 const { bases, health, trending } = storeToRefs(kb)
+
+const props = defineProps<{ section?: string }>()
+const section = computed(() => props.section ?? 'overview')
 
 onMounted(() => {
   if (!kb.loaded) kb.load()
@@ -70,6 +74,8 @@ const healthRows = computed(() =>
 
 <template>
   <div class="dashboard">
+    <!-- ====== 首页大盘：数据总览 ====== -->
+    <template v-if="section === 'overview'">
     <!-- ====== Row 1: 指标卡 ====== -->
     <div class="stats-row">
       <div v-for="s in stats" :key="s.label" class="stat-card card" :class="'tone-' + s.tone">
@@ -171,6 +177,76 @@ const healthRows = computed(() =>
         </tbody>
       </table>
     </div>
+    </template>
+
+    <!-- ====== 首页大盘：文档统计 ====== -->
+    <template v-else-if="section === 'docs'">
+      <h2 class="page-title">文档统计</h2>
+      <div class="stats-row">
+        <div class="stat-card card tone-blue">
+          <div class="stat-icon-wrap"><Icon name="doc" :size="22" /></div>
+          <div class="stat-info"><div class="stat-label">文档总数</div><div class="stat-value">{{ totalDocs.toLocaleString() }}</div></div>
+        </div>
+        <div class="stat-card card tone-green">
+          <div class="stat-icon-wrap"><Icon name="check" :size="22" /></div>
+          <div class="stat-info"><div class="stat-label">已审核</div><div class="stat-value">{{ (totalDocs - pendingDocs).toLocaleString() }}</div></div>
+        </div>
+        <div class="stat-card card tone-orange">
+          <div class="stat-icon-wrap"><Icon name="alert" :size="22" /></div>
+          <div class="stat-info"><div class="stat-label">待复核</div><div class="stat-value">{{ pendingDocs }}</div></div>
+        </div>
+        <div class="stat-card card tone-purple">
+          <div class="stat-icon-wrap"><Icon name="folder" :size="22" /></div>
+          <div class="stat-info"><div class="stat-label">知识库数</div><div class="stat-value">{{ bases.length }}</div></div>
+        </div>
+      </div>
+      <div class="ops-section card">
+        <div class="panel-head"><span class="panel-title">各知识库文档分布</span></div>
+        <table class="ops-table">
+          <thead><tr><th>知识库</th><th>文档数</th><th>审核率</th><th>可检索率</th><th>健康分</th></tr></thead>
+          <tbody>
+            <tr v-for="row in healthRows" :key="row.name">
+              <td class="col-name">{{ row.name }}</td>
+              <td>{{ row.docCount }}</td>
+              <td>{{ row.reviewRate }}%</td>
+              <td>{{ row.retrievableRate }}%</td>
+              <td><span class="score-pill" :class="row.healthScore >= 70 ? 'ok' : 'bad'">{{ row.healthScore }}</span></td>
+            </tr>
+            <tr v-if="!healthRows.length"><td colspan="5" class="empty-hint">暂无数据</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <!-- ====== 首页大盘：热门内容 ====== -->
+    <template v-else-if="section === 'popular'">
+      <h2 class="page-title">热门内容</h2>
+      <div class="chart-panel card">
+        <div class="panel-head"><span class="panel-title">热门搜索榜</span><Icon name="fire" :size="14" class="info-hint" /></div>
+        <div v-if="topTrending.length" class="trend-list">
+          <div v-for="(t, i) in topTrending" :key="t.question" class="trend-item">
+            <span class="trend-rank" :class="'rk-' + Math.min(i + 1, 3)">{{ i + 1 }}</span>
+            <span class="trend-q">{{ t.question }}</span>
+            <span class="trend-count">{{ t.count }}</span>
+          </div>
+        </div>
+        <div v-else class="empty-hint">暂无热门搜索数据</div>
+      </div>
+    </template>
+
+    <!-- ====== 其余分区：后端数据待接入 ====== -->
+    <template v-else-if="section === 'analytics'">
+      <h2 class="page-title">访问分析</h2>
+      <ComingSoon icon="chart" title="访问分析" desc="访问趋势、会话量、平均停留时长等分析指标的后端采集接口尚未接入。" />
+    </template>
+    <template v-else-if="section === 'users'">
+      <h2 class="page-title">用户统计</h2>
+      <ComingSoon icon="users" title="用户统计" desc="用户活跃度、角色分布、新增趋势等统计的后端接口尚未接入。" />
+    </template>
+    <template v-else>
+      <h2 class="page-title">系统公告</h2>
+      <ComingSoon icon="bell" title="系统公告" desc="系统公告的发布与推送后端接口尚未接入。" note="公告中心页面骨架已就绪，接入后此处展示公告列表。" />
+    </template>
   </div>
 </template>
 

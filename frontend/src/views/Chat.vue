@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // AI 智能问答 — 按 640(5).png 截图 1:1 还原，接真实 SSE 流式问答。
-defineProps<{ activeTab?: number }>()
-
+// section 由路由决定（new/history/records/model）。
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
 import { useToastStore } from '@/stores/toast'
 import {
@@ -24,6 +24,28 @@ import type {
 } from '@/types/api'
 
 const toast = useToastStore()
+const router = useRouter()
+
+const props = defineProps<{ section?: string }>()
+const section = computed(() => props.section ?? 'new')
+
+// 模型配置（本地持久化，后端暂未提供全局模型设置接口）
+const MODEL_KEY = 'knoa.chat.model'
+const modelName = ref(localStorage.getItem(MODEL_KEY + '.name') || 'agnes-2.0-flash')
+const temperature = ref(Number(localStorage.getItem(MODEL_KEY + '.temp')) || 0.3)
+const maxTokens = ref(Number(localStorage.getItem(MODEL_KEY + '.max')) || 2000)
+function saveModel() {
+  localStorage.setItem(MODEL_KEY + '.name', modelName.value)
+  localStorage.setItem(MODEL_KEY + '.temp', String(temperature.value))
+  localStorage.setItem(MODEL_KEY + '.max', String(maxTokens.value))
+  toast.success('模型配置已保存')
+}
+
+// 从「问答记录」打开某会话：载入消息并切回对话视图
+function openSession(id: string) {
+  selectSession(id)
+  router.push('/chat/new')
+}
 
 const sessions = ref<ChatSession[]>([])
 const activeId = ref<string | null>(null)
@@ -259,19 +281,25 @@ function pick(s: string) {
   inputText.value = s
 }
 
-onMounted(loadSessions)
+onMounted(async () => {
+  await loadSessions()
+  // 历史会话分区：默认打开最新一条会话做只读浏览
+  if (section.value === 'history' && sessions.value.length && !activeId.value) {
+    selectSession(sessions.value[0].id)
+  }
+})
 watch(messages, scrollToBottom, { deep: false })
 </script>
 
 <template>
-  <div class="chat-page">
+  <div class="chat-page" v-if="section === 'new' || section === 'history'">
     <!-- ====== 左栏：会话列表 ====== -->
     <aside class="chat-sidebar">
       <div class="sidebar-header">
         <span class="sidebar-title">会话列表</span>
         <Icon name="list" :size="16" class="sidebar-icon-btn" />
       </div>
-      <button class="btn btn-new-chat" @click="newChat">
+      <button v-if="section === 'new'" class="btn btn-new-chat" @click="newChat">
         <Icon name="plus" :size="14" /> 新建对话
       </button>
       <div class="conv-list">
@@ -390,8 +418,8 @@ watch(messages, scrollToBottom, { deep: false })
         <button v-for="(s, i) in suggested" :key="i" class="chip" @click="pick(s)">{{ s }}</button>
       </div>
 
-      <!-- 输入区 -->
-      <div class="input-area">
+      <!-- 输入区（仅对话视图显示） -->
+      <div class="input-area" v-if="section === 'new'">
         <div v-if="attached.length" class="attach-preview">
           <div v-for="(a, i) in attached" :key="i" class="attach-preview-item">
             <img :src="`data:${a.mimeType};base64,${a.dataB64}`" class="attach-thumb" />
@@ -425,6 +453,66 @@ watch(messages, scrollToBottom, { deep: false })
       </div>
     </main>
   </div>
+
+    <!-- ====== 问答记录 ====== -->
+    <template v-else-if="section === 'records'">
+      <div class="secondary-page">
+        <h2 class="page-title">问答记录</h2>
+        <div class="card records-card">
+          <table class="records-table">
+            <thead>
+              <tr><th>会话</th><th>问答数</th><th>最近更新</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="s in sessions" :key="s.id">
+                <td class="col-name">{{ s.title || '（新会话）' }}</td>
+                <td>{{ s.msgCount }}</td>
+                <td class="col-time">{{ s.updatedAt ? s.updatedAt.slice(0, 10) : '—' }}</td>
+                <td><button class="link-btn" @click="openSession(s.id)">查看对话</button></td>
+              </tr>
+              <tr v-if="!sessions.length">
+                <td colspan="4" class="empty-hint">暂无会话记录</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
+
+    <!-- ====== 模型配置 ====== -->
+    <template v-else>
+      <div class="secondary-page">
+        <h2 class="page-title">模型配置</h2>
+        <div class="card model-card">
+          <div class="panel-head"><span class="panel-title">问答模型</span></div>
+          <p class="model-note">当前后端统一使用 agnes 推理模型；以下配置为本地偏好，便于后续接入多模型路由。</p>
+          <div class="model-field">
+            <label>模型</label>
+            <select v-model="modelName" class="select">
+              <option value="agnes-2.0-flash">agnes-2.0-flash（快）</option>
+              <option value="agnes-2.0-pro">agnes-2.0-pro（强）</option>
+              <option value="gpt-4o">gpt-4o</option>
+            </select>
+          </div>
+          <div class="model-field">
+            <label>温度（创造性）</label>
+            <div class="field-row">
+              <input type="range" min="0" max="1" step="0.1" v-model.number="temperature" class="range" />
+              <span class="field-val">{{ temperature.toFixed(1) }}</span>
+            </div>
+          </div>
+          <div class="model-field">
+            <label>最大生成长度</label>
+            <select v-model.number="maxTokens" class="select">
+              <option :value="1000">1000</option>
+              <option :value="2000">2000</option>
+              <option :value="4000">4000</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" @click="saveModel">保存配置</button>
+        </div>
+      </div>
+    </template>
 </template>
 
 <style scoped>
@@ -833,4 +921,64 @@ watch(messages, scrollToBottom, { deep: false })
 @media (max-width: 720px) {
   .chat-sidebar { width: 200px; }
 }
+
+/* ---- 二级页（问答记录 / 模型配置）---- */
+.secondary-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.page-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+.records-card { padding: 0; overflow: hidden; }
+.records-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.records-table th {
+  text-align: left;
+  padding: 12px 16px;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.records-table td { padding: 12px 16px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
+.records-table tr:last-child td { border-bottom: none; }
+.col-name { font-weight: 600; }
+.col-time { color: var(--text-tertiary); white-space: nowrap; }
+.link-btn {
+  border: none;
+  background: transparent;
+  color: var(--brand);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+}
+.link-btn:hover { text-decoration: underline; }
+.empty-hint { padding: 24px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+
+.model-card { padding: 20px; max-width: 560px; }
+.model-note { margin: -6px 0 18px; font-size: 12.5px; color: var(--text-tertiary); line-height: 1.6; }
+.model-field { margin-bottom: 18px; }
+.model-field > label { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+.field-row { display: flex; align-items: center; gap: 12px; }
+.field-val { font-size: 13px; font-weight: 600; color: var(--brand); min-width: 28px; }
+.range { flex: 1; accent-color: var(--brand); }
+.select {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 </style>

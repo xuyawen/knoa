@@ -12,6 +12,7 @@ import {
   Presentation, FileType, Filter, RefreshCw, Eye, LayoutGrid, BarChart3, Users,
   Flame, Clock, History, List, Globe, UsersRound, CircleDot, Link2, PanelLeftClose,
   Maximize2, Paperclip, Send, Copy, ArrowDownToLine, AppWindow, Star, Tag, Calendar, Sparkles,
+  Info, Heart,
 } from 'lucide-vue-next'
 
 const props = defineProps<{ name: string; size?: number | string }>()
@@ -29,6 +30,7 @@ const ICONS: Record<string, Component> = {
   node: CircleDot, link: Link2, collapse: PanelLeftClose, expand: Maximize2, attach: Paperclip,
   send: Send, copy: Copy, export: ArrowDownToLine, view: AppWindow, gridview: LayoutGrid,
   listview: List, star: Star, tag: Tag, calendar: Calendar, sparkles: Sparkles,
+  info: Info, heart: Heart, warning: AlertTriangle,
 }
 
 const comp = computed(() => ICONS[props.name] ?? AlertTriangle)

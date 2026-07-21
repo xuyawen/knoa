@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // 文档管理 — 按 640(3).png 截图 1:1 还原，接真实文档生命周期。
-defineProps<{ activeTab?: number }>()
-
+// section 由路由决定（mine/public/department/archive）。
 import { ref, computed, onMounted, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
@@ -20,6 +19,16 @@ import type { DocumentItem, DocumentDetail, AIReview } from '@/types/api'
 
 const knowledge = useKnowledgeStore()
 const toast = useToastStore()
+
+const props = defineProps<{ section?: string }>()
+const section = computed(() => props.section ?? 'mine')
+
+// 归档分类：后端未区分 owner/公开/部门维度，这里按状态映射「归档」；
+// 其余分类（我的/公共/部门）暂共享同一文档列表，并用横幅说明后端待接入。
+const scopedDocs = computed(() => {
+  if (section.value === 'archive') return docs.value.filter((d) => d.status === '已拒绝')
+  return docs.value
+})
 
 const selectedKb = ref<string>('')
 const docs = ref<DocumentItem[]>([])
@@ -77,8 +86,9 @@ watch(selectedKb, async () => {
 /* ---------- 过滤 + 分页 ---------- */
 const filteredDocs = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return docs.value
-  return docs.value.filter((d) => d.title.toLowerCase().includes(q))
+  const base = scopedDocs.value
+  if (!q) return base
+  return base.filter((d) => d.title.toLowerCase().includes(q))
 })
 
 const totalPages = computed(() =>
@@ -280,6 +290,16 @@ function goPage(p: number) {
 <template>
   <div class="docs-page">
     <h2 class="page-title">文档管理</h2>
+
+    <!-- 分区说明横幅 -->
+    <div v-if="section === 'public' || section === 'department'" class="scope-banner">
+      <Icon name="info" :size="14" />
+      <span>{{ section === 'public' ? '公共文档' : '部门文档' }}：后端暂未区分文档的公开 / 部门范围，当前展示全部文档。接口接入后将按范围筛选。</span>
+    </div>
+    <div v-else-if="section === 'archive'" class="scope-banner warn">
+      <Icon name="archive" :size="14" />
+      <span>文档归档：展示状态为「已拒绝」的文档。</span>
+    </div>
 
     <!-- ====== 工具栏 ====== -->
     <div class="toolbar card">
@@ -499,6 +519,22 @@ function goPage(p: number) {
   color: var(--text-primary);
   margin: 0;
 }
+
+/* 分区说明横幅 */
+.scope-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--brand-soft);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.scope-banner :deep(svg) { color: var(--brand); flex-shrink: 0; }
+.scope-banner.warn { background: var(--warning-soft); }
+.scope-banner.warn :deep(svg) { color: var(--warning); }
 
 /* ---- 工具栏 ---- */
 .toolbar {

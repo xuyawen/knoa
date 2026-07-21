@@ -21,40 +21,45 @@ const topNavItems = [
   { to: '/permission', label: '系统管理' },
 ]
 
-/* ---------- 左侧子菜单（按路由切换）---------- */
-interface SubItem { label: string; icon?: string; active?: boolean }
+/* ---------- 左侧子菜单（每项都是真实路由）---------- */
+interface SubItem {
+  label: string
+  icon?: string
+  to: string                 // 点击跳转的路由
+  activeNames: string[]      // 匹配哪些路由名时高亮（parent 与 detail 可能多个）
+}
 
 const subMenus: Record<string, SubItem[]> = {
   dashboard: [
-    { label: '数据总览', icon: 'grid', active: true },
-    { label: '访问分析', icon: 'chart' },
-    { label: '文档统计', icon: 'doc' },
-    { label: '用户统计', icon: 'users' },
-    { label: '热门内容', icon: 'fire' },
-    { label: '系统公告', icon: 'bell' },
+    { label: '数据总览', icon: 'grid', to: '/dashboard', activeNames: ['dashboard'] },
+    { label: '访问分析', icon: 'chart', to: '/dashboard/analytics', activeNames: ['dash-analytics'] },
+    { label: '文档统计', icon: 'doc', to: '/dashboard/docs', activeNames: ['dash-docs'] },
+    { label: '用户统计', icon: 'users', to: '/dashboard/users', activeNames: ['dash-users'] },
+    { label: '热门内容', icon: 'fire', to: '/dashboard/popular', activeNames: ['dash-popular'] },
+    { label: '系统公告', icon: 'bell', to: '/dashboard/announcements', activeNames: ['dash-announcements'] },
   ],
   documents: [
-    { label: '我的文档', icon: 'folder', active: true },
-    { label: '公共文档', icon: 'globe' },
-    { label: '部门文档', icon: 'team' },
-    { label: '文档归档', icon: 'archive' },
+    { label: '我的文档', icon: 'folder', to: '/documents', activeNames: ['documents'] },
+    { label: '公共文档', icon: 'globe', to: '/documents/public', activeNames: ['docs-public'] },
+    { label: '部门文档', icon: 'team', to: '/documents/department', activeNames: ['docs-department'] },
+    { label: '文档归档', icon: 'archive', to: '/documents/archive', activeNames: ['docs-archive'] },
   ],
   search: [
-    { label: '搜索历史', icon: 'clock', active: true },
-    { label: '热门搜索', icon: 'fire' },
-    { label: '搜索筛选', icon: 'filter' },
+    { label: '搜索历史', icon: 'clock', to: '/search', activeNames: ['search'] },
+    { label: '热门搜索', icon: 'fire', to: '/search/popular', activeNames: ['search-popular'] },
+    { label: '搜索筛选', icon: 'filter', to: '/search/filters', activeNames: ['search-filters'] },
   ],
   chat: [
-    { label: '新建对话', icon: 'plus', active: true },
-    { label: '历史会话', icon: 'history' },
-    { label: '问答记录', icon: 'list' },
-    { label: '模型配置', icon: 'settings' },
+    { label: '新建对话', icon: 'plus', to: '/chat/new', activeNames: ['chat', 'chat-new'] },
+    { label: '历史会话', icon: 'history', to: '/chat/history', activeNames: ['chat-history'] },
+    { label: '问答记录', icon: 'list', to: '/chat/records', activeNames: ['chat-records'] },
+    { label: '模型配置', icon: 'settings', to: '/chat/model', activeNames: ['chat-model'] },
   ],
   graph: [
-    { label: '全局图谱', icon: 'graph', active: true },
-    { label: '节点管理', icon: 'node' },
-    { label: '关系检索', icon: 'link' },
-    { label: '图谱统计', icon: 'chart' },
+    { label: '全局图谱', icon: 'graph', to: '/graph/global', activeNames: ['graph', 'graph-global'] },
+    { label: '节点管理', icon: 'node', to: '/graph/nodes', activeNames: ['graph-nodes'] },
+    { label: '关系检索', icon: 'link', to: '/graph/relations', activeNames: ['graph-relations'] },
+    { label: '图谱统计', icon: 'chart', to: '/graph/stats', activeNames: ['graph-stats'] },
   ],
 }
 
@@ -63,13 +68,9 @@ const currentSubItems = computed<SubItem[]>(() => {
   return subMenus[p] ?? []
 })
 
-const activeSub = ref(0)
-// 当路由切换时，重置到第一个 active 项
-import { watch } from 'vue'
-watch(() => route.path, () => {
-  const idx = currentSubItems.value.findIndex(i => i.active)
-  activeSub.value = idx >= 0 ? idx : 0
-}, { immediate: true })
+function isSubActive(item: SubItem): boolean {
+  return item.activeNames.includes(route.name as string)
+}
 
 /* ---------- 用户下拉 ---------- */
 const userMenuOpen = ref(false)
@@ -151,16 +152,16 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
       <aside v-if="currentSubItems.length" class="sub-sidebar">
         <div class="sub-sidebar-header">{{ (route.meta.title as string) || '' }}</div>
         <div class="sub-nav">
-          <button
-            v-for="(item, i) in currentSubItems"
+          <router-link
+            v-for="item in currentSubItems"
             :key="item.label"
+            :to="item.to"
             class="sub-item"
-            :class="{ active: activeSub === i }"
-            @click="activeSub = i"
+            :class="{ active: isSubActive(item) }"
           >
             <Icon v-if="item.icon" :name="item.icon" :size="16" />
             <span>{{ item.label }}</span>
-          </button>
+          </router-link>
         </div>
         <div class="sub-footer">
           <button class="sub-collapse">
@@ -171,9 +172,7 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
 
       <!-- 主内容区 -->
       <main class="main-content">
-        <router-view v-slot="{ Component }">
-          <component :is="Component" :active-tab="activeSub" />
-        </router-view>
+        <router-view />
       </main>
     </div>
   </div>
