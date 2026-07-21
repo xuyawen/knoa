@@ -347,6 +347,7 @@ const roleMatrix = [
   gap: 16px;
   align-items: start;
 }
+.perm-users { padding: 20px 22px; }
 .perm-h { margin: 0 0 14px; font-size: 15px; font-weight: 600; color: var(--text-primary); }
 .perm-h-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .perm-h-row .perm-h { margin: 0; }
