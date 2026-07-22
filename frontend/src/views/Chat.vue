@@ -126,6 +126,17 @@ function kindOf(file: File): 'image' | 'audio' | 'video' | null {
   return null
 }
 
+/** 复制 AI 回答到剪贴板。 */
+async function copyAnswer(m: ChatMessage) {
+  if (!m.content) return
+  try {
+    await navigator.clipboard.writeText(m.content)
+    toast.success('已复制回答')
+  } catch {
+    toast.error('复制失败，请手动选择')
+  }
+}
+
 function toChatMessage(m: SessionMessage): ChatMessage {
   return {
     id: crypto.randomUUID(),
@@ -329,173 +340,214 @@ watch(messages, scrollToBottom, { deep: false })
   <div class="chat-page" v-if="section === 'new' || section === 'history'">
     <!-- ====== 左栏：会话列表 ====== -->
     <aside class="chat-sidebar">
-      <div class="sidebar-header">
-        <span class="sidebar-title">会话列表</span>
-        <Icon name="list" :size="16" class="sidebar-icon-btn" />
+      <div class="sidebar-head">
+        <div class="sidebar-title">
+          <span>对话</span>
+          <span class="sidebar-count">{{ sessions.length }}</span>
+        </div>
+        <button v-if="section === 'new'" class="icon-btn sidebar-new" title="新建对话" @click="newChat">
+          <Icon name="pen-line" :size="17" />
+        </button>
       </div>
-      <button v-if="section === 'new'" class="btn btn-new-chat" @click="newChat">
-        <Icon name="plus" :size="14" /> 新建对话
-      </button>
+
       <div class="conv-list">
-        <div
+        <button
           v-for="s in sessions"
           :key="s.id"
           class="conv-item"
           :class="{ active: s.id === activeId }"
           @click="selectSession(s.id)"
         >
-          <div class="conv-q">{{ s.title || '（新会话）' }}</div>
-          <div class="conv-meta">
-            <span class="conv-time">{{ s.updatedAt ? s.updatedAt.slice(5, 10) : '' }}</span>
-            <span class="conv-count">{{ s.msgCount }} 条</span>
-          </div>
-          <button class="conv-del" title="删除会话" @click.stop="onDeleteSession(s.id)">
-            <Icon name="trash" :size="13" />
-          </button>
-        </div>
+          <span class="conv-dot" />
+          <span class="conv-body">
+            <span class="conv-q">{{ s.title || '（新会话）' }}</span>
+            <span class="conv-meta">
+              <span class="conv-time">{{ s.updatedAt ? s.updatedAt.slice(5, 10) : '' }}</span>
+              <span class="conv-sep">·</span>
+              <span>{{ s.msgCount }} 条</span>
+            </span>
+          </span>
+          <span class="conv-del" title="删除会话" @click.stop="onDeleteSession(s.id)">
+            <Icon name="trash" :size="14" />
+          </span>
+        </button>
+        <p v-if="!sessions.length" class="conv-empty">还没有对话，点击右上角开始。</p>
       </div>
     </aside>
 
     <!-- ====== 中栏：对话区 ====== -->
     <main class="chat-main">
       <!-- 头部 -->
-      <div class="chat-header">
-        <h3 class="chat-question">{{ firstQuestion || 'AI 智能问答' }}</h3>
-        <button class="btn-clear-chat" @click="messages = []">
-          <Icon name="close" :size="13" /> 清空对话
+      <header class="chat-header">
+        <div class="chat-head-left">
+          <div class="chat-eyebrow">AI 智能问答</div>
+          <h1 class="chat-question">{{ firstQuestion || '有什么可以帮你？' }}</h1>
+        </div>
+          <button class="ghost-btn chat-clear" @click="messages = []">
+          <Icon name="trash" :size="14" />
+          <span>清空对话</span>
         </button>
-      </div>
+      </header>
 
       <!-- 消息区 -->
       <div class="messages-area" ref="scrollRef">
-        <!-- 空状态 -->
-        <div v-if="!messages.length" class="empty-state">
-          <div class="empty-avatar"><Icon name="chat" :size="26" /></div>
-          <p class="empty-title">有什么可以帮你的？</p>
-          <p class="empty-sub">基于企业知识库为你检索作答，可附图片进行多模态提问。</p>
+        <!-- 空状态（hero） -->
+        <div v-if="!messages.length" class="empty-hero">
+          <div class="empty-orb">
+            <Icon name="sparkles" :size="28" />
+          </div>
+          <h2 class="empty-title">向企业知识库提问</h2>
+          <p class="empty-sub">基于内部文档检索作答，可附图片进行多模态提问。回答均标注引用来源。</p>
+          <div class="empty-suggest">
+            <button v-for="(s, i) in suggested" :key="i" class="empty-card" @click="pick(s)">
+              <Icon name="arrow-up-right" :size="15" class="empty-card-icon" />
+              <span>{{ s }}</span>
+            </button>
+          </div>
         </div>
 
-        <template v-for="m in messages" :key="m.id">
-          <!-- 用户 -->
-          <div v-if="m.role === 'user'" class="msg-row user-msg">
-            <div class="msg-bubble user-bubble">
-              <div class="attach-thumbs" v-if="m.attachments?.length">
-                <template v-for="(a, i) in m.attachments" :key="i">
-                  <img v-if="a.kind === 'image'" :src="attachSrc(a)" class="attach-thumb" />
-                  <audio v-else-if="a.kind === 'audio'" :src="attachSrc(a)" controls class="attach-media" />
-                  <video v-else-if="a.kind === 'video'" :src="attachSrc(a)" controls class="attach-media" />
-                  <span v-else class="attach-badge">{{ a.kind }}</span>
-                </template>
-              </div>
-              {{ m.content }}
-            </div>
+        <article
+          v-for="m in messages"
+          :key="m.id"
+          class="msg-row"
+          :class="m.role === 'user' ? 'user-msg' : 'ai-msg'"
+        >
+          <!-- AI 头像 -->
+          <div v-if="m.role !== 'user'" class="msg-avatar">
+            <Icon name="sparkles" :size="15" />
           </div>
 
-          <!-- AI -->
-          <div v-else class="msg-row ai-msg">
-            <div class="msg-avatar ai-avatar"><Icon name="chat" :size="16" /></div>
-            <div class="msg-bubble">
-              <!-- 思考过程 -->
-              <div v-if="m.thinkingSteps?.length" class="thinking">
-                <button class="thinking-toggle" @click="showThinking = !showThinking">
-                  <Icon name="sparkles" :size="13" />
-                  AI 思考过程（{{ m.thinkingSteps.length }} 步）
-                  <Icon name="chevron-down" :size="11" :class="{ rotated: showThinking }" />
-                </button>
-                <ul v-if="showThinking" class="thinking-list">
-                  <li v-for="t in m.thinkingSteps" :key="t.step">
-                    <span class="think-action">{{ t.action }}</span>
-                    <span class="think-detail">{{ t.detail }}</span>
-                  </li>
-                </ul>
-              </div>
+          <div class="msg-bubble">
+            <!-- 用户附件 -->
+            <div class="attach-thumbs" v-if="m.role === 'user' && m.attachments?.length">
+              <template v-for="(a, i) in m.attachments" :key="i">
+                <img v-if="a.kind === 'image'" :src="attachSrc(a)" class="attach-thumb" />
+                <audio v-else-if="a.kind === 'audio'" :src="attachSrc(a)" controls class="attach-media" />
+                <video v-else-if="a.kind === 'video'" :src="attachSrc(a)" controls class="attach-media" />
+                <span v-else class="attach-badge">{{ a.kind }}</span>
+              </template>
+            </div>
 
-              <!-- 正文 -->
-              <div v-if="m.content" class="answer-body">{{ m.content }}</div>
-              <div v-else-if="streaming" class="answer-loading">
-                <span class="dot" /><span class="dot" /><span class="dot" />
-              </div>
+            <!-- 思考过程 -->
+            <div v-if="m.role !== 'user' && m.thinkingSteps?.length" class="thinking">
+              <button class="thinking-toggle" @click="showThinking = !showThinking">
+                <Icon name="brain-circuit" :size="14" />
+                <span>思考过程</span>
+                <span class="thinking-count">{{ m.thinkingSteps.length }}</span>
+                <Icon name="chevron-down" :size="13" class="thinking-chev" :class="{ open: showThinking }" />
+              </button>
+              <ol v-if="showThinking" class="thinking-list">
+                <li v-for="t in m.thinkingSteps" :key="t.step">
+                  <span class="think-step">{{ t.step }}</span>
+                  <span class="think-action">{{ t.action }}</span>
+                  <span class="think-detail">{{ t.detail }}</span>
+                </li>
+              </ol>
+            </div>
 
-              <!-- 引用文档 -->
-              <div v-if="m.sources?.length" class="refs-section">
-                <div class="refs-label">引用文档（{{ m.sources.length }}）</div>
-                <div class="refs-list">
-                  <div v-for="(s, i) in m.sources" :key="s.id ?? i" class="ref-file-card">
-                    <div class="rfc-icon" :class="`src-${s.sourceType || 'kb'}`">
-                      <Icon :name="s.sourceType === 'web' ? 'globe' : s.sourceType === 'graph' ? 'node' : 'doc'" :size="18" />
+            <!-- 正文 -->
+            <div v-if="m.content" class="answer-body">{{ m.content }}</div>
+            <div v-else-if="streaming" class="answer-loading">
+              <span class="dot" /><span class="dot" /><span class="dot" />
+            </div>
+
+            <!-- 引用文档 -->
+            <div v-if="m.role !== 'user' && m.sources?.length" class="refs">
+              <div class="refs-label">
+                <Icon name="book-marked" :size="14" />
+                <span>引用来源（{{ m.sources.length }}）</span>
+              </div>
+              <div class="refs-grid">
+                <div v-for="(s, i) in m.sources" :key="s.id ?? i" class="ref-card">
+                  <span class="ref-icon" :class="`src-${s.sourceType || 'kb'}`">
+                    <Icon :name="s.sourceType === 'web' ? 'globe' : s.sourceType === 'graph' ? 'graph' : 'doc'" :size="16" />
+                  </span>
+                  <div class="ref-info">
+                    <div class="ref-name">{{ s.title }}</div>
+                    <div class="ref-meta">
+                      <span class="ref-kb">{{ s.kb || '知识库' }}</span>
+                      <span class="ref-conf">{{ s.confidence ? Math.round(s.confidence * 100) + '% 相关' : '相关' }}</span>
                     </div>
-                    <div class="rfc-info">
-                      <div class="rfc-name">{{ s.title }}</div>
-                      <div class="rfc-meta-row">
-                        <span>{{ s.kb || '知识库' }} · {{ s.confidence ? Math.round(s.confidence * 100) + '%' : '相关' }}</span>
-                        <span>{{ s.snippet ? '3页' : '—' }} · {{ new Date().toLocaleDateString('zh-CN') }}</span>
-                      </div>
-                    </div>
+                    <p v-if="s.snippet" class="ref-snippet">{{ s.snippet }}</p>
                   </div>
                 </div>
               </div>
+            </div>
 
-              <!-- 反馈 + 错误 -->
-              <div v-if="errorMsg && !m.content" class="answer-error">{{ errorMsg }}</div>
-              <div v-if="m.messageId && m.content" class="feedback-row">
-                <button
-                  v-if="auth.user?.ttsEnabled"
-                  class="fb-btn"
-                  :class="{ on: playingId === m.id }"
-                  @click="speak(m)"
-                  :title="playingId === m.id ? '播报中…' : '朗读回答'"
-                >
-                  <Icon :name="playingId === m.id ? 'loader' : 'volume'" :size="14" :class="{ spin: playingId === m.id }" />
-                </button>
-                <button class="fb-btn" :class="{ on: m.feedback === 'up' }" @click="onFeedback(m, 'up')" title="有用">
-                  <Icon name="check" :size="14" />
-                </button>
-                <button class="fb-btn" :class="{ on: m.feedback === 'down' }" @click="onFeedback(m, 'down')" title="没用">
-                  <Icon name="close" :size="14" />
-                </button>
-              </div>
+            <!-- 错误 -->
+            <div v-if="m.role !== 'user' && errorMsg && !m.content" class="answer-error">
+              <Icon name="alert" :size="14" />
+              <span>{{ errorMsg }}</span>
+            </div>
+
+            <!-- 反馈 + 操作 -->
+            <div v-if="m.role !== 'user' && m.messageId && m.content" class="msg-actions">
+              <span class="msg-actions-divider" />
+              <button class="act-btn" title="复制回答" @click="copyAnswer(m)">
+                <Icon name="copy" :size="14" />
+              </button>
+              <button
+                v-if="auth.user?.ttsEnabled"
+                class="act-btn"
+                :class="{ on: playingId === m.id }"
+                :title="playingId === m.id ? '播报中…' : '朗读回答'"
+                @click="speak(m)"
+              >
+                <Icon :name="playingId === m.id ? 'loader' : 'volume'" :size="14" :class="{ spin: playingId === m.id }" />
+              </button>
+              <button class="act-btn" :class="{ on: m.feedback === 'up' }" title="有用" @click="onFeedback(m, 'up')">
+                <Icon name="thumbs-up" :size="14" />
+              </button>
+              <button class="act-btn" :class="{ on: m.feedback === 'down' }" title="没用" @click="onFeedback(m, 'down')">
+                <Icon name="thumbs-down" :size="14" />
+              </button>
             </div>
           </div>
-        </template>
+        </article>
       </div>
 
       <!-- 建议追问 -->
-      <div class="suggest-row" v-if="!streaming">
+      <div class="suggest-row" v-if="!streaming && messages.length">
         <span class="suggest-label">你可能还想问</span>
         <button v-for="(s, i) in suggested" :key="i" class="chip" @click="pick(s)">{{ s }}</button>
       </div>
 
       <!-- 输入区（仅对话视图显示） -->
-      <div class="input-area" v-if="section === 'new'">
+      <div class="composer" v-if="section === 'new'">
         <div v-if="attached.length" class="attach-preview">
-          <div v-for="(a, i) in attached" :key="i" class="attach-preview-item">
+          <div v-for="(a, i) in attached" :key="i" class="attach-chip">
             <img v-if="a.kind === 'image'" :src="attachSrc(a)" class="attach-thumb" />
             <audio v-else-if="a.kind === 'audio'" :src="attachSrc(a)" controls class="attach-media" />
             <video v-else-if="a.kind === 'video'" :src="attachSrc(a)" controls class="attach-media" />
-            <button class="attach-remove" @click="removeAttach(i)"><Icon name="close" :size="10" /></button>
+            <span v-else class="attach-badge">{{ a.kind }}</span>
+            <button class="attach-x" @click="removeAttach(i)"><Icon name="close" :size="11" /></button>
           </div>
         </div>
+
         <textarea
           v-model="inputText"
-          placeholder="请输入问题，Shift + Enter 换行"
-          rows="2"
-          class="chat-input"
+          class="composer-input"
+          rows="1"
+          placeholder="输入问题，Shift + Enter 换行，Enter 发送"
           @keydown="onKeydown"
         ></textarea>
-        <div class="input-bar">
-          <div class="input-left">
-            <label class="attach-btn" title="附图片 / 音频 / 视频">
+
+        <div class="composer-bar">
+          <div class="composer-left">
+            <label class="composer-attach" title="附图片 / 音频 / 视频">
               <Icon name="attach" :size="17" />
               <input type="file" accept="image/*,audio/*,video/*" multiple class="file-hidden" @change="onAttach" />
             </label>
-            <span class="char-count">{{ inputText.length }} / 2000</span>
+            <span class="composer-count">{{ inputText.length }} / 2000</span>
           </div>
-          <div class="input-actions">
-            <button v-if="streaming" class="btn btn-ghost send-btn" @click="stop">
-              <Icon name="close" :size="14" /> 停止
+          <div class="composer-right">
+            <button v-if="streaming" class="stop-btn" @click="stop">
+              <Icon name="square" :size="13" />
+              <span>停止</span>
             </button>
-            <button v-else class="btn btn-primary send-btn" :disabled="!inputText.trim()" @click="send">
-              <Icon name="send" :size="15" /> 发送
+            <button v-else class="send-btn" :disabled="!inputText.trim()" @click="send">
+              <span>发送</span>
+              <Icon name="arrow-up" :size="15" />
             </button>
           </div>
         </div>
@@ -567,9 +619,9 @@ watch(messages, scrollToBottom, { deep: false })
 <style scoped>
 .chat-page {
   display: flex;
-  gap: 0;
-  height: calc(100vh - 58px - 48px);
+  height: calc(100vh - var(--topbar-h) - 48px);
   min-height: 520px;
+  background: var(--bg-page);
 }
 .chat-page :deep(.file-hidden) {
   position: absolute;
@@ -579,100 +631,125 @@ watch(messages, scrollToBottom, { deep: false })
   cursor: pointer;
 }
 
-/* ---- 会话侧栏 ---- */
+/* ============ 侧栏 ============ */
 .chat-sidebar {
-  width: 260px;
+  width: 272px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
   background: var(--bg-surface);
 }
-.sidebar-header {
+.sidebar-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 16px 12px;
+  padding: 18px 18px 14px;
 }
 .sidebar-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
+  letter-spacing: -0.01em;
 }
-.sidebar-icon-btn { color: var(--text-tertiary); cursor: pointer; }
-
-.btn-new-chat {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: calc(100% - 24px);
-  margin: 0 auto 10px;
-  height: 36px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-md);
-  background: transparent;
-  font-size: 13px;
-  font-weight: 500;
+.sidebar-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  background: var(--bg-subtle);
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+}
+.sidebar-new {
   color: var(--brand);
-  cursor: pointer;
-  font-family: inherit;
-  transition: all var(--dur-fast);
+  background: var(--brand-soft);
 }
-.btn-new-chat:hover { border-color: var(--brand); background: var(--brand-soft); }
+.sidebar-new:hover { background: var(--brand-ring); }
 
 .conv-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0 8px;
+  padding: 4px 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .conv-item {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
   padding: 11px 12px;
   border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: background var(--dur-fast);
-  border-left: 3px solid transparent;
-  margin-bottom: 2px;
+  text-align: left;
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out);
 }
 .conv-item:hover { background: var(--bg-hover); }
 .conv-item.active {
   background: var(--brand-soft);
-  border-left-color: var(--brand);
+  color: var(--text-primary);
+}
+.conv-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: background var(--dur-fast);
+}
+.conv-item.active .conv-dot { background: var(--brand); }
+.conv-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 .conv-q {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: inherit;
   line-height: 1.35;
-  margin-bottom: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding-right: 18px;
 }
-.conv-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-tertiary); }
+.conv-item.active .conv-q { color: var(--brand); }
+.conv-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.conv-sep { opacity: 0.6; }
 .conv-del {
-  position: absolute;
-  top: 10px;
-  right: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
+  width: 26px;
+  height: 26px;
   border-radius: var(--radius-sm);
-  cursor: pointer;
+  color: var(--text-tertiary);
   opacity: 0;
-  transition: all var(--dur-fast);
+  transition: all var(--dur-fast) var(--ease-out);
 }
 .conv-item:hover .conv-del { opacity: 1; }
-.conv-del:hover { background: var(--bg-hover); color: #DC2626; }
+.conv-del:hover { background: var(--danger-soft); color: var(--danger); }
+.conv-empty {
+  margin: 24px 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+  text-align: center;
+}
 
-/* ---- 对话主区 ---- */
+/* ============ 对话主区 ============ */
 .chat-main {
   flex: 1;
   display: flex;
@@ -683,104 +760,152 @@ watch(messages, scrollToBottom, { deep: false })
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 12px;
+  padding: 18px 26px 14px;
   border-bottom: 1px solid var(--border);
 }
+.chat-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand);
+  margin-bottom: 4px;
+}
 .chat-question {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
+  letter-spacing: -0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 60vw;
 }
-.btn-clear-chat {
+.ghost-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 12px;
+  gap: 6px;
+  padding: 7px 13px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: transparent;
-  font-size: 12px;
+  background: var(--bg-surface);
+  font-size: 12.5px;
   color: var(--text-secondary);
-  cursor: pointer;
-  font-family: inherit;
+  transition: all var(--dur-fast) var(--ease-out);
 }
-.btn-clear-chat:hover { background: var(--bg-hover); }
+.ghost-btn:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-strong); }
 
-/* ---- 消息区 ---- */
+/* ============ 消息区 ============ */
 .messages-area {
   flex: 1;
   overflow-y: auto;
-  padding: 20px 24px;
+  padding: 26px 26px 10px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 22px;
 }
-.empty-state {
+
+/* 空状态 hero */
+.empty-hero {
   margin: auto;
   text-align: center;
-  color: var(--text-tertiary);
-  max-width: 360px;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: fade-up 0.4s var(--ease-out) both;
 }
-.empty-avatar {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: var(--brand-soft);
-  color: var(--brand);
+.empty-orb {
+  width: 64px;
+  height: 64px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-hover) 100%);
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto 14px;
+  margin-bottom: 18px;
+  box-shadow: 0 10px 26px var(--brand-ring);
 }
-.empty-title { font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px; }
-.empty-sub { font-size: 13px; line-height: 1.6; margin: 0; }
+.empty-title { font-size: 19px; font-weight: 700; color: var(--text-primary); margin: 0 0 8px; letter-spacing: -0.01em; }
+.empty-sub { font-size: 13.5px; line-height: 1.65; color: var(--text-secondary); margin: 0 0 22px; }
+.empty-suggest {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+}
+.empty-card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: left;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.empty-card:hover {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-float);
+}
+.empty-card-icon { color: var(--brand); flex-shrink: 0; }
 
-.msg-row { display: flex; gap: 12px; max-width: 820px; }
-.user-msg { justify-content: flex-end; }
-.ai-msg { align-items: flex-start; }
+/* 消息气泡 */
+.msg-row {
+  display: flex;
+  gap: 12px;
+  max-width: 840px;
+  width: 100%;
+  animation: fade-up 0.32s var(--ease-out) both;
+}
+.msg-row.user-msg { align-self: flex-end; max-width: 680px; flex-direction: row-reverse; }
+.msg-row.ai-msg { align-items: flex-start; }
 .msg-avatar {
   width: 34px;
   height: 34px;
-  border-radius: 50%;
+  border-radius: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   color: #fff;
-  margin-top: 3px;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-hover) 100%);
+  margin-top: 2px;
 }
-.ai-avatar { background: var(--brand); }
-
 .msg-bubble {
+  min-width: 0;
   padding: 14px 18px;
-  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
   font-size: 13.5px;
-  line-height: 1.75;
+  line-height: 1.78;
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
 }
-.user-bubble {
-  background: var(--brand);
-  color: #fff;
-  border-color: var(--brand);
-  border-radius: var(--radius-lg) 4px var(--radius-lg) var(--radius-lg);
-}
-.ai-msg .msg-bubble {
+.msg-row.ai-msg .msg-bubble {
   background: var(--bg-surface);
-  border-radius: 4px var(--radius-lg) var(--radius-lg) var(--radius-lg);
+  border: 1px solid var(--border);
+  border-radius: 6px var(--radius-lg) var(--radius-lg) var(--radius-lg);
+  box-shadow: var(--shadow-card);
   flex: 1;
+}
+.msg-row.user-msg .msg-bubble {
+  background: var(--brand);
+  color: var(--text-on-brand);
+  border-radius: var(--radius-lg) 6px var(--radius-lg) var(--radius-lg);
 }
 
 /* 思考过程 */
 .thinking {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-subtle);
@@ -789,71 +914,103 @@ watch(messages, scrollToBottom, { deep: false })
 .thinking-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
-  padding: 8px 12px;
-  border: none;
-  background: transparent;
+  padding: 9px 13px;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
 }
-.thinking-toggle .chevron-down { margin-left: auto; transition: transform var(--dur-fast); color: var(--text-tertiary); }
-.thinking-toggle .chevron-down.rotated { transform: rotate(180deg); }
-.thinking-list { margin: 0; padding: 4px 12px 10px 26px; }
-.thinking-list li { font-size: 12px; color: var(--text-tertiary); margin-bottom: 4px; line-height: 1.5; }
-.think-action {
-  display: inline-block;
-  padding: 0 7px;
-  margin-right: 6px;
-  border-radius: var(--radius-pill);
+.thinking-toggle:hover { color: var(--text-primary); }
+.thinking-count {
   background: var(--brand-soft);
   color: var(--brand);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+}
+.thinking-chev { margin-left: auto; color: var(--text-tertiary); transition: transform var(--dur-fast) var(--ease-out); }
+.thinking-chev.open { transform: rotate(180deg); }
+.thinking-list { margin: 0; padding: 4px 14px 12px; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+.thinking-list li { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--text-tertiary); line-height: 1.55; }
+.think-step {
+  flex-shrink: 0;
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 700;
+}
+.think-action {
+  flex-shrink: 0;
   font-weight: 600;
+  color: var(--text-secondary);
 }
 
-.answer-loading { display: flex; gap: 5px; padding: 4px 0; }
+/* 加载圆点 */
+.answer-loading { display: flex; gap: 5px; padding: 6px 0; }
 .answer-loading .dot {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary);
-  animation: blink 1.2s infinite ease-in-out;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text-tertiary);
+  animation: blink 1.3s infinite ease-in-out;
 }
-.answer-loading .dot:nth-child(2) { animation-delay: 0.2s; }
-.answer-loading .dot:nth-child(3) { animation-delay: 0.4s; }
-@keyframes blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+.answer-loading .dot:nth-child(2) { animation-delay: 0.18s; }
+.answer-loading .dot:nth-child(3) { animation-delay: 0.36s; }
+@keyframes blink { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
 
-.answer-error { margin-top: 10px; font-size: 12.5px; color: #DC2626; }
+.answer-error {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 12px; font-size: 12.5px; color: var(--danger);
+}
 
-/* 引用文档 */
-.refs-section { margin-top: 14px; }
-.refs-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; }
-.refs-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+/* 引用来源 */
+.refs { margin-top: 16px; }
+.refs-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 600; color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+.refs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
 .ref-card {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  transition: box-shadow var(--dur-fast), transform var(--dur-fast);
+  gap: 11px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-2);
+  transition: all var(--dur-fast) var(--ease-out);
 }
-.ref-card:hover { box-shadow: var(--shadow-float); transform: translateY(-1px); }
+.ref-card:hover {
+  border-color: var(--brand);
+  box-shadow: var(--shadow-float);
+  transform: translateY(-2px);
+}
 .ref-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 34px; height: 34px;
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
-.ref-icon.src-kb { background: #DBEAFE; color: #1E40AF; }
-.ref-icon.src-web { background: #D1FAE5; color: #065F46; }
-.ref-icon.src-graph { background: #FEF3C7; color: #92400E; }
-.ref-info { min-width: 0; }
-.ref-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ref-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-tertiary); margin: 2px 0 4px; }
-.ref-kb { color: var(--brand); }
+.ref-icon.src-kb { background: var(--info-soft); color: var(--info); }
+.ref-icon.src-web { background: var(--success-soft); color: var(--success); }
+.ref-icon.src-graph { background: var(--warning-soft); color: var(--warning); }
+.ref-info { min-width: 0; flex: 1; }
+.ref-name {
+  font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ref-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-tertiary); margin: 3px 0 4px; }
+.ref-kb { color: var(--brand); font-weight: 600; }
 .ref-snippet {
+  margin: 0;
   font-size: 11.5px;
   color: var(--text-tertiary);
   line-height: 1.5;
@@ -863,198 +1020,168 @@ watch(messages, scrollToBottom, { deep: false })
   overflow: hidden;
 }
 
-/* 引用文件卡片（原型风格） */
-.ref-file-card {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 14px; border-radius: var(--radius-md);
-  background: var(--bg-surface); border: 1px solid var(--border);
-  transition: all var(--dur-fast); cursor: default;
+/* 操作行 */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 14px;
 }
-.ref-file-card:hover { border-color: var(--brand); box-shadow: 0 2px 8px rgba(59,130,246,.12); }
-.rfc-icon {
-  width: 38px; height: 38px; border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
+.msg-actions-divider {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  margin-right: 8px;
 }
-.rfc-icon.src-kb { background: #DBEAFE; color: #1E40AF; }
-.rfc-icon.src-web { background: #D1FAE5; color: #065F46; }
-.rfc-icon.src-graph { background: #FEF3C7; color: #92400E; }
-.rfc-info { flex: 1; min-width: 0; }
-.rfc-name { font-size: 13px; font-weight: 600; color: var(--brand); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rfc-meta-row {
-  display: flex; gap: 12px; font-size: 11.5px; color: var(--text-tertiary); margin-top: 3px;
-}
-
-/* 反馈 */
-.feedback-row { display: flex; gap: 6px; margin-top: 12px; }
-.fb-btn {
+.act-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--border);
+  width: 32px;
+  height: 32px;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all var(--dur-fast);
+  color: var(--text-tertiary);
+  transition: all var(--dur-fast) var(--ease-out);
 }
-.fb-btn:hover { background: var(--bg-hover); }
-.fb-btn.on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
+.act-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.act-btn.on { background: var(--brand-soft); color: var(--brand); }
 
-/* ---- 建议追问 ---- */
+/* ============ 建议追问 ============ */
 .suggest-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 24px 8px;
+  padding: 12px 26px 10px;
   flex-wrap: wrap;
 }
-.suggest-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+.suggest-label { font-size: 12.5px; font-weight: 600; color: var(--text-tertiary); white-space: nowrap; }
 .chip {
   display: inline-flex;
   align-items: center;
-  padding: 5px 13px;
+  padding: 6px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   font-size: 12px;
   color: var(--text-primary);
   background: var(--bg-surface);
-  cursor: pointer;
-  transition: all var(--dur-fast);
-  white-space: nowrap;
   font-family: inherit;
+  transition: all var(--dur-fast) var(--ease-out);
+  white-space: nowrap;
 }
 .chip:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
 
-/* ---- 输入区 ---- */
-.input-area {
-  padding: 12px 24px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-surface);
-}
-.attach-preview { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-.attach-preview-item { position: relative; }
-.attach-thumb { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border); }
-.attach-media { width: 200px; max-width: 60vw; border-radius: 8px; border: 1px solid var(--border); }
-.attach-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 12px; }
-.attach-remove {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: none;
-  background: #DC2626;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.chat-input {
-  width: 100%;
+/* ============ 输入区（composer） ============ */
+.composer {
+  margin: 0 22px 20px;
+  padding: 12px 14px 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
-  font-size: 14px;
-  resize: none;
-  outline: none;
-  font-family: inherit;
-  line-height: 1.5;
+  border-radius: var(--radius-lg);
   background: var(--bg-surface);
-  color: var(--text-primary);
+  box-shadow: var(--shadow-card);
   transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
 }
-.chat-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
-.chat-input::placeholder { color: var(--text-placeholder); }
+.composer:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 4px var(--brand-ring);
+}
+.attach-preview { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.attach-chip { position: relative; }
+.attach-thumb { width: 50px; height: 50px; border-radius: 9px; object-fit: cover; border: 1px solid var(--border); }
+.attach-media { width: 200px; max-width: 60vw; border-radius: 9px; border: 1px solid var(--border); }
+.attach-badge { display: inline-flex; padding: 4px 10px; border-radius: 9px; background: var(--bg-subtle); color: var(--text-secondary); font-size: 12px; }
+.attach-x {
+  position: absolute;
+  top: -6px; right: -6px;
+  width: 19px; height: 19px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--dur-fast);
+}
+.attach-x:hover { background: var(--danger-hover); }
 
-.input-bar { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
-.input-left { display: flex; align-items: center; gap: 10px; }
-.attach-btn {
+.composer-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  font-family: inherit;
+  max-height: 180px;
+  padding: 2px 2px;
+}
+.composer-input::placeholder { color: var(--text-placeholder); }
+
+.composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+.composer-left { display: flex; align-items: center; gap: 12px; }
+.composer-attach {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 36px; height: 36px;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  cursor: pointer;
   overflow: hidden;
-  transition: all var(--dur-fast);
+  transition: all var(--dur-fast) var(--ease-out);
 }
-.attach-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-.char-count { font-size: 12px; color: var(--text-tertiary); }
-.input-actions { display: flex; align-items: center; gap: 8px; }
-.send-btn { height: 36px; padding: 0 20px; font-size: 13px; }
+.composer-attach:hover { background: var(--bg-hover); color: var(--brand); }
+.composer-count { font-size: 12px; color: var(--text-tertiary); }
+.composer-right { display: flex; align-items: center; gap: 8px; }
+
+.send-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 18px;
+  border-radius: var(--radius-md);
+  background: var(--brand);
+  color: var(--text-on-brand);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast);
+}
+.send-btn:hover:not(:disabled) { background: var(--brand-hover); }
+.send-btn:active:not(:disabled) { transform: translateY(1px); }
+.send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.stop-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.9s linear infinite; }
 
 @media (max-width: 720px) {
-  .chat-sidebar { width: 200px; }
+  .chat-sidebar { width: 210px; }
+  .empty-suggest { grid-template-columns: 1fr; }
+  .chat-question { max-width: 50vw; }
 }
-
-/* ---- 二级页（问答记录 / 模型配置）---- */
-.secondary-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.page-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0;
-}
-.records-card { padding: 0; overflow: hidden; }
-.records-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.records-table th {
-  text-align: left;
-  padding: 12px 16px;
-  background: var(--bg-subtle);
-  color: var(--text-secondary);
-  font-weight: 600;
-  font-size: 12px;
-  border-bottom: 1px solid var(--border);
-}
-.records-table td { padding: 12px 16px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
-.records-table tr:last-child td { border-bottom: none; }
-.col-name { font-weight: 600; }
-.col-time { color: var(--text-tertiary); white-space: nowrap; }
-.link-btn {
-  border: none;
-  background: transparent;
-  color: var(--brand);
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-  padding: 0;
-}
-.link-btn:hover { text-decoration: underline; }
-.empty-hint { padding: 24px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
-
-.model-card { padding: 20px; max-width: 560px; }
-.model-note { margin: -6px 0 18px; font-size: 12.5px; color: var(--text-tertiary); line-height: 1.6; }
-.model-field { margin-bottom: 18px; }
-.model-field > label { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
-.field-row { display: flex; align-items: center; gap: 12px; }
-.field-val { font-size: 13px; font-weight: 600; color: var(--brand); min-width: 28px; }
-.range { flex: 1; accent-color: var(--brand); }
-.select {
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-family: inherit;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-}
-.select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 </style>

@@ -15,6 +15,7 @@ import {
   Maximize2, Paperclip, Send, Copy, ArrowDownToLine, AppWindow, Star, Tag, Calendar, Sparkles,
   Info, Heart,
   ArrowUpRight, ArrowDownRight, Pin, UserPlus, Volume2,
+  BrainCircuit, BookMarked, ThumbsUp, ThumbsDown, PenLine, ArrowUp, Square,
 } from 'lucide-vue-next'
 
 const props = defineProps<{ name: string; size?: number | string }>()
@@ -37,6 +38,8 @@ const ICONS: Record<string, Component> = {
   'arrow-up-right': ArrowUpRight, 'arrow-down-right': ArrowDownRight,
   pin: Pin, 'user-plus': UserPlus,
   volume: Volume2,
+  'pen-line': PenLine, 'brain-circuit': BrainCircuit, 'book-marked': BookMarked,
+  'thumbs-up': ThumbsUp, 'thumbs-down': ThumbsDown, 'arrow-up': ArrowUp, square: Square,
 }
 
 const comp = computed(() => ICONS[props.name] ?? AlertTriangle)
