@@ -40,6 +40,9 @@ def _to_out(u: User) -> UserOut:
         created_at=u.created_at,
         preferred_model=u.preferred_model,
         tts_enabled=u.tts_enabled,
+        email=u.email,
+        department=u.department,
+        employee_id=u.employee_id,
     )
 
 
@@ -129,6 +132,9 @@ async def create_user(
         password_hash=User.hash_password(payload.password),
         display_name=payload.display_name,
         role=payload.role,
+        email=payload.email,
+        department=payload.department,
+        employee_id=payload.employee_id,
     )
     db.add(u)
     await db.commit()
@@ -167,6 +173,13 @@ async def update_user(
                 raise HTTPException(status_code=400, detail="不能降级或停用最后一个管理员")
     if payload.display_name is not None:
         u.display_name = payload.display_name
+    # 档案字段（邮箱/部门/工号）本人与 admin 均可改，不算特权字段
+    if payload.email is not None:
+        u.email = payload.email
+    if payload.department is not None:
+        u.department = payload.department
+    if payload.employee_id is not None:
+        u.employee_id = payload.employee_id
     if current.role == "admin":
         if payload.role is not None:
             u.role = payload.role

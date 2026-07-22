@@ -234,6 +234,9 @@ export interface UserOut {
   createdAt: string | null
   preferredModel?: string | null    // P8：偏好问答模型
   ttsEnabled?: boolean              // P8：是否启用语音播报
+  email?: string | null
+  department?: string | null
+  employeeId?: string | null
 }
 
 export interface TokenOut {
@@ -247,6 +250,9 @@ export interface UserCreate {
   password: string
   displayName?: string | null
   role?: string       // 默认 viewer
+  email?: string | null
+  department?: string | null
+  employeeId?: string | null
 }
 
 export interface UserUpdate {
@@ -254,6 +260,9 @@ export interface UserUpdate {
   role?: string
   isActive?: boolean
   password?: string
+  email?: string | null
+  department?: string | null
+  employeeId?: string | null
 }
 
 export type SSEEvent =

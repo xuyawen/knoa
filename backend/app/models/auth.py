@@ -20,6 +20,9 @@ class UserOut(CamelModel):
     created_at: datetime | None = None
     preferred_model: str | None = None          # P8：偏好问答模型（透传进 ask 管线）
     tts_enabled: bool = False                   # P8：是否启用语音播报
+    email: str | None = None
+    department: str | None = None
+    employee_id: str | None = None
 
 
 class TokenOut(CamelModel):
@@ -33,6 +36,9 @@ class UserCreateIn(CamelModel):
     password: str = Field(..., min_length=6, max_length=128)
     display_name: str | None = None
     role: Literal["admin", "editor", "viewer"] = "viewer"
+    email: str | None = None
+    department: str | None = None
+    employee_id: str | None = None
 
 
 class UserUpdateIn(CamelModel):
@@ -40,6 +46,9 @@ class UserUpdateIn(CamelModel):
     role: Literal["admin", "editor", "viewer"] | None = None
     is_active: bool | None = None
     password: str | None = None
+    email: str | None = None
+    department: str | None = None
+    employee_id: str | None = None
 
 
 class ChangePasswordIn(CamelModel):

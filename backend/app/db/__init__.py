@@ -144,6 +144,10 @@ class User(Base):
     preferred_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 语音播报开关：前端朗读按钮是否可用
     tts_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # 用户档案字段（用户管理界面维护）
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    employee_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     @staticmethod

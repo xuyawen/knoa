@@ -73,11 +73,11 @@ const ROLE_LABEL: Record<string, string> = { admin: '管理员', editor: '编辑
 const showModal = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
-const form = ref({ username: '', displayName: '', role: 'viewer', password: '', isActive: true })
+const form = ref({ username: '', displayName: '', role: 'viewer', password: '', isActive: true, email: '', department: '', employeeId: '' })
 
 function openCreate() {
   editingId.value = null
-  form.value = { username: '', displayName: '', role: 'viewer', password: '', isActive: true }
+  form.value = { username: '', displayName: '', role: 'viewer', password: '', isActive: true, email: '', department: '', employeeId: '' }
   showModal.value = true
 }
 function openEdit(u: UserOut) {
@@ -88,6 +88,9 @@ function openEdit(u: UserOut) {
     role: u.role,
     password: '',
     isActive: u.isActive,
+    email: u.email || '',
+    department: u.department || '',
+    employeeId: u.employeeId || '',
   }
   showModal.value = true
 }
@@ -108,6 +111,9 @@ async function save() {
         displayName: form.value.displayName || null,
         role: form.value.role,
         isActive: form.value.isActive,
+        email: form.value.email || null,
+        department: form.value.department || null,
+        employeeId: form.value.employeeId || null,
       }
       if (form.value.password) payload.password = form.value.password
       await updateUser(editingId.value, payload)
@@ -118,6 +124,9 @@ async function save() {
         password: form.value.password,
         displayName: form.value.displayName || null,
         role: form.value.role,
+        email: form.value.email || null,
+        department: form.value.department || null,
+        employeeId: form.value.employeeId || null,
       }
       await createUser(payload)
       toast.success('用户已创建')
@@ -212,6 +221,9 @@ const roleMatrix = [
               <tr>
                 <th>用户名</th>
                 <th>显示名</th>
+                <th>邮箱</th>
+                <th>部门</th>
+                <th>工号</th>
                 <th>角色</th>
                 <th>状态</th>
                 <th>操作</th>
@@ -224,6 +236,9 @@ const roleMatrix = [
                   <span class="u-uname">{{ u.username }}</span>
                 </td>
                 <td class="u-dname">{{ u.displayName || '—' }}</td>
+                <td>{{ u.email || '—' }}</td>
+                <td>{{ u.department || '—' }}</td>
+                <td>{{ u.employeeId || '—' }}</td>
                 <td><span class="role-badge" :class="roleClass(u.role)">{{ ROLE_LABEL[u.role] || u.role }}</span></td>
                 <td>
                   <span class="status-badge" :class="u.isActive ? 'success' : 'danger'">{{ u.isActive ? '启用' : '停用' }}</span>
@@ -236,7 +251,7 @@ const roleMatrix = [
                 </td>
               </tr>
               <tr v-if="!loading && !pagedUsers.length">
-                <td colspan="5" class="empty-cell">暂无用户（或当前筛选无匹配）</td>
+                <td colspan="8" class="empty-cell">暂无用户（或当前筛选无匹配）</td>
               </tr>
             </tbody>
           </table>
@@ -295,6 +310,18 @@ const roleMatrix = [
       <div class="form-row">
         <label class="form-label">显示名</label>
         <input v-model="form.displayName" class="form-input" placeholder="可选" />
+      </div>
+      <div class="form-row">
+        <label class="form-label">邮箱</label>
+        <input v-model="form.email" class="form-input" placeholder="可选" />
+      </div>
+      <div class="form-row">
+        <label class="form-label">部门</label>
+        <input v-model="form.department" class="form-input" placeholder="可选" />
+      </div>
+      <div class="form-row">
+        <label class="form-label">工号</label>
+        <input v-model="form.employeeId" class="form-input" placeholder="可选" />
       </div>
       <div class="form-row">
         <label class="form-label">角色</label>
