@@ -117,7 +117,9 @@ async function handleLogin() {
         </form>
 
         <div class="sso-divider">
+          <span class="line" />
           <span class="divider-text">其他登录方式</span>
+          <span class="line" />
         </div>
 
         <div class="sso-row">
@@ -222,29 +224,29 @@ async function handleLogin() {
   top: 406px;
   width: 540px;
   height: 36px;
-  background: #e0e6f0;
+  background: linear-gradient(180deg, #e4eaf3, #dce3ee);
 }
 
 .platform-middle {
   top: 376px;
   width: 420px;
   height: 28px;
-  background: #e8edf4;
+  background: linear-gradient(180deg, #edf1f7, #e5ebf2);
 }
 
 .platform-top {
   top: 350px;
   width: 300px;
   height: 22px;
-  background: #f8fafd;
+  background: linear-gradient(180deg, #fbfcfe, #f4f7fb);
 }
 
 .cube-scene {
   position: absolute;
-  left: 259px;
-  top: 143px;
-  width: 195px;
-  height: 195px;
+  left: 257px;
+  top: 141px;
+  width: 200px;
+  height: 200px;
   cursor: pointer;
 }
 
@@ -265,8 +267,8 @@ async function handleLogin() {
 
 .icon-circle {
   position: absolute;
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   background: #fff;
   border: 1px solid #e5e7eb;
@@ -289,26 +291,26 @@ async function handleLogin() {
 }
 
 .ic-chart {
-  left: 190px;
-  top: 90px;
+  left: 157px;
+  top: 60px;
   animation-delay: 0s;
 }
 
 .ic-search {
-  left: 470px;
-  top: 90px;
+  left: 493px;
+  top: 60px;
   animation-delay: 0.8s;
 }
 
 .ic-doc {
-  left: 150px;
-  top: 230px;
+  left: 109px;
+  top: 228px;
   animation-delay: 1.6s;
 }
 
 .ic-settings {
-  left: 510px;
-  top: 230px;
+  left: 541px;
+  top: 228px;
   animation-delay: 2.3s;
 }
 
@@ -512,8 +514,15 @@ async function handleLogin() {
 .sso-divider {
   display: flex;
   align-items: center;
-  justify-content: center;
-  margin-top: 28px;
+  gap: 12px;
+  height: auto;
+  margin-top: 20px;
+}
+
+.line {
+  flex: 1;
+  height: 1px;
+  background: #eaeaea;
 }
 
 .divider-text {
@@ -526,7 +535,7 @@ async function handleLogin() {
 .sso-row {
   display: flex;
   gap: 12px;
-  margin-top: 16px;
+  margin-top: 20px;
 }
 
 .sso-btn {
