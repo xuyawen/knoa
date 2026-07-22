@@ -116,7 +116,7 @@ async function handleLogin() {
           </button>
         </form>
 
-        <div class="divider">
+        <div class="sso-divider">
           <span class="divider-text">其他登录方式</span>
         </div>
 
@@ -509,7 +509,7 @@ async function handleLogin() {
   cursor: not-allowed;
 }
 
-.divider {
+.sso-divider {
   display: flex;
   align-items: center;
   justify-content: center;
