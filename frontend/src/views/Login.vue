@@ -247,12 +247,22 @@ async function handleLogin() {
   top: 141px;
   width: 200px;
   height: 200px;
+  cursor: pointer;
 }
 
 .cube-svg {
   display: block;
   width: 100%;
   height: 100%;
+  transform-origin: 50% 62%;
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), filter 0.45s;
+}
+
+/* 鼠标移入方块：立方体轻轻抬头 + 蓝色辉光呼吸 */
+.cube-scene:hover .cube-svg {
+  transform: scale(1.06) rotate(-3deg);
+  filter: drop-shadow(0 16px 22px rgba(1, 77, 178, 0.38));
+  animation: cube-pulse 1.8s ease-in-out infinite;
 }
 
 .icon-circle {
@@ -268,6 +278,16 @@ async function handleLogin() {
   color: #6b7280;
   box-shadow: 0 4px 16px rgba(10, 23, 40, 0.06);
   animation: fy 3.2s ease-in-out infinite;
+  transition: color 0.3s, border-color 0.3s, box-shadow 0.3s;
+}
+
+/* 鼠标移入方块：四周图标圈点亮成品牌蓝并加速浮动放大 */
+.cube-scene:hover ~ .icon-circle {
+  color: #014db2;
+  border-color: #cfe0f7;
+  box-shadow: 0 8px 22px rgba(1, 77, 178, 0.18);
+  animation-name: fy-hover;
+  animation-duration: 1.7s;
 }
 
 .ic-chart {
@@ -301,6 +321,26 @@ async function handleLogin() {
   }
   50% {
     transform: translateY(-10px);
+  }
+}
+
+@keyframes cube-pulse {
+  0%,
+  100% {
+    transform: scale(1.06) rotate(-3deg);
+  }
+  50% {
+    transform: scale(1.1) rotate(-3deg);
+  }
+}
+
+@keyframes fy-hover {
+  0%,
+  100% {
+    transform: translateY(0) scale(1.12);
+  }
+  50% {
+    transform: translateY(-16px) scale(1.2);
   }
 }
 
