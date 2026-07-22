@@ -244,7 +244,7 @@ async function handleLogin() {
 .cube-scene {
   position: absolute;
   left: 257px;
-  top: 150px;
+  top: 141px;
   width: 200px;
   height: 200px;
   cursor: pointer;
