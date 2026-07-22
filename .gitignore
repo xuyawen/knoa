@@ -42,10 +42,8 @@ deploy/backup/*.sql
 AI学习笔记_*.md
 
 # interview prep materials (user-only, NEVER commit to git)
-# 面试复习/面试相关 md 一律不入库
-INTERVIEW*.md
-*面试*.md
-*interview*.md
+# 面试复习材料统一放在 interview/ 目录，整目录忽略（不再单独忽略散落的面试 md）
+interview/
 
 # secrets — global fallback (never commit private keys / certs / macOS cruft)
 *.pem
