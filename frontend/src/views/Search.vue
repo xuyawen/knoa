@@ -45,6 +45,7 @@ const errorMsg = ref('')
 const showThinking = ref(false)
 const askAbort = ref<AbortController | null>(null)
 const scrollRef = ref<HTMLElement | null>(null)
+const searchCost = ref<number | null>(null)
 
 const suggested = [
   '数据安全分级分类标准是怎样的？',
@@ -89,6 +90,7 @@ function scrollToBottom() {
 async function runSearch() {
   const text = query.value.trim()
   if (!text || streaming.value) return
+  const t0 = performance.now()
   submitted.value = text
   answer.value = ''
   sources.value = []
@@ -122,6 +124,7 @@ async function runSearch() {
   } finally {
     streaming.value = false
     askAbort.value = null
+    searchCost.value = Math.round((performance.now() - t0) * 100) / 100
   }
 }
 
@@ -245,7 +248,7 @@ function clearSearch() {
           <span class="flink expand">展开 <Icon name="chevron-down" :size="11" /></span>
         </div>
         <div class="result-meta">
-          <span>找到约 <b>{{ sources.length || 128 }}</b> 条结果（用时 0.23 秒）</span>
+          <span>找到 <b>{{ sources.length }}</b> 条结果<span v-if="searchCost !== null">（用时 {{ searchCost.toFixed(2) }} 秒）</span></span>
           <span class="sort-opt">相似度排序 <Icon name="chevron-down" :size="11" /></span>
           <div class="view-tog">
             <button class="vt active"><Icon name="listview" :size="15" /></button>
