@@ -65,10 +65,27 @@ async def lifespan(app: FastAPI):
                 password_hash=User.hash_password(settings.ADMIN_PASSWORD),
                 display_name=settings.ADMIN_DISPLAY_NAME,
                 role="admin",
+                email=settings.ADMIN_EMAIL,
+                department=settings.ADMIN_DEPARTMENT,
+                employee_id=settings.ADMIN_EMPLOYEE_ID,
             )
             session.add(admin)
             await session.commit()
             await session.refresh(admin)
+        else:
+            # ponytail: 补全 admin 空缺档案字段，幂等仅填空缺项
+            changed = False
+            if admin.email is None:
+                admin.email = settings.ADMIN_EMAIL
+                changed = True
+            if admin.department is None:
+                admin.department = settings.ADMIN_DEPARTMENT
+                changed = True
+            if admin.employee_id is None:
+                admin.employee_id = settings.ADMIN_EMPLOYEE_ID
+                changed = True
+            if changed:
+                await session.commit()
         # 迁移遗留会话：user_id 为 NULL 的会话归属到该管理员，
         # 避免上线会话隔离后旧会话对所有用户不可见（幂等，仅影响 NULL 行）。
         await session.execute(

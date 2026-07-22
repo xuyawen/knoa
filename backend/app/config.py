@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "admin123"
     ADMIN_DISPLAY_NAME: str = "系统管理员"
+    # admin 默认档案字段（首次自动创建时写入；已存在则补全空缺项）
+    ADMIN_EMAIL: str = "admin@knoa.local"
+    ADMIN_DEPARTMENT: str = "总部"
+    ADMIN_EMPLOYEE_ID: str = "A0001"
     # HTTPS (TLS) — 自签证书用于本地开发；生产由 nginx 做 TLS 终止
     SSL_CERT_FILE: str = "certs/cert.pem"
     SSL_KEY_FILE: str = "certs/key.pem"
