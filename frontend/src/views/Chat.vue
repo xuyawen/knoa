@@ -363,9 +363,6 @@ watch(messages, scrollToBottom, { deep: false })
           <span>对话</span>
           <span class="sidebar-count">{{ sessions.length }}</span>
         </div>
-        <button v-if="section === 'new'" class="icon-btn sidebar-new" title="新建对话" @click="newChat">
-          <Icon name="pen-line" :size="17" />
-        </button>
       </div>
 
       <div class="conv-list">
@@ -410,10 +407,16 @@ watch(messages, scrollToBottom, { deep: false })
           <div class="chat-eyebrow">AI 智能问答</div>
           <h1 class="chat-question">{{ firstQuestion || '有什么可以帮你？' }}</h1>
         </div>
+        <div class="chat-head-actions">
+          <button class="ghost-btn" @click="newChat">
+            <Icon name="plus" :size="14" />
+            <span>新建对话</span>
+          </button>
           <button class="ghost-btn chat-clear" @click="messages = []">
-          <Icon name="trash" :size="14" />
-          <span>清空对话</span>
-        </button>
+            <Icon name="trash" :size="14" />
+            <span>清空对话</span>
+          </button>
+        </div>
       </header>
 
       <!-- 消息区 -->
@@ -723,12 +726,6 @@ watch(messages, scrollToBottom, { deep: false })
   padding: 1px 8px;
   border-radius: var(--radius-pill);
 }
-.sidebar-new {
-  color: var(--brand);
-  background: var(--brand-soft);
-}
-.sidebar-new:hover { background: var(--brand-ring); }
-
 .conv-list {
   flex: 1;
   overflow-y: auto;
@@ -822,6 +819,12 @@ watch(messages, scrollToBottom, { deep: false })
   justify-content: space-between;
   padding: 18px 26px 14px;
   border-bottom: 1px solid var(--border);
+}
+.chat-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
 }
 .chat-eyebrow {
   font-size: 11px;
