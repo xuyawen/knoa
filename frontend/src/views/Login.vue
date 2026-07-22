@@ -515,7 +515,7 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 20px;
+  margin-top: 28px;
 }
 
 .line {
@@ -534,7 +534,7 @@ async function handleLogin() {
 .sso-row {
   display: flex;
   gap: 12px;
-  margin-top: 8px;
+  margin-top: 16px;
 }
 
 .sso-btn {
