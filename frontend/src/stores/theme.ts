@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 
 // 主题 store：light / dark / system 三态。
 // 持久化到 localStorage，并把 data-theme 写到 <html> 上驱动 CSS 变量切换。
@@ -45,5 +45,11 @@ export const useThemeStore = defineStore('theme', () => {
     setMode(order[(idx + 1) % order.length])
   }
 
-  return { mode, init, setMode, cycle, apply }
+  // ponytail: UI 只关心明暗两态，基于解析后的实际值切换，避免 system 初值歧义
+  const current = computed(() => resolve(mode.value))
+  function toggle() {
+    setMode(current.value === 'dark' ? 'light' : 'dark')
+  }
+
+  return { mode, current, init, setMode, cycle, toggle, apply }
 })

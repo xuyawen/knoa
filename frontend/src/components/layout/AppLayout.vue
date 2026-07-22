@@ -4,11 +4,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useThemeStore } from '@/stores/theme'
 import { getAnnouncements, markAnnouncementRead } from '@/api'
 import type { Announcement } from '@/types/api'
 import Icon from '@/components/ui/Icon.vue'
 
 const auth = useAuthStore()
+const theme = useThemeStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -158,6 +160,15 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
 
       <!-- 右：操作区 -->
       <div class="topbar-right">
+        <!-- 主题切换：明 / 暗 -->
+        <button
+          class="icon-btn theme-toggle"
+          :title="theme.current === 'dark' ? '切换到明亮模式' : '切换到暗黑模式'"
+          @click="theme.toggle()"
+        >
+          <Icon :name="theme.current === 'dark' ? 'sun' : 'moon'" :size="18" />
+        </button>
+
         <!-- 通知铃铛 + badge -->
         <div class="notify-wrap">
           <button class="icon-btn notify-btn" title="通知" @click.stop="toggleNotify">
