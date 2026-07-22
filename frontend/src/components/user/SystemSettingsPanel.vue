@@ -51,6 +51,8 @@ async function onSave() {
     saving.value = false
   }
 }
+
+defineExpose({ onSave, saving })
 </script>
 
 <template>
@@ -91,12 +93,6 @@ async function onSave() {
         </div>
       </div>
 
-      <div class="set-actions">
-        <button class="btn btn-primary" :disabled="saving" @click="onSave">
-          <Icon v-if="saving" name="loader" :size="14" class="spin" />
-          {{ saving ? '保存中…' : '保存设置' }}
-        </button>
-      </div>
     </template>
   </div>
 </template>
@@ -113,8 +109,6 @@ async function onSave() {
 .set-control .select { width: 200px; }
 
 .set-divider { height: 1px; background: var(--border); }
-
-.set-actions { display: flex; justify-content: flex-end; padding: 20px 0 4px; }
 
 .switch {
   position: relative;

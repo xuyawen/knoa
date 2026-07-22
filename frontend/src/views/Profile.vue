@@ -95,6 +95,8 @@ const editTab = ref<'info' | 'security' | 'system'>('info')
 const editingInfo = ref(false)
 const infoDraft = ref({ displayName: '', email: '', department: '', employeeId: '' })
 const infoSaving = ref(false)
+const systemSettingsRef = ref<InstanceType<typeof SystemSettingsPanel> | null>(null)
+const systemSaving = ref(false)
 
 function syncInfoDraft() {
   const u = auth.user
@@ -119,6 +121,16 @@ function startEditInfo() {
 function cancelEditInfo() {
   editingInfo.value = false
 }
+async function onSaveSystem() {
+  if (!systemSettingsRef.value) return
+  systemSaving.value = true
+  try {
+    await systemSettingsRef.value.onSave()
+  } finally {
+    systemSaving.value = false
+  }
+}
+
 async function saveInfo() {
   if (!auth.user) return
   infoSaving.value = true
@@ -374,7 +386,7 @@ const pwdStrength = computed(() => {
 
       <!-- 系统设置 -->
       <div v-else class="edit-body">
-        <SystemSettingsPanel />
+        <SystemSettingsPanel ref="systemSettingsRef" />
       </div>
 
       <template #foot>
@@ -398,6 +410,9 @@ const pwdStrength = computed(() => {
         </template>
         <template v-else>
           <button class="btn btn-ghost" @click="showEdit = false">关闭</button>
+          <button class="btn btn-primary" :disabled="systemSaving" @click="onSaveSystem">
+            <Icon v-if="systemSaving" name="loader" :size="14" class="spin" /> 保存设置
+          </button>
         </template>
       </template>
     </AppModal>
