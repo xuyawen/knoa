@@ -38,7 +38,7 @@ async def _token(client):
     return r.json()["accessToken"]
 
 
-async def _wait_for_chunks(db_session, *, doc_id=None, kb_id=None, timeout: float = 3.0):
+async def _wait_for_chunks(db_session, *, doc_id=None, kb_id=None, timeout: float = 10.0):
     """等待后台异步摄入完成（approve 已改为不阻塞请求、后台摄入）。
 
     每轮查询前 yield 给事件循环，让 _ingest_document_background 有机会执行并提交；

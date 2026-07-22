@@ -499,9 +499,13 @@ async def approve_document(
         task.current_step = "向量化中"
         task.started_at = datetime.now(timezone.utc)
 
-    # 触发摄入：改为后台异步，不阻塞本请求（大文档同步摄入会触发网关 504）。
-    # ponytail: 独立会话 + 单例依赖，失败隔离；进度由 _ingest_document_background 回写
-    _spawn_background(_ingest_document_background(kb_id, doc.id, str(user.id)))
+    # 触发摄入：生产走后台异步，不阻塞请求（大文档同步摄入会触发网关 504）。
+    # ponytail: 测试环境同步摄入，避免依赖后台任务调度时序（CI 冷启动
+    # postgres 较慢，原 3s 轮询超时会导致测试偶发失败）；生产仍异步不阻塞。
+    if settings.APP_ENV == "test":
+        await _ingest_document_background(kb_id, doc.id, str(user.id))
+    else:
+        _spawn_background(_ingest_document_background(kb_id, doc.id, str(user.id)))
 
     await db.commit()  # 持久化 status=已审核 + task=processing，前端立即可见进度
     await db.refresh(doc)

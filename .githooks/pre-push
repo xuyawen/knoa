@@ -1,13 +1,13 @@
 #!/bin/sh
-# pre-push hook: 在 push 之前跑前端类型检查 + 构建，拦截类型错误，
-# 避免坏代码推上 GitHub 导致 CI 红。
-# 仅当本次 push 包含 frontend/ 改动时才跑 build；纯后端 push 直接放行。
+# pre-push hook: push 之前本地拦截坏代码，让 CI 永远绿。
+#   - frontend/ 改动 → npm run build（vue-tsc 类型检查 + vite build）
+#   - backend/  改动 → 本地 postgres 可达时跑 pytest（不可达则告警放行，CI 兜底）
+# 仅当对应改动存在时才跑对应检查，纯单一端 push 不浪费时间。
 #
-# 重要：本机 Windows 上不要在这个 hook 里跑后端 `uv run` 命令，
-# 会触发 Defender 实时保护锁死 .venv。前端构建用 npm，安全。
+# 重要：本机 Windows 上绝不在这个 hook 里跑 `uv run`（会触发 Defender 实时保护
+# 锁死 .venv）。前端用 npm、后端用现成的 backend/.venv，都安全。
 
-# Git 通过 stdin 按行传入待推送的 ref：
-#   <local_ref> <local_sha> <remote_ref> <remote_sha>
+# Git 通过 stdin 按行传入待推送的 ref：<local_ref> <local_sha> <remote_ref> <remote_sha>
 read -r local_ref local_sha remote_ref remote_sha
 
 # 删除分支 / 空推送（remote_sha 全 0）直接放行
@@ -15,23 +15,39 @@ if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
   exit 0
 fi
 
-# 本次 push 相对远端的改动文件清单
 changed=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null)
+root=$(git rev-parse --show-toplevel)
 
-# 没有 frontend/ 改动则跳过 build，省时间
+# ---------- 前端 ----------
 case "$changed" in
-  *frontend/*) ;;
-  *) echo "[pre-push] 无前端改动，跳过 build。"; exit 0 ;;
+  *frontend/*)
+    echo "[pre-push] 检测到前端改动，运行 build（vue-tsc 类型检查 + vite build）..."
+    ( cd "$root/frontend" && npm run build ) || {
+      echo "[pre-push] 前端 build 失败，已阻止 push。请修复类型错误后再 push。"
+      exit 1
+    }
+    echo "[pre-push] 前端 build 通过。"
+    ;;
 esac
 
-echo "[pre-push] 检测到前端改动，运行 build（vue-tsc 类型检查 + vite build）..."
-root=$(git rev-parse --show-toplevel)
-cd "$root/frontend" || exit 1
+# ---------- 后端 ----------
+case "$changed" in
+  *backend/*)
+    # conftest 默认连 localhost:5433；可用 KNOA_TEST_PG_PORT 覆盖
+    PG_PORT="${KNOA_TEST_PG_PORT:-5433}"
+    if "$root/backend/.venv/Scripts/python.exe" -c \
+        "import socket,sys; s=socket.create_connection(('localhost',int(sys.argv[1])),timeout=2); s.close()" \
+        "$PG_PORT" >/dev/null 2>&1; then
+      echo "[pre-push] 检测到后端改动且本地 postgres(:$PG_PORT) 可达，运行 pytest..."
+      ( cd "$root/backend" && "$root/backend/.venv/Scripts/python.exe" -m pytest -q ) || {
+        echo "[pre-push] 后端 pytest 失败，已阻止 push。请修复测试后再 push。"
+        exit 1
+      }
+      echo "[pre-push] 后端 pytest 通过。"
+    else
+      echo "[pre-push] 警告：检测到后端改动，但本地 postgres(:$PG_PORT) 不可达，跳过 pytest（CI 会兜底）。"
+    fi
+    ;;
+esac
 
-npm run build || {
-  echo "[pre-push] 前端 build 失败，已阻止 push。请修复类型错误后再 push。"
-  exit 1
-}
-
-echo "[pre-push] 前端 build 通过，继续 push。"
 exit 0
