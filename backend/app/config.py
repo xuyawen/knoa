@@ -96,7 +96,8 @@ class Settings(BaseSettings):
     CORS_ALLOW_CREDENTIALS: bool = True
     # 鉴权 Cookie（P1-8：token 改 HttpOnly Cookie，防 XSS 窃取）
     COOKIE_NAME: str = "knoa_token"
-    COOKIE_SECURE: bool = True      # 仅 HTTPS 传输；本地 http 开发可设为 false
+    # ponytail: dev(http) 自动关闭 Secure，使 HttpOnly Cookie 能被浏览器存储；生产(https)仍为 True
+    COOKIE_SECURE: bool = APP_ENV != "development"
     COOKIE_SAMESITE: str = "lax"
     # 腾讯云 TTS（语音播报；httpx 直连 + 手写 TC3 签名，不引第三方 SDK）
     # 留空则 /api/tts 优雅降级返回 503，前端朗读按钮自动隐藏
