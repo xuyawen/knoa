@@ -49,6 +49,9 @@ const typeOptions = [
   { label: 'Excel', value: 'XLSX' },
   { label: 'PPT', value: 'PPTX' },
   { label: 'Markdown', value: 'MD' },
+  { label: '图片', value: 'IMAGE' },
+  { label: '音频', value: 'AUDIO' },
+  { label: '视频', value: 'VIDEO' },
 ]
 const statusOptions = [
   { label: '全部状态', value: '' },
@@ -517,7 +520,7 @@ function goPage(p: number) {
         <!-- 批量上传 -->
         <label class="btn btn-primary btn-sm upload-btn" :class="{ 'is-loading': uploadTasks.length > 0 }">
           <Icon name="upload" :size="13" /> {{ uploadTasks.length > 0 ? '上传中…' : '批量上传' }}
-          <input type="file" multiple accept=".md,.txt,.docx,.pdf" class="file-hidden" @change="onUploadFiles" />
+          <input type="file" multiple accept=".md,.txt,.docx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.mov,.webm,.mkv,.avi" class="file-hidden" @change="onUploadFiles" />
         </label>
 
         <!-- 筛选下拉组 -->

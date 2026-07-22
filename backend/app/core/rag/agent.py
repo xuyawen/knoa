@@ -1021,8 +1021,8 @@ class AgenticRAGAgent:
         """把文本 + 多模态文件拼成 OpenAI 多模态 content。
 
         纯文本问题 → 返回 str;带图 → 返回 content blocks list
-        （text + image_url/data URI）。audio/video 由 ask 路由层在入口拦截，
-        这里只处理 image。
+        （text + image_url/data URI）。当前模型仅支持 image，故 audio/video
+        不拼进 LLM 消息（仅作为附件入库/回显），这里只处理 image。
         """
         if not files:
             return question

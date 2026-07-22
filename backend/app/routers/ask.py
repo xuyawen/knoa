@@ -43,14 +43,12 @@ async def ask(
         req.knowledge_base, req.question[:80], len(req.files),
         extra={"request_id": rid},
     )
-    # 多模态能力校验：当前模型不支持的模态（audio/video）直接 400 中文报错
-    for f in req.files:
-        if not settings.MODEL_CAPABILITIES.get(f.kind, False):
-            kind_cn = {"audio": "音频", "video": "视频", "image": "图片"}.get(f.kind, f.kind)
-            raise HTTPException(
-                status_code=400,
-                detail=f"当前模型暂不支持{kind_cn}输入，请移除后重试（仅支持图片）",
-            )
+    # 多模态能力：当前模型仅确认支持 image。不支持的模态（audio/video）不拦截——
+    # 仍作为附件入库/回显（用户记录留痕），但 agent 构造 LLM 消息时只会把 image
+    # 拼成 image_url block，audio/video 不被喂给模型（避免无谓报错）。
+    unsupported = [f.kind for f in req.files if not settings.MODEL_CAPABILITIES.get(f.kind, False)]
+    if unsupported:
+        logger.info("chat attachments with unsupported modality (stored, not sent to model): %s", unsupported)
 
     # 库级权限：问答目标 KB 必须对该用户可见。
     # 用一次性 DB 会话完成（流式开始前），不占用流式生成器的会话生命周期 ——

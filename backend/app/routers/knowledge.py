@@ -12,6 +12,12 @@ from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.es_client import ESClient
 from app.core.rag.ingestor import DocumentIngester
 from app.core.rag.parsers import UnsupportedFormatError, parse_document
+from app.core.rag.multimodal import (
+    AUDIO_EXTS,
+    IMAGE_EXTS,
+    VIDEO_EXTS,
+    parse_multimodal,
+)
 from app.core.storage import get_object_store
 from app.config import settings
 from app.core.security import (
@@ -332,12 +338,28 @@ async def upload_document(
     object_key = f"uploads/{kb_id}/{uuid.uuid4().hex}_{filename}"
     await store.put(object_key, raw)
 
-    # 3) 按扩展名解析为文本；解析失败则清理已存的原始文件并回 415
-    try:
-        parsed = parse_document(filename, raw)
-    except UnsupportedFormatError as e:
+    # 3) 按扩展名解析：文本走原 parse_document；图片/音频/视频走多模态解析器。
+    #    解析失败则清理已存的原始文件并回 415。
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    text_exts = {"md", "markdown", "txt", "docx", "pdf"}
+    if ext in text_exts:
+        try:
+            parsed = parse_document(filename, raw)
+        except UnsupportedFormatError as e:
+            await store.delete(object_key)
+            raise HTTPException(status_code=415, detail=str(e))
+    elif ext in IMAGE_EXTS | AUDIO_EXTS | VIDEO_EXTS:
+        try:
+            parsed = await parse_multimodal(filename, raw, get_llm())
+        except UnsupportedFormatError as e:
+            await store.delete(object_key)
+            raise HTTPException(status_code=415, detail=str(e))
+    else:
         await store.delete(object_key)
-        raise HTTPException(status_code=415, detail=str(e))
+        raise HTTPException(
+            status_code=415,
+            detail=f"不支持的文件格式 .{ext or '未知'}，当前支持：md / txt / docx / pdf / 图片 / 音频 / 视频",
+        )
 
     # 4) 方案 A：只建 Document(status=待复核)，不摄入
     title = _extract_title(parsed.text, filename)
@@ -615,6 +637,12 @@ _TYPE_MAP = {
     "txt": "TXT",
     "docx": "DOCX",
     "pdf": "PDF",
+    # Phase 7 多模态：图片/音频/视频的类型徽标
+    "png": "IMAGE", "jpg": "IMAGE", "jpeg": "IMAGE", "gif": "IMAGE",
+    "bmp": "IMAGE", "webp": "IMAGE",
+    "mp3": "AUDIO", "wav": "AUDIO", "m4a": "AUDIO", "ogg": "AUDIO",
+    "flac": "AUDIO", "aac": "AUDIO",
+    "mp4": "VIDEO", "mov": "VIDEO", "webm": "VIDEO", "mkv": "VIDEO", "avi": "VIDEO",
 }
 
 

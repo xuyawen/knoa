@@ -93,6 +93,19 @@ function readFileB64(file: File): Promise<string> {
   })
 }
 
+/** 多模态附件 → data URI（图片/音频/视频统一用 base64 内联播放或预览）。 */
+function attachSrc(a: { mimeType?: string; dataB64?: string }): string {
+  return `data:${a.mimeType};base64,${a.dataB64}`
+}
+
+/** 由 MIME 推断附件种类，决定缩略图/播放器渲染。 */
+function kindOf(file: File): 'image' | 'audio' | 'video' | null {
+  if (file.type.startsWith('image/')) return 'image'
+  if (file.type.startsWith('audio/')) return 'audio'
+  if (file.type.startsWith('video/')) return 'video'
+  return null
+}
+
 function toChatMessage(m: SessionMessage): ChatMessage {
   return {
     id: crypto.randomUUID(),
@@ -243,17 +256,18 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-/* ---------- 附件（多模态图片） ---------- */
+/* ---------- 附件（多模态：图片 / 音频 / 视频） ---------- */
 async function onAttach(e: Event) {
   const input = e.target as HTMLInputElement
   const files = Array.from(input.files || [])
   for (const f of files) {
-    if (!f.type.startsWith('image/')) continue
+    const kind = kindOf(f)
+    if (!kind) continue
     try {
       const b64 = await readFileB64(f)
-      attached.value.push({ kind: 'image', mimeType: f.type, dataB64: b64, name: f.name })
+      attached.value.push({ kind, mimeType: f.type, dataB64: b64, name: f.name })
     } catch {
-      toast.error(`读取图片失败：${f.name}`)
+      toast.error(`读取文件失败：${f.name}`)
     }
   }
   input.value = ''
@@ -346,7 +360,12 @@ watch(messages, scrollToBottom, { deep: false })
           <div v-if="m.role === 'user'" class="msg-row user-msg">
             <div class="msg-bubble user-bubble">
               <div class="attach-thumbs" v-if="m.attachments?.length">
-                <img v-for="(a, i) in m.attachments" :key="i" :src="`data:${a.mimeType};base64,${a.dataB64}`" class="attach-thumb" />
+                <template v-for="(a, i) in m.attachments" :key="i">
+                  <img v-if="a.kind === 'image'" :src="attachSrc(a)" class="attach-thumb" />
+                  <audio v-else-if="a.kind === 'audio'" :src="attachSrc(a)" controls class="attach-media" />
+                  <video v-else-if="a.kind === 'video'" :src="attachSrc(a)" controls class="attach-media" />
+                  <span v-else class="attach-badge">{{ a.kind }}</span>
+                </template>
               </div>
               {{ m.content }}
             </div>
@@ -421,7 +440,9 @@ watch(messages, scrollToBottom, { deep: false })
       <div class="input-area" v-if="section === 'new'">
         <div v-if="attached.length" class="attach-preview">
           <div v-for="(a, i) in attached" :key="i" class="attach-preview-item">
-            <img :src="`data:${a.mimeType};base64,${a.dataB64}`" class="attach-thumb" />
+            <img v-if="a.kind === 'image'" :src="attachSrc(a)" class="attach-thumb" />
+            <audio v-else-if="a.kind === 'audio'" :src="attachSrc(a)" controls class="attach-media" />
+            <video v-else-if="a.kind === 'video'" :src="attachSrc(a)" controls class="attach-media" />
             <button class="attach-remove" @click="removeAttach(i)"><Icon name="close" :size="10" /></button>
           </div>
         </div>
@@ -434,9 +455,9 @@ watch(messages, scrollToBottom, { deep: false })
         ></textarea>
         <div class="input-bar">
           <div class="input-left">
-            <label class="attach-btn" title="附图片">
+            <label class="attach-btn" title="附图片 / 音频 / 视频">
               <Icon name="attach" :size="17" />
-              <input type="file" accept="image/*" multiple class="file-hidden" @change="onAttach" />
+              <input type="file" accept="image/*,audio/*,video/*" multiple class="file-hidden" @change="onAttach" />
             </label>
             <span class="char-count">{{ inputText.length }} / 2000</span>
           </div>
@@ -887,6 +908,8 @@ watch(messages, scrollToBottom, { deep: false })
 .attach-preview { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .attach-preview-item { position: relative; }
 .attach-thumb { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border); }
+.attach-media { width: 200px; max-width: 60vw; border-radius: 8px; border: 1px solid var(--border); }
+.attach-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 12px; }
 .attach-remove {
   position: absolute;
   top: -5px;
