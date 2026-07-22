@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select, delete
+from sqlalchemy import delete, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
@@ -27,33 +27,45 @@ async def list_sessions(
         .order_by(ChatSession.updated_at.desc())
     )
     sessions = result.scalars().all()
+    if not sessions:
+        return []
+
+    # 聚合查询消除 N+1：一次性取全部会话的消息数与首条用户消息，而非逐条查
+    ids = [s.id for s in sessions]
+    counts = (
+        await db.execute(
+            select(ChatMessage.session_id, func.count(ChatMessage.id))
+            .where(ChatMessage.session_id.in_(ids))
+            .group_by(ChatMessage.session_id)
+        )
+    ).all()
+    count_by_id = {sid: c for sid, c in counts}
+
+    first_msgs = (
+        await db.execute(
+            select(ChatMessage.session_id, ChatMessage.content)
+            .where(ChatMessage.session_id.in_(ids), ChatMessage.role == "user")
+            .order_by(ChatMessage.session_id, ChatMessage.created_at)
+            .distinct(ChatMessage.session_id)
+        )
+    ).all()
+    first_by_id = {sid: content for sid, content in first_msgs}
 
     out = []
     for s in sessions:
-        try:
-            msg_count = await db.scalar(
-                select(func.count(ChatMessage.id)).where(ChatMessage.session_id == s.id)
+        title = s.title
+        if not title:
+            first_user = first_by_id.get(s.id)
+            title = (first_user[:24] + "…") if first_user else "新对话"
+        out.append(
+            SessionOut(
+                id=str(s.id),
+                title=title,
+                updated_at=s.updated_at.isoformat() if s.updated_at else "",
+                msg_count=count_by_id.get(s.id, 0),
+                summary=s.summary,
             )
-            title = s.title
-            if not title:
-                first_user = await db.scalar(
-                    select(ChatMessage.content)
-                    .where(ChatMessage.session_id == s.id, ChatMessage.role == "user")
-                    .order_by(ChatMessage.created_at)
-                    .limit(1)
-                )
-                title = (first_user[:24] + "…") if first_user else "新对话"
-            out.append(
-                SessionOut(
-                    id=str(s.id),
-                    title=title,
-                    updated_at=s.updated_at.isoformat() if s.updated_at else "",
-                    msg_count=msg_count or 0,
-                    summary=s.summary,
-                )
-            )
-        except Exception:
-            pass  # 单个会话构建失败不阻塞整体列表
+        )
     return out
 
 

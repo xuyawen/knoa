@@ -59,6 +59,19 @@ from app.models.knowledge import SourceItemOut
 
 logger = logging.getLogger(__name__)
 
+# 后台任务引用集：持有 asyncio 任务到其完成，防止被 GC 静默取消
+# （CPython 对无引用 task 可能在下次 GC 时取消）；任务完成后自动 discard，
+# 集合不会无限增长。
+_BACKGROUND_TASKS: set = set()
+
+
+def _spawn_background(coro):
+    """即发即弃的后台任务：持有引用 + 完成后自动清理，异常记入日志。"""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
+
 try:
     from langsmith import traceable
 except ImportError:
@@ -494,17 +507,12 @@ class AgenticRAGAgent:
             await self.db.commit()
 
             # ── Mem0：后台抽取/保存长期记忆（不阻塞回答已返回的 SSE 流） ──
+            # 持有 task 引用到完成，避免被 GC 静默取消；异常记入日志而非吞掉
             if self.memory and self.user_id:
-                try:
-                    asyncio.create_task(self._save_memory(question, final_answer_text))
-                except Exception:
-                    pass
+                _spawn_background(self._save_memory(question, final_answer_text))
 
             # ── 滚动摘要：后台压缩窗口外旧对话（不阻塞 SSE 流，下一轮才生效） ──
-            try:
-                asyncio.create_task(self._roll_summary(session.id))
-            except Exception:
-                pass
+            _spawn_background(self._roll_summary(session.id))
 
             # ── 问答链路追踪：耗时 + 召回块数 + 是否触发图谱 + 意图 + 模型 ──
             intent = st.intent

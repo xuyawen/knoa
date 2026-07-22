@@ -1,4 +1,6 @@
+import asyncio
 import base64
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -20,6 +22,7 @@ from app.core.rag.multimodal import (
 )
 from app.core.storage import get_object_store
 from app.config import settings
+from app.database import AsyncSessionLocal
 from app.core.security import (
     get_current_user,
     LEVEL_ORDER,
@@ -42,6 +45,8 @@ from app.models.knowledge import (
     KnowledgeBasesResponse,
 )
 from app.models.operation_log import record_operation
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -463,8 +468,6 @@ async def approve_document(
     kb_id: str,
     doc_id: str,
     db: AsyncSession = Depends(get_db),
-    embedder: EmbeddingModel = Depends(get_embedder),
-    llm: OpenAICompatProvider = Depends(get_llm),
     user: User = Depends(require_kb_access("edit")),
 ):
     """审核通过：翻转状态为已审核，并触发摄入（切分+向量化+ES+图谱）。
@@ -496,26 +499,66 @@ async def approve_document(
         task.current_step = "向量化中"
         task.started_at = datetime.now(timezone.utc)
 
-    # 触发摄入：与 seed / upload 共用同一套 chunk/embed/ES/图谱逻辑
-    ingester = DocumentIngester(
-        embedder,
-        settings.RAG_CHUNK_SIZE,
-        settings.RAG_CHUNK_OVERLAP,
-        settings.RAG_CHUNK_MIN_CHARS,
-        es=get_es(),
-        graph=GraphStore(llm, embedder),
-    )
-    await ingester.ingest_existing(doc, db)
+    # 触发摄入：改为后台异步，不阻塞本请求（大文档同步摄入会触发网关 504）。
+    # ponytail: 独立会话 + 单例依赖，失败隔离；进度由 _ingest_document_background 回写
+    _spawn_background(_ingest_document_background(kb_id, doc.id, str(user.id)))
 
-    if task is not None:
-        task.status = "completed"
-        task.progress = 100
-        task.current_step = "完成"
-        task.completed_at = datetime.now(timezone.utc)
-    await db.commit()
+    await db.commit()  # 持久化 status=已审核 + task=processing，前端立即可见进度
     await db.refresh(doc)
     await record_operation(db, user, "approve", related_doc_id=str(doc.id), detail=doc.title)
     return _doc_out(doc)
+
+
+# 后台任务引用集：与 agent.py 同款机制，持有 task 到完成，防止被 GC 取消
+_BACKGROUND_TASKS: set = set()
+
+
+def _spawn_background(coro):
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
+
+
+async def _ingest_document_background(kb_id: str, doc_id: str, user_id: str) -> None:
+    """审核通过后异步摄入：切分+向量化+ES+图谱，回写处理任务进度。
+
+    ponytail: 不阻塞 approve 请求（大文档同步摄入会触发网关 504）；
+    独立 DB 会话 + 单例依赖，失败隔离，不污染主请求事务。
+    """
+    async with AsyncSessionLocal() as db:
+        doc = await db.scalar(
+            select(Document).where(Document.id == doc_id, Document.kb_id == kb_id)
+        )
+        if doc is None:
+            return
+        ingester = DocumentIngester(
+            get_embedder(),
+            settings.RAG_CHUNK_SIZE,
+            settings.RAG_CHUNK_OVERLAP,
+            settings.RAG_CHUNK_MIN_CHARS,
+            es=get_es(),
+            graph=GraphStore(get_llm(), get_embedder()),
+        )
+        task = await db.scalar(
+            select(DocumentTask)
+            .where(DocumentTask.document_id == doc.id)
+            .order_by(DocumentTask.created_at.desc())
+        )
+        try:
+            await ingester.ingest_existing(doc, db)
+            if task is not None:
+                task.status = "completed"
+                task.progress = 100
+                task.current_step = "完成"
+                task.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+        except Exception as e:
+            logger.warning("background ingest failed kb=%s doc=%s: %s", kb_id, doc_id, e)
+            if task is not None:
+                task.status = "failed"
+                task.current_step = "摄入失败"
+                await db.commit()
 
 
 @router.post("/knowledge-bases/{kb_id}/documents/{doc_id}/reject", response_model=DocumentOut)

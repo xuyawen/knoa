@@ -84,6 +84,13 @@ async def lifespan(app: FastAPI):
         await get_es().aclose()
     except Exception:
         pass
+    # 统一关闭 Redis 连接（main 启动期创建单例，此前未关闭 → 连接泄漏）
+    try:
+        from app.deps import get_redis
+
+        await get_redis().close()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="知海 Knoa API", version="0.1.0", lifespan=lifespan)

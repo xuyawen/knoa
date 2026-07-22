@@ -25,6 +25,10 @@ from app.models.auth import (
 
 router = APIRouter()
 
+# 登录时序侧信道防护用的占位哈希：用户不存在时也跑一次等效 PBKDF2 校验，
+# 使「用户存在/不存在」「密码对错」路径响应时间趋同，防止攻击者通过耗时枚举有效用户名。
+DUMMY_HASH = User.hash_password("knoa-timing-dummy")
+
 
 def _to_out(u: User) -> UserOut:
     return UserOut(
@@ -58,7 +62,12 @@ def _clear_auth_cookie(response: Response) -> None:
 @router.post("/auth/login", response_model=TokenOut)
 async def login(payload: LoginIn, response: Response, db: AsyncSession = Depends(get_db)):
     user = await db.scalar(select(User).where(User.username == payload.username))
-    if user is None or not user.verify_password(payload.password) or not user.is_active:
+    # 时序侧信道防护：无论用户是否存在，都执行一次恒定耗时的 PBKDF2 校验，
+    # 使「存在/不存在」「密码对错」路径响应时间趋同，防止攻击者通过耗时枚举有效用户名。
+    if user is None:
+        User.verify_password(payload.password, DUMMY_HASH)
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    if not user.verify_password(payload.password) or not user.is_active:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = create_access_token(str(user.id), user.username, user.role)
     _set_auth_cookie(response, token)

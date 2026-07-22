@@ -9,7 +9,9 @@ HTTP 客户端用 httpx.AsyncClient + ASGITransport：让 app 跑在「与测试
 TestClient（独立线程/loop）带来的「another operation is in progress /
 attached to a different loop」等异步连接错乱。
 """
+import asyncio
 import httpx
+import time
 import uuid
 from httpx import ASGITransport
 
@@ -35,6 +37,31 @@ async def _token(client):
     assert r.status_code == 200, r.text
     # 注意：响应模型是 CamelModel，JSON 键为 accessToken
     return r.json()["accessToken"]
+
+
+async def _wait_for_chunks(db_session, *, doc_id=None, kb_id=None, timeout: float = 3.0):
+    """等待后台异步摄入完成（approve 已改为不阻塞请求、后台摄入）。
+
+    每轮查询前 yield 给事件循环，让 _ingest_document_background 有机会执行并提交；
+    超时则返回当前计数（通常为 0），由调用方断言。
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        q = select(func.count()).select_from(DocChunk)
+        if doc_id is not None:
+            q = q.where(DocChunk.document_id == uuid.UUID(doc_id))
+        if kb_id is not None:
+            q = q.where(DocChunk.kb_id == kb_id)
+        n = (await db_session.execute(q)).scalar()
+        if n and n > 0:
+            return n
+        await asyncio.sleep(0.05)
+    q = select(func.count()).select_from(DocChunk)
+    if doc_id is not None:
+        q = q.where(DocChunk.document_id == uuid.UUID(doc_id))
+    if kb_id is not None:
+        q = q.where(DocChunk.kb_id == kb_id)
+    return (await db_session.execute(q)).scalar()
 
 
 async def test_health(client):
@@ -144,9 +171,8 @@ async def test_upload_pending_then_approve_ingests(client, db_session):
     ap = await client.post(f"/api/knowledge-bases/{kb_id}/documents/{doc_id}/approve", headers=h)
     assert ap.status_code == 200, ap.text
     assert ap.json()["status"] == "已审核"
-    n1 = (await db_session.execute(
-        select(func.count()).select_from(DocChunk).where(DocChunk.document_id == uuid.UUID(doc_id))
-    )).scalar()
+    # approve 已改为后台异步摄入，轮询等待摄入完成（yield 给事件循环让后台任务执行）
+    n1 = await _wait_for_chunks(db_session, doc_id=doc_id)
     assert n1 > 0, "approve 后未摄入"
 
     # 4) 驳回一条新上传 → 状态已拒绝且无 chunk
@@ -200,9 +226,7 @@ async def test_short_document_still_ingested(client, db_session):
             f"/api/knowledge-bases/{kb_id}/documents/{doc_id}/approve", headers=h
         )
         assert ap.status_code == 200 and ap.json()["status"] == "已审核"
-        n1 = (await db_session.execute(
-            select(func.count()).select_from(DocChunk).where(DocChunk.document_id == uuid.UUID(doc_id))
-        )).scalar()
+        n1 = await _wait_for_chunks(db_session, doc_id=doc_id)
         assert n1 >= 1, "短文档被噪声阈值丢弃, 审核后搜不到"
     finally:
         await client.delete(f"/api/knowledge-bases/{kb_id}", headers=h)
@@ -239,11 +263,8 @@ async def test_kb_update_and_delete_cascade(client, db_session):
     )
     doc_id = up.json()["id"]
     await client.post(f"/api/knowledge-bases/{kb_id}/documents/{doc_id}/approve", headers=h)
-    n_before = (
-        await db_session.execute(
-            select(func.count()).select_from(DocChunk).where(DocChunk.kb_id == kb_id)
-        )
-    ).scalar()
+    # approve 已改为后台异步摄入，轮询等待摄入完成
+    n_before = await _wait_for_chunks(db_session, kb_id=kb_id)
     assert n_before > 0
     lst2 = (await client.get("/api/knowledge-bases", headers=h)).json()
     kb_info = next(x for x in lst2["knowledgeBases"] if x["id"] == kb_id)

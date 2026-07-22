@@ -156,9 +156,10 @@ class User(Base):
         )
         return f"pbkdf2_sha256${settings.PBKDF2_ITERATIONS}${salt}${dk.hex()}"
 
-    def verify_password(self, password: str) -> bool:
+    def verify_password(self, password: str, password_hash: str | None = None) -> bool:
+        h = password_hash or self.password_hash
         try:
-            _, iter_s, salt, dk = self.password_hash.split("$")
+            _, iter_s, salt, dk = h.split("$")
             dk2 = hashlib.pbkdf2_hmac(
                 "sha256", password.encode(), bytes.fromhex(salt), int(iter_s)
             )

@@ -44,6 +44,10 @@ def _rate_limited(ip: str) -> bool:
     # 清掉窗口外的旧命中
     while window and now - window[0] > _RATE_WINDOW:
         window.pop(0)
+    # 窗口已空：删除该 IP 的 key，避免 _hits dict 随不同访客无限增长（内存泄漏）
+    if not window:
+        _hits.pop(ip, None)
+        return False
     if len(window) >= _RATE_LIMIT:
         return True
     window.append(now)
