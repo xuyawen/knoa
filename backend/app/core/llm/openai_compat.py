@@ -30,7 +30,10 @@ class OpenAICompatProvider:
 
     @traceable(name="llm_stream", tags=["llm"])
     async def stream_chat(
-        self, messages: list[dict[str, Any]], temperature: float | None = None
+        self,
+        messages: list[dict[str, Any]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
         """兼容多提供商流式输出，安全地提取 content + reasoning_content"""
         try:
@@ -38,7 +41,7 @@ class OpenAICompatProvider:
                 model=self.model,
                 messages=messages,
                 temperature=temperature or self.default_temperature,
-                max_tokens=self.max_tokens,
+                max_tokens=max_tokens or self.max_tokens,
                 stream=True,
             )
         except Exception as e:

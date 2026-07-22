@@ -3,13 +3,13 @@
 // 用客户端力导向布局渲染实体关系图，支持拖拽 / 缩放 / 平移 / 悬浮高亮 / 点击查看。
 // 右侧统计面板全部取自接口真实数据（节点/边/库数、类型分布、按度数 Top、最近新增）。
 // section 由路由决定（global/nodes/relations/stats）。
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useToastStore } from '@/stores/toast'
 import { useKnowledgeStore } from '@/stores/knowledge'
-import { getGraph } from '@/api'
-import type { GraphData, GraphNode, GraphEdge } from '@/types/api'
+import { getGraph, getGraphHotNodes, getGraphRecent, exportGraph } from '@/api'
+import type { GraphData, GraphNode, GraphEdge, GraphFilter, GraphHotNode } from '@/types/api'
 
 const toast = useToastStore()
 const knowledge = useKnowledgeStore()
@@ -42,23 +42,45 @@ const searchTerm = ref('')
 const selectedId = ref<string | null>(null)
 const hoveredId = ref<string | null>(null)
 
-// 工具栏筛选
+// 工具栏筛选（透传后端 GET /api/graph 真实过滤）
 const gFilterType = ref('')
 const gFilterBiz = ref('')
 const gFilterTime = ref('')
-const nodeTypeOpts = [
-  { label: '全部', value: '' }, { label: '文档', value: 'doc' },
-  { label: '知识点', value: 'concept' }, { label: '标签', value: 'tag' },
-  { label: '业务分类', value: 'biz' },
-]
-const bizCatOpts = [
-  { label: '全部', value: '' }, { label: '制度规范', value: 'policy' },
-  { label: '培训资料', value: 'training' }, { label: '产品文档', value: 'product' },
-]
+
+// 节点类型选项：从已加载图谱的真实去重 type 派生（首次无类型过滤时采集）
+const allTypeOptions = ref<{ label: string; value: string }[]>([{ label: '全部', value: '' }])
+const bizCatOpts = computed<{ label: string; value: string }[]>(() => {
+  const cats = Array.from(
+    new Set(knowledge.bases.map((b) => b.category).filter((c): c is string => !!c)),
+  )
+  return [{ label: '全部', value: '' }, ...cats.map((c) => ({ label: c, value: c }))]
+})
+const nodeTypeOpts = computed(() => allTypeOptions.value)
 const timeRangeOpts = [
   { label: '全部时间', value: '' }, { label: '近 7 天', value: '7d' },
   { label: '近 30 天', value: '30d' }, { label: '近 90 天', value: '90d' },
 ]
+
+// 时间范围 → created_at 下限（ISO）
+function timeRangeToFromTo(v: string): { from?: string; to?: string } {
+  if (!v) return {}
+  const days = v === '7d' ? 7 : v === '30d' ? 30 : v === '90d' ? 90 : 0
+  if (!days) return {}
+  const d = new Date()
+  d.setDate(d.getDate() - days)
+  return { from: d.toISOString() }
+}
+
+// 真实筛选参数（随三个下拉变化）
+const graphFilter = computed<GraphFilter>(() => ({
+  nodeType: gFilterType.value || undefined,
+  bizCategory: gFilterBiz.value || undefined,
+  ...timeRangeToFromTo(gFilterTime.value),
+}))
+
+// 右侧「热门实体 Top5 / 最近更新」来自服务端专门接口（替代前端近似）
+const hotNodes = ref<GraphHotNode[]>([])
+const recentNodes = ref<GraphNode[]>([])
 
 /* ---- 力导向布局 ---- */
 interface LNode { id: string; x: number; y: number; deg: number; r: number }
@@ -233,18 +255,7 @@ const typeBars = computed(() => {
   const max = entries.length ? entries[0][1] : 1
   return entries.map(([label, count]) => ({ label, count, pct: Math.round((count / max) * 100) }))
 })
-const topNodes = computed(() =>
-  [...(graph.value?.nodes || [])]
-    .map((n) => ({ node: n, deg: degree.value[n.id] || 0 }))
-    .sort((a, b) => b.deg - a.deg)
-    .slice(0, 6),
-)
-const recentNodes = computed(() =>
-  [...(graph.value?.nodes || [])]
-    .filter((n) => n.createdAt)
-    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-    .slice(0, 6),
-)
+// 热门/最近列表改由服务端专门接口（hotNodes/recentNodes）提供，见 loadHotRecent。
 const selectedNode = computed(() => graph.value?.nodes.find((n) => n.id === selectedId.value) || null)
 const selectedNeighbors = computed<string[]>(() => {
   const id = selectedId.value
@@ -321,13 +332,24 @@ async function fetchGraph() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const data = await getGraph(selectedKb.value)
+    const data = await getGraph(selectedKb.value, graphFilter.value)
     graph.value = data
     lNodes.value = computeLayout(data.nodes, data.edges)
     selectedId.value = null
     hoveredId.value = null
     resetView()
     await nextTick()
+    // 无类型过滤时，用真实节点类型刷新下拉选项
+    if (!gFilterType.value && data.nodes) {
+      const types = Array.from(
+        new Set(data.nodes.map((n) => n.type).filter((t): t is string => !!t)),
+      )
+      allTypeOptions.value = [
+        { label: '全部', value: '' },
+        ...types.map((t) => ({ label: t, value: t })),
+      ]
+    }
+    await loadHotRecent()
   } catch (e: any) {
     errorMsg.value = e?.message || String(e)
     toast.error(`加载图谱失败：${errorMsg.value}`)
@@ -336,16 +358,44 @@ async function fetchGraph() {
   }
 }
 
+async function loadHotRecent() {
+  try {
+    const [h, r] = await Promise.all([
+      getGraphHotNodes(5, selectedKb.value),
+      getGraphRecent(5, selectedKb.value),
+    ])
+    hotNodes.value = h
+    recentNodes.value = r
+  } catch {
+    /* 非致命：侧栏列表缺失不影响主图 */
+  }
+}
+
+function onExport() {
+  exportGraph('json', selectedKb.value).catch((e: any) => {
+    toast.error(`导出失败：${e?.message || e}`)
+  })
+}
+
 function resetAll() {
+  gFilterType.value = ''
+  gFilterBiz.value = ''
+  gFilterTime.value = ''
   searchTerm.value = ''
   selectedId.value = null
   hoveredId.value = null
   resetView()
+  void fetchGraph()
 }
 
 onMounted(async () => {
   if (!knowledge.loaded) await knowledge.load().catch(() => {})
   await fetchGraph()
+})
+
+// 三个筛选下拉变化 → 重新拉图（后端真实过滤，节点集合随之变化）
+watch([gFilterType, gFilterBiz, gFilterTime], () => {
+  void fetchGraph()
 })
 </script>
 
@@ -371,7 +421,7 @@ onMounted(async () => {
         <button class="btn btn-primary btn-sm" :disabled="loading" @click="fetchGraph">
           <Icon name="search" :size="13" /> 搜索
         </button>
-        <button class="btn btn-outline btn-sm" title="导出图谱">
+        <button class="btn btn-outline btn-sm" title="导出图谱" @click="onExport">
           <Icon name="download" :size="13" /> 导出图谱
         </button>
       </div>
@@ -555,13 +605,13 @@ onMounted(async () => {
 
         <!-- 高关联节点 -->
         <div class="section-block">
-          <div class="section-title">高关联实体 Top 6</div>
+          <div class="section-title">热门知识点 Top 5</div>
           <div class="hot-list">
-            <div v-for="(item, i) in topNodes" :key="item.node.id" class="hot-item" @click="selectedId = item.node.id" @mouseenter="hoveredId = item.node.id" @mouseleave="hoveredId = null">
+            <div v-for="(item, i) in hotNodes" :key="item.id" class="hot-item" @click="selectedId = item.id" @mouseenter="hoveredId = item.id" @mouseleave="hoveredId = null">
               <span class="hot-rank" :class="{ top3: i < 3 }">{{ i + 1 }}</span>
-              <span class="hot-dot" :style="{ background: nodeColor(item.node.kbId) }"></span>
-              <span class="hot-name">{{ item.node.label }}</span>
-              <span class="hot-count">度数 <strong>{{ item.deg }}</strong></span>
+              <span class="hot-dot" :style="{ background: nodeColor(item.kbId) }"></span>
+              <span class="hot-name">{{ item.label }}</span>
+              <span class="hot-count">度数 <strong>{{ item.degree }}</strong></span>
             </div>
           </div>
         </div>
@@ -670,13 +720,13 @@ onMounted(async () => {
 
         <div class="grid-2">
           <div class="card stat-block">
-            <div class="section-title">高关联实体 Top 6</div>
+            <div class="section-title">热门知识点 Top 5</div>
             <div class="hot-list">
-              <div v-for="(item, i) in topNodes" :key="item.node.id" class="hot-item" @click="selectedId = item.node.id">
+              <div v-for="(item, i) in hotNodes" :key="item.id" class="hot-item" @click="selectedId = item.id">
                 <span class="hot-rank" :class="{ top3: i < 3 }">{{ i + 1 }}</span>
-                <span class="hot-dot" :style="{ background: nodeColor(item.node.kbId) }"></span>
-                <span class="hot-name">{{ item.node.label }}</span>
-                <span class="hot-count">度数 <strong>{{ item.deg }}</strong></span>
+                <span class="hot-dot" :style="{ background: nodeColor(item.kbId) }"></span>
+                <span class="hot-name">{{ item.label }}</span>
+                <span class="hot-count">度数 <strong>{{ item.degree }}</strong></span>
               </div>
             </div>
           </div>

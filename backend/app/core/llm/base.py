@@ -20,7 +20,10 @@ class ToolCallResult(BaseModel):
 
 class LLMProvider(Protocol):
     async def stream_chat(
-        self, messages: list[dict[str, str]], temperature: float | None = None
+        self,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[str]: ...
 
     async def chat(

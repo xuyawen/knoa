@@ -12,6 +12,9 @@ import type {
   AIReview,
   ChatAttachment,
   GraphData,
+  GraphFilter,
+  GraphHotNode,
+  GraphNode,
   DashboardMetrics,
   TrendResponse,
   DocCategory,
@@ -286,12 +289,56 @@ export async function deleteFeedback(messageId: string) {
   return resp.json()
 }
 
-/** 知识图谱只读数据：返回 kg_node / kg_edge 的真实节点与边。 */
-export async function getGraph(kbId?: string | null): Promise<GraphData> {
-  const qs = kbId ? `?kb_id=${encodeURIComponent(kbId)}` : ''
-  const resp = await fetch(`/api/graph${qs}`, { headers: authHeaders() })
+/** 知识图谱只读数据：返回 kg_node / kg_edge 的真实节点与边（支持筛选）。 */
+export async function getGraph(kbId?: string | null, filter?: GraphFilter): Promise<GraphData> {
+  const params = new URLSearchParams()
+  if (kbId) params.set('kb_id', kbId)
+  if (filter?.nodeType) params.set('node_type', filter.nodeType)
+  if (filter?.bizCategory) params.set('biz_category', filter.bizCategory)
+  if (filter?.from) params.set('from', filter.from)
+  if (filter?.to) params.set('to', filter.to)
+  const qs = params.toString()
+  const resp = await fetch(`/api/graph${qs ? `?${qs}` : ''}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
+}
+
+/** 热门实体 TopN（按度数）。 */
+export async function getGraphHotNodes(limit = 5, kbId?: string | null): Promise<GraphHotNode[]> {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  if (kbId) params.set('kb_id', kbId)
+  const resp = await fetch(`/api/graph/hot-nodes?${params.toString()}`, { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 最近更新实体 TopN（按 created_at）。 */
+export async function getGraphRecent(limit = 5, kbId?: string | null): Promise<GraphNode[]> {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  if (kbId) params.set('kb_id', kbId)
+  const resp = await fetch(`/api/graph/recent?${params.toString()}`, { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 导出完整图谱（json / gexf），触发浏览器下载。 */
+export async function exportGraph(format: 'json' | 'gexf' = 'json', kbId?: string | null): Promise<void> {
+  const params = new URLSearchParams()
+  params.set('format', format)
+  if (kbId) params.set('kb_id', kbId)
+  const resp = await fetch(`/api/graph/export?${params.toString()}`, { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  const blob = await resp.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = format === 'gexf' ? 'graph.gexf' : 'graph.json'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
 
 /**

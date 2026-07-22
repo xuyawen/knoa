@@ -7,6 +7,7 @@ export interface KnowledgeBase {
   documentCount: number
   pendingCount: number
   description: string | null
+  category?: string | null
 }
 
 export interface KBCreate {
@@ -204,6 +205,19 @@ export interface GraphData {
   nodes: GraphNode[]
   edges: GraphEdge[]
   stats: GraphStats
+}
+
+/** 热门实体（带度数，来自 /api/graph/hot-nodes）。 */
+export interface GraphHotNode extends GraphNode {
+  degree: number
+}
+
+/** 图谱筛选参数（透传后端 GET /api/graph）。 */
+export interface GraphFilter {
+  nodeType?: string
+  bizCategory?: string
+  from?: string   // ISO 日期，created_at >=
+  to?: string     // ISO 日期，created_at <=
 }
 
 export interface KnowledgeBasesResponse {

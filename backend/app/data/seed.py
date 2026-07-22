@@ -8,11 +8,11 @@ from app.database import AsyncSessionLocal, init_db
 from app.db import KnowledgeBase, Trending
 
 KB_SEEDS = [
-    {"id": "compliance", "name": "合规库", "icon": "compliance"},
-    {"id": "ads", "name": "广告投放", "icon": "ads"},
-    {"id": "logistics", "name": "物流仓储", "icon": "logistics"},
-    {"id": "selection", "name": "选品策略", "icon": "selection"},
-    {"id": "service", "name": "客服话术", "icon": "service"},
+    {"id": "compliance", "name": "合规库", "icon": "compliance", "category": "合规"},
+    {"id": "ads", "name": "广告投放", "icon": "ads", "category": "广告"},
+    {"id": "logistics", "name": "物流仓储", "icon": "logistics", "category": "物流"},
+    {"id": "selection", "name": "选品策略", "icon": "selection", "category": "选品"},
+    {"id": "service", "name": "客服话术", "icon": "service", "category": "客服"},
 ]
 
 TRENDING_SEEDS = [
@@ -32,6 +32,9 @@ async def main():
             existing = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == seed["id"]))
             if not existing:
                 db.add(KnowledgeBase(**seed))
+            else:
+                # 幂等回填 category（老库可能缺该字段值）
+                existing.category = seed.get("category")
         await db.flush()
 
         # 种子 trending (写入今天)

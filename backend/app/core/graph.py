@@ -55,7 +55,14 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 def _extract_json(text: str):
-    """从 LLM 的自由文本里抠出第一个 JSON 对象/数组（容错）。"""
+    """从 LLM 的自由文本里抠出 JSON 对象/数组（容错）。
+
+    推理模型（如 Agnes）常把结构化输出塞进 reasoning_content，且中间可能夹带
+    草稿 JSON，真正完整的 JSON 在末尾。故优先整体解析，失败则尝试从「最后一个」
+    配平 JSON 块提取（推理模型的终版 JSON 通常在最后），再回退到首个块。
+    """
+    if not text:
+        return None
     try:
         return json.loads(text)
     except Exception:
@@ -65,19 +72,27 @@ def _extract_json(text: str):
     opens = [i for i, ch in enumerate(cleaned) if ch in "{["]
     if not opens:
         return None
-    start = min(opens)
-    depth = 0
-    for i in range(start, len(cleaned)):
-        ch = cleaned[i]
-        if ch in "{[":
-            depth += 1
-        elif ch in "}]":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(cleaned[start : i + 1])
-                except Exception:
-                    return None
+
+    def _match_from(start: int):
+        depth = 0
+        for i in range(start, len(cleaned)):
+            ch = cleaned[i]
+            if ch in "{[":
+                depth += 1
+            elif ch in "}]":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(cleaned[start : i + 1])
+                    except Exception:
+                        return None
+        return None
+
+    # 末位优先（推理模型终版 JSON 在末尾），失败再往前试
+    for start in reversed(opens):
+        obj = _match_from(start)
+        if isinstance(obj, (dict, list)):
+            return obj
     return None
 
 
@@ -144,13 +159,16 @@ class GraphStore:
             for i, c in enumerate(chunks)
         )[:6000]
         try:
-            raw = await self.llm.chat(
-                [
-                    {"role": "system", "content": _GRAPH_EXTRACT_PROMPT},
-                    {"role": "user", "content": f"文档标题：{doc_title}\n\n文档内容：\n{text}"},
-                ],
-                temperature=0.0,
+            # 推理模型（Agnes）非流式 chat 的 content 常为空，且 reasoning 会吃掉
+            # max_tokens 预算导致 JSON 被截断；故用流式 + 提高 token 上限，
+            # 让完整 JSON 落在 content 流里（与非流式问答同一套流式通道）。
+            raw = "".join(
+                c
+                for c in await self._stream_completion(doc_title, text)
             )
+        except Exception as e:
+            logger.warning("graph extract LLM failed (skip graph for doc %s): %s", doc_title, e)
+            return
         except Exception as e:
             logger.warning("graph extract LLM failed (skip graph for doc %s): %s", doc_title, e)
             return
@@ -233,6 +251,25 @@ class GraphStore:
             await db.flush()
             _invalidate_graph(kb_id)
         logger.info("graph extract doc=%s: +%d nodes, +%d edges", doc_title, inserted_nodes, inserted_edges)
+
+    async def _stream_completion(self, doc_title: str, text: str) -> list[str]:
+        """用流式通道拿结构化抽取结果。
+
+        推理模型（Agnes）非流式 chat 的 content 常为空，且 reasoning 会吃掉
+        max_tokens 预算把 JSON 截断；流式 + 抬高 token 上限能让完整 JSON 落在
+        content 流里（与问答共用同一流式通道）。
+        """
+        chunks: list[str] = []
+        async for piece in self.llm.stream_chat(
+            [
+                {"role": "system", "content": _GRAPH_EXTRACT_PROMPT},
+                {"role": "user", "content": f"文档标题：{doc_title}\n\n文档内容：\n{text}"},
+            ],
+            temperature=0.0,
+            max_tokens=8000,
+        ):
+            chunks.append(piece)
+        return chunks
 
     async def delete_by_doc(
         self, db: AsyncSession, kb_id: str, chunk_ids: list
