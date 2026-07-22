@@ -48,6 +48,14 @@
   /* ---- 标签/紫色软底（指标卡、badge 复用）---- */
   --tag-soft: #E0E7FF;
 
+  /* ---- 多彩强调色（指标卡 / 统计卡 / 图表图例，与语义色 danger/success/warning 区分）---- */
+  --accent-blue: #3B82F6;        --accent-blue-soft: #DBEAFE;
+  --accent-cyan: #06B6D4;        --accent-cyan-soft: #CFFAFE;
+  --accent-violet: #8B5CF6;      --accent-violet-soft: #EDE9FE;
+  --accent-green: #10B981;       --accent-green-soft: #D1FAE5;
+  --accent-amber: #F59E0B;       --accent-amber-soft: #FEF3C7;
+  --accent-rose: #F43F5E;        --accent-rose-soft: #FFE4E6;
+
   /* ---- 饼图分类调色板（跟随主题，不写死）---- */
   --cat-1: #3B82F6;          /* 产品文档 · 蓝 */
   --cat-2: #10B981;          /* 技术文档 · 绿 */
@@ -127,6 +135,14 @@
   --node-category: #FBBF24;
 
   --tag-soft: #1E1B3A;
+
+  /* ---- 多彩强调色（暗色）---- */
+  --accent-blue: #60A5FA;        --accent-blue-soft: #14253E;
+  --accent-cyan: #22D3EE;        --accent-cyan-soft: #0B2A33;
+  --accent-violet: #A78BFA;      --accent-violet-soft: #1E1B3A;
+  --accent-green: #34D399;       --accent-green-soft: #062E1E;
+  --accent-amber: #FBBF24;       --accent-amber-soft: #2A2310;
+  --accent-rose: #FB7185;        --accent-rose-soft: #2E1019;
 
   --cat-1: #60A5FA;
   --cat-2: #34D399;

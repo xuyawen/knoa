@@ -2,6 +2,7 @@
 // 通用模态壳：teleport 到 body，背景遮罩 + 居中卡片。
 // 复用于所有弹框场景（确认框、会话过期、详情等），配色走 token。
 import { watch } from 'vue'
+import Icon from './Icon.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -38,7 +39,7 @@ watch(
               <h3 class="modal-title">{{ title }}</h3>
             </slot>
             <button class="icon-btn modal-x" @click="emit('close')" aria-label="关闭">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              <Icon name="close" :size="18" />
             </button>
           </header>
           <div class="modal-body">

@@ -14,7 +14,7 @@ import {
   Flame, Clock, History, List, Globe, UsersRound, CircleDot, Link2, PanelLeftClose,
   Maximize2, Paperclip, Send, Copy, ArrowDownToLine, AppWindow, Star, Tag, Calendar, Sparkles,
   Info, Heart,
-  ArrowUpRight, ArrowDownRight, Pin, UserPlus, Volume2,
+  ArrowUpRight, ArrowDownRight, Pin, UserPlus, Volume2, ArrowUpDown, Lightbulb,
   BrainCircuit, BookMarked, ThumbsUp, ThumbsDown, PenLine, ArrowUp, Square,
 } from 'lucide-vue-next'
 
@@ -40,6 +40,7 @@ const ICONS: Record<string, Component> = {
   volume: Volume2,
   'pen-line': PenLine, 'brain-circuit': BrainCircuit, 'book-marked': BookMarked,
   'thumbs-up': ThumbsUp, 'thumbs-down': ThumbsDown, 'arrow-up': ArrowUp, square: Square,
+  'arrow-up-down': ArrowUpDown, lightbulb: Lightbulb,
 }
 
 const comp = computed(() => ICONS[props.name] ?? AlertTriangle)
