@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import Icon from './Icon.vue'
 
 export interface SelectOption {
@@ -24,16 +24,31 @@ const emit = defineEmits<{
 }>()
 
 const open = ref(false)
+const flipUp = ref(false)
 const root = ref<HTMLElement>()
+const panel = ref<HTMLElement>()
 
 const currentLabel = computed(() => {
   const opt = props.options.find((o) => o.value === props.modelValue)
   return opt?.label || props.placeholder
 })
 
+function measure() {
+  if (!root.value || !panel.value) return
+  const rect = root.value.getBoundingClientRect()
+  const ph = panel.value.getBoundingClientRect().height
+  const below = window.innerHeight - rect.bottom
+  flipUp.value = ph > below && rect.top > below
+}
+
 function toggle() {
   if (props.disabled) return
-  open.value = !open.value
+  if (open.value) {
+    open.value = false
+    return
+  }
+  open.value = true
+  nextTick(measure)
 }
 
 function pick(opt: SelectOption) {
@@ -47,8 +62,18 @@ function onClickOutside(e: MouseEvent) {
   }
 }
 
-onMounted(() => document.addEventListener('click', onClickOutside))
-onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
+function onResize() {
+  if (open.value) measure()
+}
+
+onMounted(() => {
+  document.addEventListener('click', onClickOutside)
+  window.addEventListener('resize', onResize)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onClickOutside)
+  window.removeEventListener('resize', onResize)
+})
 </script>
 
 <template>
@@ -57,8 +82,8 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
       <span class="c-select-label">{{ currentLabel }}</span>
       <Icon name="chevron-down" :size="12" class="c-select-arrow" />
     </button>
-    <Transition name="c-drop">
-      <div v-if="open" class="c-select-panel">
+    <Transition :name="flipUp ? 'c-drop-up' : 'c-drop'">
+      <div v-if="open" ref="panel" class="c-select-panel" :class="{ up: flipUp }">
         <div
           v-for="opt in options"
           :key="opt.value"
@@ -131,6 +156,10 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   padding: 4px;
 }
+.c-select-panel.up {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
 .c-select-opt {
   padding: 8px 12px;
   font-size: 13px;
@@ -160,6 +189,12 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
 .c-drop-leave-active { animation: drop-in 0.12s ease-in reverse; }
 @keyframes drop-in {
   from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.c-drop-up-enter-active { animation: drop-in-up 0.15s ease-out; }
+.c-drop-up-leave-active { animation: drop-in-up 0.12s ease-in reverse; }
+@keyframes drop-in-up {
+  from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
