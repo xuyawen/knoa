@@ -60,8 +60,8 @@ async function handleLogin() {
             <g transform="translate(32.5, 32.5)">
               <path fill="#014DB2" d="M65 0L130 32.5L130 97.5L65 130L0 97.5L0 32.5L65 0Z" />
               <path fill="#3B82F6" d="M65 0L130 32.5L65 65L0 32.5L65 0Z" />
-              <path fill="#1E40AF" d="M65 32.6667L130 65.3333L130 130L65 97.3333L65 32.6667Z" />
-              <path fill="#60A5FA" d="M0 32.6667L65 65.3333L65 130L0 97.3333L0 32.6667Z" />
+              <path fill="#1E40AF" d="M130 32.5L65 65L65 130L130 97.5Z" />
+              <path fill="#60A5FA" d="M0 32.5L65 65L65 130L0 97.5Z" />
             </g>
           </svg>
         </div>
