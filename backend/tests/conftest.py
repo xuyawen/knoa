@@ -89,6 +89,26 @@ _app.dependency_overrides[_dep_get_embedder] = lambda: FakeEmbedder()
 _app.dependency_overrides[_dep_get_llm] = lambda: FakeLLM()
 _app.dependency_overrides[_dep_get_redis] = lambda: FakeRedis()
 
+# 直接调用路径也要换 fake：凡 `from app.deps import get_embedder` 的模块持有的是
+# 导入时的函数引用，重绑 app.deps 模块属性无效（Depends override 也覆盖不到
+# 直接调用）。遍历已加载的 app.* 模块，把每个模块命名空间里这些名字都换成返回
+# fake 的工厂，让所有直接调用方（_ingest_document_background、agent 后台任务等）
+# 也走替身，不依赖真实 API key / Redis。
+# get_es 不动：ES_ENABLED 默认 False，ESClient 各操作在 enabled=False 时静默跳过，
+# 真实客户端即可（返回 None 反而会让 get_es().delete_by_doc 崩）。
+import sys
+from functools import partial
+
+for _mod in list(sys.modules.values()):
+    if _mod is None or not getattr(_mod, "__name__", "").startswith("app."):
+        continue
+    if hasattr(_mod, "get_embedder"):
+        _mod.get_embedder = partial(FakeEmbedder)
+    if hasattr(_mod, "get_llm"):
+        _mod.get_llm = partial(FakeLLM)
+    if hasattr(_mod, "get_redis"):
+        _mod.get_redis = partial(FakeRedis)
+
 
 async def _drop_and_create():
     admin = await asyncpg.connect(
