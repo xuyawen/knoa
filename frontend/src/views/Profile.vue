@@ -1,15 +1,18 @@
 <script setup lang="ts">
 // 个人中心 — 参考用户设计图：顶部资料卡 + 统计 + 左（知识库/贡献）右（问答/贡献度/菜单）
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { changePassword, updateUser } from '@/api/auth'
 import { getSessions, getKnowledgeBases } from '@/api'
 import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
+import SystemSettingsPanel from '@/components/user/SystemSettingsPanel.vue'
 import type { ChatSession, Paginated, KnowledgeBasesResponse } from '@/types/api'
 
 const auth = useAuthStore()
+const route = useRoute()
 const toast = useToastStore()
 
 const ROLE_LABEL: Record<string, string> = { admin: '管理员', editor: '编辑者', viewer: '访客' }
@@ -38,7 +41,21 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+
+  const tab = route.query.tab
+  if (tab === 'info' || tab === 'security' || tab === 'system') {
+    openEdit(tab)
+  }
 })
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (tab === 'info' || tab === 'security' || tab === 'system') {
+      openEdit(tab)
+    }
+  },
+)
 
 /* ---------- 统计 ---------- */
 const stats = computed(() => [
@@ -79,7 +96,7 @@ const recentContribs = [
 
 /* ---------- 编辑资料弹窗 ---------- */
 const showEdit = ref(false)
-const editTab = ref<'info' | 'security'>('info')
+const editTab = ref<'info' | 'security' | 'system'>('info')
 const editingInfo = ref(false)
 const infoDraft = ref({ displayName: '', email: '', department: '', employeeId: '' })
 const infoSaving = ref(false)
@@ -93,7 +110,7 @@ function syncInfoDraft() {
     employeeId: u?.employeeId || '',
   }
 }
-function openEdit(tab: 'info' | 'security' = 'info') {
+function openEdit(tab: 'info' | 'security' | 'system' = 'info') {
   editTab.value = tab
   syncInfoDraft()
   editingInfo.value = false
@@ -268,11 +285,12 @@ const pwdStrength = computed(() => {
           v-for="t in [
             { key: 'info', label: '基本信息' },
             { key: 'security', label: '安全设置' },
+            { key: 'system', label: '系统设置' },
           ]"
           :key="t.key"
           class="edit-tab"
           :class="{ active: editTab === t.key }"
-          @click="editTab = t.key as 'info' | 'security'"
+          @click="editTab = t.key as 'info' | 'security' | 'system'"
         >
           {{ t.label }}
         </button>
@@ -328,7 +346,7 @@ const pwdStrength = computed(() => {
       </div>
 
       <!-- 安全设置 -->
-      <form v-else class="edit-body sec-form" @submit.prevent="onSubmitPassword">
+      <form v-else-if="editTab === 'security'" class="edit-body sec-form" @submit.prevent="onSubmitPassword">
         <div class="sec-field">
           <label class="sec-label">当前密码 <span class="req">*</span></label>
           <div class="sec-input-wrap">
@@ -359,7 +377,12 @@ const pwdStrength = computed(() => {
         </div>
       </form>
 
-      <template #foot>
+      <!-- 系统设置 -->
+      <div v-else class="edit-body">
+        <SystemSettingsPanel />
+      </div>
+
+      <template v-if="editTab !== 'system'" #foot>
         <template v-if="editTab === 'info'">
           <button v-if="!editingInfo" class="btn btn-ghost" @click="showEdit = false">关闭</button>
           <button v-if="!editingInfo" class="btn btn-primary" @click="startEditInfo">

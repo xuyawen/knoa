@@ -132,6 +132,10 @@ function onLogout() {
   auth.logout()
   router.push('/login')
 }
+function goAccountSettings() {
+  closeUserMenu()
+  router.push({ path: '/profile', query: { tab: 'system' } })
+}
 
 const user = computed(() => auth.user)
 const userInitial = computed(() => user.value?.name?.[0] ?? '管')
@@ -225,7 +229,7 @@ const sidebarCollapsed = ref(false)
             <a class="dd-item" href="#" @click.prevent="router.push('/profile')">
               <Icon name="user" :size="16" />个人中心
             </a>
-            <a class="dd-item" href="#" @click.prevent="router.push('/settings')">
+            <a class="dd-item" href="#" @click.prevent="goAccountSettings">
               <Icon name="settings" :size="16" />账号设置
             </a>
             <div class="dd-divider" />
