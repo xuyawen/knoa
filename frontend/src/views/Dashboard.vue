@@ -31,11 +31,11 @@ const statCards = computed(() => {
   if (!m) return []
   const d = m.deltas
   return [
-    { icon: 'doc', color: '#3b82f6', bg: 'rgba(59,130,246,0.10)', label: '文档总数', value: m.totalDocs.toLocaleString(), delta: pct(d.totalDocs), up: d.totalDocs >= 0 },
-    { icon: 'plus', color: '#06b6d4', bg: 'rgba(6,182,212,0.10)', label: '今日新增文档', value: String(m.todayNewDocs), delta: pct(d.todayNewDocs), up: d.todayNewDocs >= 0 },
-    { icon: 'sparkles', color: '#8b5cf6', bg: 'rgba(139,92,246,0.10)', label: 'AI 问答次数', value: m.aiAnswers.toLocaleString(), delta: pct(d.aiAnswers), up: d.aiAnswers >= 0 },
-    { icon: 'search', color: '#3b82f6', bg: 'rgba(59,130,246,0.10)', label: '用户搜索次数', value: m.userSearches.toLocaleString(), delta: pct(d.userSearches), up: d.userSearches >= 0 },
-    { icon: 'users', color: '#8b5cf6', bg: 'rgba(139,92,246,0.10)', label: '活跃用户数', value: String(m.activeUsers), delta: pct(d.activeUsers), up: d.activeUsers >= 0 },
+    { icon: 'doc', color: 'var(--accent-blue)', bg: 'var(--accent-blue-soft)', label: '文档总数', value: m.totalDocs.toLocaleString(), delta: pct(d.totalDocs), up: d.totalDocs >= 0 },
+    { icon: 'plus', color: 'var(--accent-cyan)', bg: 'var(--accent-cyan-soft)', label: '今日新增文档', value: String(m.todayNewDocs), delta: pct(d.todayNewDocs), up: d.todayNewDocs >= 0 },
+    { icon: 'sparkles', color: 'var(--accent-violet)', bg: 'var(--accent-violet-soft)', label: 'AI 问答次数', value: m.aiAnswers.toLocaleString(), delta: pct(d.aiAnswers), up: d.aiAnswers >= 0 },
+    { icon: 'search', color: 'var(--accent-blue)', bg: 'var(--accent-blue-soft)', label: '用户搜索次数', value: m.userSearches.toLocaleString(), delta: pct(d.userSearches), up: d.userSearches >= 0 },
+    { icon: 'users', color: 'var(--accent-violet)', bg: 'var(--accent-violet-soft)', label: '活跃用户数', value: String(m.activeUsers), delta: pct(d.activeUsers), up: d.activeUsers >= 0 },
   ]
 })
 function pct(v: number): string {
@@ -322,10 +322,10 @@ onMounted(() => {
     <template v-else-if="section === 'docs'">
       <h2 class="page-title">文档统计</h2>
       <div class="stats-row">
-        <div class="stat-card card"><div class="sc-icon" style="background:rgba(59,130,246,.1);color:#3b82f6"><Icon name="doc" :size="22"/></div><div class="sc-body"><div class="sc-label">文档总数</div><div class="sc-value">{{ (docStats?.total ?? totalDocs).toLocaleString() }}</div></div></div>
-        <div class="stat-card card"><div class="sc-icon" style="background:rgba(34,197,94,.1);color:#22c55e"><Icon name="check" :size="22"/></div><div class="sc-body"><div class="sc-label">已审核</div><div class="sc-value">{{ (byStatusCount('已审核')).toLocaleString() }}</div></div></div>
-        <div class="stat-card card"><div class="sc-icon" style="background:rgba(245,158,11,.1);color:#f59e0b"><Icon name="alert" :size="22"/></div><div class="sc-body"><div class="sc-label">待复核</div><div class="sc-value">{{ byStatusCount('待复核') }}</div></div></div>
-        <div class="stat-card card"><div class="sc-icon" style="background:rgba(139,92,246,.1);color:#8b5cf6"><Icon name="folder" :size="22"/></div><div class="sc-body"><div class="sc-label">知识库数</div><div class="sc-value">{{ bases.length }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-blue-soft);color:var(--accent-blue)"><Icon name="doc" :size="22"/></div><div class="sc-body"><div class="sc-label">文档总数</div><div class="sc-value">{{ (docStats?.total ?? totalDocs).toLocaleString() }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-green-soft);color:var(--accent-green)"><Icon name="check" :size="22"/></div><div class="sc-body"><div class="sc-label">已审核</div><div class="sc-value">{{ (byStatusCount('已审核')).toLocaleString() }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-amber-soft);color:var(--accent-amber)"><Icon name="alert" :size="22"/></div><div class="sc-body"><div class="sc-label">待复核</div><div class="sc-value">{{ byStatusCount('待复核') }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-violet-soft);color:var(--accent-violet)"><Icon name="folder" :size="22"/></div><div class="sc-body"><div class="sc-label">知识库数</div><div class="sc-value">{{ bases.length }}</div></div></div>
       </div>
 
       <div class="charts-row">
@@ -449,9 +449,9 @@ onMounted(() => {
     <template v-else-if="section === 'users'">
       <h2 class="page-title">用户统计</h2>
       <div class="stats-row">
-        <div class="stat-card card"><div class="sc-icon" style="background:rgba(139,92,246,.1);color:#8b5cf6"><Icon name="users" :size="22"/></div><div class="sc-body"><div class="sc-label">活跃用户数（今日）</div><div class="sc-value">{{ metrics?.activeUsers ?? '—' }}</div></div></div>
-        <div class="stat-card card"><div class="sc-icon" style="background:rgba(59,130,246,.1);color:#3b82f6"><Icon name="user-plus" :size="22"/></div><div class="sc-body"><div class="sc-label">总用户数</div><div class="sc-value">{{ totalUsers ?? '—' }}</div></div></div>
-        <div class="stat-card card"><div class="sc-icon" style="background:rgba(34,197,94,.1);color:#22c55e"><Icon name="sparkles" :size="22"/></div><div class="sc-body"><div class="sc-label">近30天新增</div><div class="sc-value">{{ newUsers30 ?? '—' }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-violet-soft);color:var(--accent-violet)"><Icon name="users" :size="22"/></div><div class="sc-body"><div class="sc-label">活跃用户数（今日）</div><div class="sc-value">{{ metrics?.activeUsers ?? '—' }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-blue-soft);color:var(--accent-blue)"><Icon name="user-plus" :size="22"/></div><div class="sc-body"><div class="sc-label">总用户数</div><div class="sc-value">{{ totalUsers ?? '—' }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-green-soft);color:var(--accent-green)"><Icon name="sparkles" :size="22"/></div><div class="sc-body"><div class="sc-label">近30天新增</div><div class="sc-value">{{ newUsers30 ?? '—' }}</div></div></div>
       </div>
       <div class="ops-section card">
         <div class="panel-head"><span class="panel-title">说明</span></div>
@@ -524,7 +524,7 @@ onMounted(() => {
   cursor: pointer; border: none; font-family: inherit; transition: all var(--dur-fast);
 }
 .ttab:hover { background: var(--bg-hover); }
-.ttab.active { background: var(--brand); color: #fff; font-weight: 600; }
+.ttab.active { background: var(--brand); color: var(--text-on-brand); font-weight: 600; }
 
 .chart-wrap { position: relative; width: 100%; }
 .trend-svg { width: 100%; height: auto; overflow: visible; }
@@ -590,7 +590,7 @@ onMounted(() => {
   display:inline-flex; align-items:center; justify-content:center;
   font-size:12px; font-weight:700; background:var(--bg-subtle); color:var(--text-tertiary);
 }
-.trend-rank.rk-1{background:var(--brand);color:#fff}.trend-rank.rk-2{background:var(--brand-soft);color:var(--brand)}
+.trend-rank.rk-1{background:var(--brand);color:var(--text-on-brand)}.trend-rank.rk-2{background:var(--brand-soft);color:var(--brand)}
 .trend-rank.rk-3{background:var(--warning-soft);color:var(--warning)}
 .trend-q { flex:1; font-size:13.5px; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .trend-count {
