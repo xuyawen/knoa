@@ -267,8 +267,6 @@ async function handleLogin() {
 
 .icon-circle {
   position: absolute;
-  left: 325px;
-  top: 209px;
   width: 64px;
   height: 64px;
   border-radius: 50%;
@@ -279,50 +277,50 @@ async function handleLogin() {
   justify-content: center;
   color: #6b7280;
   box-shadow: 0 4px 16px rgba(10, 23, 40, 0.06);
-  animation: orbit 24s linear infinite;
+  animation: fy 3.2s ease-in-out infinite;
   transition: color 0.3s, border-color 0.3s, box-shadow 0.3s;
 }
 
-/* 鼠标移入方块：四周图标圈点亮成品牌蓝并加速公转 + 放大 */
+/* 鼠标移入方块：四周图标圈点亮成品牌蓝并加速浮动放大 */
 .cube-scene:hover ~ .icon-circle {
   color: #014db2;
   border-color: #cfe0f7;
   box-shadow: 0 8px 22px rgba(1, 77, 178, 0.18);
-  animation-name: orbit-hover;
-  animation-duration: 10s;
+  animation-name: fy-hover;
+  animation-duration: 1.7s;
 }
 
 .ic-chart {
-  animation-delay: -0s;
+  left: 157px;
+  top: 60px;
+  animation-delay: 0s;
 }
 
 .ic-search {
-  animation-delay: -6s;
+  left: 493px;
+  top: 60px;
+  animation-delay: 0.8s;
 }
 
 .ic-doc {
-  animation-delay: -12s;
+  left: 109px;
+  top: 228px;
+  animation-delay: 1.6s;
 }
 
 .ic-settings {
-  animation-delay: -18s;
+  left: 541px;
+  top: 228px;
+  animation-delay: 2.3s;
 }
 
-@keyframes orbit {
-  from {
-    transform: rotate(0deg) translateX(190px) rotate(0deg);
+@keyframes fy {
+  0%,
+  100% {
+    transform: translateY(0);
   }
-  to {
-    transform: rotate(360deg) translateX(190px) rotate(-360deg);
-  }
-}
-
-@keyframes orbit-hover {
-  from {
-    transform: rotate(0deg) translateX(190px) scale(1.12) rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg) translateX(190px) scale(1.12) rotate(-360deg);
+  50% {
+    transform: translateY(-10px);
   }
 }
 
@@ -333,6 +331,16 @@ async function handleLogin() {
   }
   50% {
     transform: scale(1.1) rotate(-3deg);
+  }
+}
+
+@keyframes fy-hover {
+  0%,
+  100% {
+    transform: translateY(0) scale(1.12);
+  }
+  50% {
+    transform: translateY(-16px) scale(1.2);
   }
 }
 
