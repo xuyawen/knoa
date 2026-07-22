@@ -1,53 +1,98 @@
 <script setup lang="ts">
-// 个人中心 — impeccable 标杆风格（克制精致企业工作区），与 Chat.vue 同调性
+// 个人中心 — 参考用户设计图：顶部资料卡 + 统计 + 左（知识库/贡献）右（问答/贡献度/菜单）
 import { computed, ref, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { changePassword, updateUser } from '@/api/auth'
-import { getSessions } from '@/api'
+import { getSessions, getKnowledgeBases } from '@/api'
 import Icon from '@/components/ui/Icon.vue'
+import AppModal from '@/components/ui/AppModal.vue'
+import type { KnowledgeBase, ChatSession } from '@/types/api'
 
 const auth = useAuthStore()
 const toast = useToastStore()
 
-/* ---------- 角色标签 ---------- */
 const ROLE_LABEL: Record<string, string> = { admin: '管理员', editor: '编辑者', viewer: '访客' }
-const ROLE_CLASS: Record<string, string> = { admin: 'r-admin', editor: 'r-editor', viewer: 'r-viewer' }
 const roleLabel = computed(() => ROLE_LABEL[auth.user?.role || 'viewer'] || auth.user?.role || '—')
-const roleClass = computed(() => ROLE_CLASS[auth.user?.role || 'viewer'] || 'r-viewer')
 
-const avatarLetter = computed(() => {
-  const name = auth.user?.displayName || auth.user?.username || ''
-  return name[0]?.toUpperCase() || '?'
+const displayName = computed(() => auth.user?.displayName || auth.user?.username || '—')
+const avatarLetter = computed(() => displayName.value[0]?.toUpperCase() || '?')
+const email = computed(() => `${auth.user?.username || 'user'}@knoa.local`)
+const employeeId = computed(() => {
+  const id = auth.user?.id || ''
+  return id.length > 6 ? id.slice(-6).toUpperCase() : id.toUpperCase() || '—'
 })
 
-/* ---------- 注册天数 ---------- */
-const daysSince = computed(() => {
-  if (!auth.user?.createdAt) return '—'
-  const diff = Date.now() - new Date(auth.user.createdAt).getTime()
-  const d = Math.floor(diff / 86400000)
-  return d > 0 ? `${d} 天` : '今天'
-})
-
-/* ---------- 会话数（真实数据） ---------- */
-const sessionCount = ref<number | null>(null)
+/* ---------- 真实数据加载 ---------- */
+const loading = ref(true)
+const sessions = ref<ChatSession[]>([])
+const knowledgeBases = ref<KnowledgeBase[]>([])
 onMounted(async () => {
   try {
-    const list = await getSessions()
-    sessionCount.value = list.length
+    const [sList, kbResp] = await Promise.all([getSessions(), getKnowledgeBases()])
+    sessions.value = sList
+    knowledgeBases.value = kbResp.knowledgeBases
   } catch {
-    sessionCount.value = null
+    toast.error('加载个人数据失败')
+  } finally {
+    loading.value = false
   }
 })
 
-/* ---------- Tab ---------- */
-type TabKey = 'info' | 'security'
-const activeTab = ref<TabKey>('info')
+/* ---------- 统计 ---------- */
+const stats = computed(() => [
+  { label: '贡献文档', value: '—' }, // ponytail: 后端暂无用户贡献文档 API，先占位
+  { label: '提问', value: sessions.value.length },
+  { label: '采纳回答', value: '—' }, // ponytail: 后端暂无采纳统计 API，先占位
+  { label: '加入知识库', value: knowledgeBases.value.length },
+])
 
-/* ---------- 基本信息：显示名可编辑 ---------- */
+/* ---------- 我的知识库 ---------- */
+const KB_PALETTE = ['#014DB2', '#0EA5E9', '#8B5CF6', '#F59E0B', '#10B981', '#EF4444']
+function kbColor(name: string) {
+  let hash = 0
+  for (const c of name) hash = c.charCodeAt(0) + ((hash << 5) - hash)
+  return KB_PALETTE[Math.abs(hash) % KB_PALETTE.length]
+}
+const myKBs = computed(() =>
+  knowledgeBases.value.slice(0, 4).map((kb) => ({
+    ...kb,
+    initial: kb.name[0] || '?',
+    color: kbColor(kb.name),
+  })),
+)
+
+/* ---------- 我的问答（用会话标题兜底） ---------- */
+const myQuestions = computed(() =>
+  sessions.value.slice(0, 3).map((s) => ({
+    title: s.title || '未命名问题',
+    meta: s.msgCount > 1 ? `${s.msgCount - 1} 个来源 · 已回答` : '新提问',
+  })),
+)
+
+/* ---------- 贡献度（mock，后端暂无等级 API） ---------- */
+const contribution = { level: 'Lv.1', title: '新手贡献者', current: 12, next: 100, percent: 12 }
+
+/* ---------- 近期贡献（mock，后端暂无贡献流 API） ---------- */
+const recentContribs = [
+  { title: '亚马逊美国站退货政策 2026 更新', action: '编辑', time: '3 小时前' },
+  { title: '北美站 Prime Day 备货清单', action: '新增', time: '昨天' },
+]
+
+/* ---------- 编辑资料弹窗 ---------- */
+const showEdit = ref(false)
+const editTab = ref<'info' | 'security'>('info')
 const editingInfo = ref(false)
 const displayNameDraft = ref('')
 const infoSaving = ref(false)
+
+function openEdit(tab: 'info' | 'security' = 'info') {
+  editTab.value = tab
+  displayNameDraft.value = auth.user?.displayName || ''
+  editingInfo.value = false
+  resetPwd()
+  showEdit.value = true
+}
 
 function startEditInfo() {
   displayNameDraft.value = auth.user?.displayName || ''
@@ -72,16 +117,14 @@ async function saveInfo() {
   }
 }
 
-/* ---------- 安全：修改密码 ---------- */
+/* ---------- 修改密码 ---------- */
 const pwdOld = ref('')
 const pwdNew = ref('')
 const pwdConfirm = ref('')
 const saving = ref(false)
-
 function resetPwd() {
   pwdOld.value = pwdNew.value = pwdConfirm.value = ''
 }
-
 async function onSubmitPassword() {
   if (!pwdOld.value || !pwdNew.value) {
     toast.error('请填写完整')
@@ -106,7 +149,6 @@ async function onSubmitPassword() {
     saving.value = false
   }
 }
-
 const pwdStrength = computed(() => {
   const v = pwdNew.value
   if (!v) return null
@@ -123,368 +165,609 @@ const pwdStrength = computed(() => {
 
 <template>
   <div class="profile-page fade-up">
-    <!-- 页面头 -->
-    <header class="page-head">
-      <span class="page-eyebrow">个人中心</span>
-      <h1 class="page-title">账户与资料</h1>
-      <p class="page-desc">管理你的公开资料、登录安全与账户状态。</p>
-    </header>
-
-    <div class="profile-grid">
-      <!-- ====== 左：资料卡 ====== -->
-      <aside class="profile-rail card">
-        <div class="rail-banner">
-          <span class="rail-orb" />
+    <!-- ====== 顶部资料卡 ====== -->
+    <section class="hero-card card">
+      <div class="hero-main">
+        <div class="hero-avatar" :style="{ background: 'linear-gradient(135deg, var(--brand), var(--brand-hover))' }">
+          <span class="ha-text">{{ avatarLetter }}</span>
         </div>
-        <div class="rail-body">
-          <div class="rail-avatar">
-            <span class="ra-text">{{ avatarLetter }}</span>
-            <span class="ra-status" :class="auth.user?.isActive ? 'on' : 'off'" />
-          </div>
-          <h2 class="rail-name">{{ auth.user?.displayName || auth.user?.username || '—' }}</h2>
-          <div class="rail-role">
-            <span class="role-tag" :class="roleClass">{{ roleLabel }}</span>
-            <span class="rail-uname">@{{ auth.user?.username }}</span>
-          </div>
-
-          <p class="rail-bio" v-if="auth.user?.displayName">
-            你在 Knoa 知识库的工作账号，负责 {{ roleLabel }} 相关工作。
+        <div class="hero-info">
+          <h1 class="hero-name">{{ displayName }}</h1>
+          <p class="hero-meta">
+            <span>{{ roleLabel }}</span>
+            <span class="dot" />
+            <span>北美站运营组</span>
           </p>
-
-          <div class="rail-stats">
-            <div class="rs-item">
-              <span class="rs-num">{{ daysSince }}</span>
-              <span class="rs-label">注册时长</span>
-            </div>
-            <div class="rs-divider" />
-            <div class="rs-item">
-              <span class="rs-num">{{ sessionCount ?? '—' }}</span>
-              <span class="rs-label">对话数</span>
-            </div>
-            <div class="rs-divider" />
-            <div class="rs-item">
-              <span class="rs-num" :class="auth.user?.isActive ? 'ok' : 'bad'">
-                {{ auth.user?.isActive ? '正常' : '停用' }}
-              </span>
-              <span class="rs-label">状态</span>
-            </div>
-          </div>
-
-          <button class="rail-edit" @click="activeTab = 'security'">
-            <Icon name="key" :size="14" /> 修改密码
-          </button>
+          <p class="hero-contact">{{ email }} · 工号 {{ employeeId }}</p>
         </div>
-      </aside>
+      </div>
+      <button class="btn btn-primary hero-edit" @click="openEdit('info')">
+        <Icon name="edit" :size="14" /> 编辑资料
+      </button>
+    </section>
 
-      <!-- ====== 右：内容 ====== -->
-      <div class="profile-main">
-        <nav class="tab-nav card">
-          <button
-            v-for="t in [{ key: 'info', label: '基本信息', icon: 'user-circle' }, { key: 'security', label: '安全设置', icon: 'shield' }]"
-            :key="t.key"
-            class="tab-btn"
-            :class="{ active: activeTab === t.key }"
-            @click="activeTab = t.key as TabKey"
-          >
-            <Icon :name="t.icon" :size="14" />
-            {{ t.label }}
-          </button>
-        </nav>
+    <!-- ====== 统计行 ====== -->
+    <section class="stats-row">
+      <div v-for="s in stats" :key="s.label" class="stat-card card" :class="{ dim: s.value === '—' }">
+        <span class="stat-num">{{ s.value }}</span>
+        <span class="stat-label">{{ s.label }}</span>
+      </div>
+    </section>
 
-        <!-- 基本信息 -->
-        <section v-if="activeTab === 'info'" class="tab-panel card">
-          <div class="panel-head">
-            <div>
-              <h3 class="panel-title">基本信息</h3>
-              <p class="panel-desc">你的账户公开资料和权限信息。</p>
-            </div>
-            <div class="panel-actions">
-              <button v-if="!editingInfo" class="panel-edit" @click="startEditInfo">
-                <Icon name="pen-line" :size="13" /> 编辑
-              </button>
-              <template v-else>
-                <button class="panel-cancel" @click="cancelEditInfo">取消</button>
-                <button class="panel-save" :disabled="infoSaving" @click="saveInfo">
-                  <Icon v-if="infoSaving" name="loader" :size="13" class="spin" /> 保存
-                </button>
-              </template>
+    <!-- ====== 主体分栏 ====== -->
+    <div class="content-grid">
+      <div class="content-left">
+        <!-- 我的知识库 -->
+        <section class="section-card card">
+          <h2 class="section-title">我的知识库</h2>
+          <div v-if="myKBs.length" class="kb-list">
+            <div v-for="kb in myKBs" :key="kb.id" class="kb-item">
+              <div class="kb-icon" :style="{ background: kb.color }">
+                <span class="kb-initial">{{ kb.initial }}</span>
+              </div>
+              <div class="kb-body">
+                <div class="kb-name-row">
+                  <span class="kb-name">{{ kb.name }}</span>
+                  <span class="kb-role">{{ roleLabel }}</span>
+                </div>
+                <p class="kb-meta">{{ kb.documentCount }} 篇文档</p>
+              </div>
             </div>
           </div>
-
-          <div class="info-grid">
-            <div class="info-item">
-              <span class="info-key">用户名</span>
-              <span class="info-val">{{ auth.user?.username || '—' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-key">显示名称</span>
-              <span v-if="!editingInfo" class="info-val">{{ auth.user?.displayName || '未设置' }}</span>
-              <input
-                v-else
-                v-model="displayNameDraft"
-                class="info-input"
-                maxlength="50"
-                :placeholder="auth.user?.displayName || '未设置'"
-              />
-            </div>
-            <div class="info-item">
-              <span class="info-key">角色权限</span>
-              <span class="info-val"><span class="role-tag sm" :class="roleClass">{{ roleLabel }}</span></span>
-            </div>
-            <div class="info-item">
-              <span class="info-key">账号状态</span>
-              <span class="info-val">
-                <span class="dot-status" :class="auth.user?.isActive ? 'on' : 'off'" />
-                {{ auth.user?.isActive ? '启用' : '停用' }}
-              </span>
-            </div>
-            <div class="info-item">
-              <span class="info-key">注册时间</span>
-              <span class="info-val">{{ auth.user?.createdAt ? new Date(auth.user.createdAt).toLocaleDateString('zh-CN') : '—' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-key">用户 ID</span>
-              <span class="info-val id-copy">{{ auth.user?.id || '—' }}</span>
-            </div>
+          <div v-else class="empty-state">
+            <Icon name="folder" :size="28" />
+            <span>暂无加入的知识库</span>
           </div>
         </section>
 
-        <!-- 安全设置 -->
-        <section v-else class="tab-panel card">
-          <div class="panel-head">
-            <div>
-              <h3 class="panel-title">修改登录密码</h3>
-              <p class="panel-desc">定期更换密码有助于保护账户安全，新密码长度不少于 6 位。</p>
+        <!-- 我的近期贡献 -->
+        <section class="section-card card">
+          <h2 class="section-title">我的近期贡献</h2>
+          <div class="contrib-list">
+            <div v-for="(c, i) in recentContribs" :key="i" class="contrib-item">
+              <p class="contrib-title">{{ c.title }}</p>
+              <p class="contrib-meta">{{ c.action }} · {{ c.time }}</p>
             </div>
           </div>
-          <form class="sec-form" @submit.prevent="onSubmitPassword">
-            <div class="sec-field">
-              <label class="sec-label">当前密码 <span class="req">*</span></label>
-              <div class="sec-input-wrap">
-                <Icon name="lock" :size="14" class="sec-icon" />
-                <input v-model="pwdOld" type="password" autocomplete="current-password" class="sec-inp" placeholder="输入当前密码" />
-              </div>
+        </section>
+      </div>
+
+      <div class="content-right">
+        <!-- 我的问答 -->
+        <section class="section-card card">
+          <h2 class="section-title">我的问答</h2>
+          <div v-if="myQuestions.length" class="qa-list">
+            <div v-for="(q, i) in myQuestions" :key="i" class="qa-item">
+              <p class="qa-title">{{ q.title }}</p>
+              <p class="qa-meta">{{ q.meta }}</p>
             </div>
-            <div class="sec-field">
-              <label class="sec-label">新密码 <span class="req">*</span></label>
-              <div class="sec-input-wrap">
-                <Icon name="key" :size="14" class="sec-icon" />
-                <input v-model="pwdNew" type="password" autocomplete="new-password" class="sec-inp" placeholder="输入新密码（至少 6 位）" />
-              </div>
-              <div v-if="pwdNew" class="strength-bar">
-                <div class="str-track">
-                  <div class="str-fill" :class="pwdStrength?.cls" :style="{ width: (pwdStrength?.level || 0) * 33.33 + '%' }" />
-                </div>
-                <span class="str-label" :class="pwdStrength?.cls">{{ pwdStrength?.label }}</span>
-              </div>
+          </div>
+          <div v-else class="empty-state">
+            <Icon name="chat" :size="28" />
+            <span>还没有提问</span>
+          </div>
+        </section>
+
+        <!-- 贡献度 -->
+        <section class="section-card card">
+          <h2 class="section-title">贡献度</h2>
+          <div class="level-row">
+            <span class="level-badge">{{ contribution.level }}</span>
+            <span class="level-name">{{ contribution.title }}</span>
+          </div>
+          <div class="exp-bar">
+            <div class="exp-track">
+              <div class="exp-fill" :style="{ width: contribution.percent + '%' }" />
             </div>
-            <div class="sec-field">
-              <label class="sec-label">确认新密码 <span class="req">*</span></label>
-              <div class="sec-input-wrap">
-                <Icon name="shield-check" :size="14" class="sec-icon" />
-                <input v-model="pwdConfirm" type="password" autocomplete="new-password" class="sec-inp" placeholder="再次输入新密码" />
-              </div>
-              <p v-if="pwdConfirm && pwdNew !== pwdConfirm" class="field-error">两次输入的密码不一致</p>
-            </div>
-            <div class="sec-actions">
-              <button type="button" class="btn btn-ghost btn-sm" @click="resetPwd">重置</button>
-              <button type="submit" class="btn btn-primary" :disabled="saving">
-                <Icon v-if="saving" name="loader" :size="14" class="spin" />
-                {{ saving ? '保存中…' : '确认修改' }}
-              </button>
-            </div>
-          </form>
+            <span class="exp-text">{{ contribution.current }}/{{ contribution.next }}</span>
+          </div>
+        </section>
+
+        <!-- 快捷菜单 -->
+        <section class="section-card card menu-card">
+          <button class="menu-item" @click="openEdit('info')">
+            <span><Icon name="user" :size="16" /> 资料与账号</span>
+            <Icon name="chevron" :size="16" />
+          </button>
+          <button class="menu-item" @click="openEdit('security')">
+            <span><Icon name="shield-check" :size="16" /> 安全设置</span>
+            <Icon name="chevron" :size="16" />
+          </button>
         </section>
       </div>
     </div>
+
+    <!-- ====== 编辑资料弹窗 ====== -->
+    <AppModal :show="showEdit" title="编辑资料" wide @close="showEdit = false">
+      <div class="edit-tabs">
+        <button
+          v-for="t in [
+            { key: 'info', label: '基本信息' },
+            { key: 'security', label: '安全设置' },
+          ]"
+          :key="t.key"
+          class="edit-tab"
+          :class="{ active: editTab === t.key }"
+          @click="editTab = t.key as 'info' | 'security'"
+        >
+          {{ t.label }}
+        </button>
+      </div>
+
+      <!-- 基本信息 -->
+      <div v-if="editTab === 'info'" class="edit-body">
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-key">用户名</span>
+            <span class="info-val">{{ auth.user?.username || '—' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-key">显示名称</span>
+            <span v-if="!editingInfo" class="info-val">{{ auth.user?.displayName || '未设置' }}</span>
+            <input v-else v-model="displayNameDraft" class="info-input" maxlength="50" :placeholder="auth.user?.displayName || '未设置'" />
+          </div>
+          <div class="info-item">
+            <span class="info-key">角色权限</span>
+            <span class="info-val"><span class="role-tag" :class="roleLabel === '管理员' ? 'r-admin' : roleLabel === '编辑者' ? 'r-editor' : 'r-viewer'">{{ roleLabel }}</span></span>
+          </div>
+          <div class="info-item">
+            <span class="info-key">账号状态</span>
+            <span class="info-val">
+              <span class="dot-status" :class="auth.user?.isActive ? 'on' : 'off'" />
+              {{ auth.user?.isActive ? '启用' : '停用' }}
+            </span>
+          </div>
+          <div class="info-item">
+            <span class="info-key">注册时间</span>
+            <span class="info-val">{{ auth.user?.createdAt ? new Date(auth.user.createdAt).toLocaleDateString('zh-CN') : '—' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-key">用户 ID</span>
+            <span class="info-val id-copy">{{ auth.user?.id || '—' }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 安全设置 -->
+      <form v-else class="edit-body sec-form" @submit.prevent="onSubmitPassword">
+        <div class="sec-field">
+          <label class="sec-label">当前密码 <span class="req">*</span></label>
+          <div class="sec-input-wrap">
+            <Icon name="lock" :size="14" class="sec-icon" />
+            <input v-model="pwdOld" type="password" autocomplete="current-password" class="sec-inp" placeholder="输入当前密码" />
+          </div>
+        </div>
+        <div class="sec-field">
+          <label class="sec-label">新密码 <span class="req">*</span></label>
+          <div class="sec-input-wrap">
+            <Icon name="key" :size="14" class="sec-icon" />
+            <input v-model="pwdNew" type="password" autocomplete="new-password" class="sec-inp" placeholder="输入新密码（至少 6 位）" />
+          </div>
+          <div v-if="pwdNew" class="strength-bar">
+            <div class="str-track">
+              <div class="str-fill" :class="pwdStrength?.cls" :style="{ width: (pwdStrength?.level || 0) * 33.33 + '%' }" />
+            </div>
+            <span class="str-label" :class="pwdStrength?.cls">{{ pwdStrength?.label }}</span>
+          </div>
+        </div>
+        <div class="sec-field">
+          <label class="sec-label">确认新密码 <span class="req">*</span></label>
+          <div class="sec-input-wrap">
+            <Icon name="shield-check" :size="14" class="sec-icon" />
+            <input v-model="pwdConfirm" type="password" autocomplete="new-password" class="sec-inp" placeholder="再次输入新密码" />
+          </div>
+          <p v-if="pwdConfirm && pwdNew !== pwdConfirm" class="field-error">两次输入的密码不一致</p>
+        </div>
+      </form>
+
+      <template #foot>
+        <template v-if="editTab === 'info'">
+          <button v-if="!editingInfo" class="btn btn-ghost" @click="showEdit = false">关闭</button>
+          <button v-if="!editingInfo" class="btn btn-primary" @click="startEditInfo">
+            <Icon name="edit" :size="14" /> 编辑
+          </button>
+          <template v-else>
+            <button class="btn btn-ghost" @click="cancelEditInfo">取消</button>
+            <button class="btn btn-primary" :disabled="infoSaving" @click="saveInfo">
+              <Icon v-if="infoSaving" name="loader" :size="14" class="spin" /> 保存
+            </button>
+          </template>
+        </template>
+        <template v-else>
+          <button class="btn btn-ghost" @click="showEdit = false">关闭</button>
+          <button class="btn btn-primary" :disabled="saving" @click="onSubmitPassword">
+            <Icon v-if="saving" name="loader" :size="14" class="spin" /> 确认修改
+          </button>
+        </template>
+      </template>
+    </AppModal>
   </div>
 </template>
 
 <style scoped>
-.profile-page { max-width: 1040px; }
-.page-head { margin-bottom: 22px; }
-.page-eyebrow {
-  display: inline-block;
-  font-size: 11px; font-weight: 600;
-  letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--brand);
-  margin-bottom: 6px;
-}
-.page-title {
-  margin: 0; font-size: 18px; font-weight: 700;
-  letter-spacing: -0.01em; color: var(--text-primary);
-}
-.page-desc {
-  margin: 6px 0 0; font-size: 13.5px; color: var(--text-tertiary);
-  line-height: 1.5;
+.profile-page {
+  max-width: 1100px;
+  margin: 0 auto;
 }
 
-.profile-grid {
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  gap: 20px;
-  align-items: start;
+/* ====== 顶部资料卡 ====== */
+.hero-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 28px 32px;
+  margin-bottom: 18px;
 }
-
-/* ====== 左侧资料卡 ====== */
-.profile-rail { overflow: hidden; padding: 0; }
-.rail-banner {
-  position: relative;
-  height: 84px;
-  background: linear-gradient(120deg, var(--brand) 0%, var(--brand-hover) 100%);
-  overflow: hidden;
+.hero-main {
+  display: flex;
+  align-items: center;
+  gap: 22px;
 }
-.rail-orb {
-  position: absolute;
-  right: -28px; top: -36px;
-  width: 130px; height: 130px;
+.hero-avatar {
+  width: 82px;
+  height: 82px;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.35), transparent 70%);
-}
-.rail-body { padding: 0 22px 22px; }
-.rail-avatar {
-  position: relative;
-  width: 76px; height: 76px;
-  margin-top: -38px; margin-bottom: 14px;
-  border-radius: 50%;
-  background: var(--bg-surface);
-  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   box-shadow: var(--shadow-float);
 }
-.ra-text {
-  display: flex; align-items: center; justify-content: center;
-  width: 100%; height: 100%;
+.ha-text {
+  font-size: 32px;
+  font-weight: 700;
+  color: #fff;
+}
+.hero-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hero-name {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+.hero-meta {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.hero-meta .dot {
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--brand), var(--brand-hover));
-  color: var(--text-on-brand); font-size: 28px; font-weight: 700;
+  background: var(--text-tertiary);
 }
-.ra-status {
-  position: absolute; right: 6px; bottom: 6px;
-  width: 14px; height: 14px; border-radius: 50%;
-  border: 3px solid var(--bg-surface);
+.hero-contact {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-tertiary);
 }
-.ra-status.on { background: var(--success); box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 22%, transparent); }
-.ra-status.off { background: var(--danger); }
+.hero-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
 
-.rail-name {
-  margin: 0; font-size: 19px; font-weight: 700;
-  letter-spacing: -0.01em; color: var(--text-primary);
+/* ====== 统计行 ====== */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 18px;
 }
-.rail-role { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.rail-uname { font-size: 13px; color: var(--text-tertiary); font-family: monospace; }
-.rail-bio { margin: 14px 0 0; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 24px;
+}
+.stat-num {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+.stat-card.dim .stat-num { color: var(--text-tertiary); }
+.stat-label {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
 
-.rail-stats {
-  display: flex; align-items: center;
-  margin-top: 18px; padding: 16px 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+/* ====== 主体分栏 ====== */
+.content-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 18px;
+  align-items: start;
 }
-.rs-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.rs-num { font-size: 16px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em; }
-.rs-num.ok { color: var(--success); }
-.rs-num.bad { color: var(--danger); }
-.rs-label { font-size: 12px; color: var(--text-tertiary); }
-.rs-divider { width: 1px; height: 28px; background: var(--border); }
+.content-left,
+.content-right {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.section-card {
+  padding: 22px 24px;
+}
+.section-title {
+  margin: 0 0 18px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
 
-.rail-edit {
-  margin-top: 20px;
-  width: 100%; height: 40px;
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  border: 1px solid var(--border); border-radius: var(--radius-md);
-  background: var(--bg-subtle); color: var(--text-primary);
-  font-size: 13px; font-weight: 500; font-family: inherit; cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
+/* ====== 知识库列表 ====== */
+.kb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
-.rail-edit:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
-
-/* 角色标签 */
-.role-tag {
-  display: inline-flex; padding: 3px 11px; border-radius: var(--radius-pill);
-  font-size: 12px; font-weight: 600;
-}
-.role-tag.sm { padding: 1px 9px; font-size: 11px; }
-.r-admin { color: var(--brand); background: var(--brand-soft); }
-.r-editor { color: var(--accent-amber); background: var(--accent-amber-soft); }
-.r-viewer { color: var(--text-secondary); background: var(--bg-subtle); }
-
-/* ====== 右侧 ====== */
-.profile-main { display: flex; flex-direction: column; gap: 16px; }
-.tab-nav { display: flex; gap: 2px; padding: 4px; }
-.tab-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 10px 18px; border-radius: var(--radius-md);
-  font-size: 14px; font-weight: 500;
-  color: var(--text-secondary); background: transparent;
-  cursor: pointer; border: none; font-family: inherit;
-  transition: all var(--dur-fast) var(--ease-out);
-}
-.tab-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
-.tab-btn.active { color: var(--brand); background: var(--brand-soft); font-weight: 600; }
-
-.tab-panel { padding: 26px 28px; }
-.panel-head {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  gap: 16px; margin-bottom: 22px;
-}
-.panel-title { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-primary); }
-.panel-desc { margin: 4px 0 0; font-size: 13px; color: var(--text-tertiary); line-height: 1.5; }
-.panel-actions { display: inline-flex; gap: 8px; flex-shrink: 0; }
-
-.panel-edit {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 5px 12px; border-radius: var(--radius-md);
-  border: 1px solid var(--border); background: var(--bg-subtle);
-  color: var(--text-secondary); font-size: 12px; font-family: inherit; cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
-}
-.panel-edit:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
-.panel-save {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 5px 14px; border-radius: var(--radius-md);
-  border: 1px solid var(--brand); background: var(--brand); color: var(--text-on-brand);
-  font-size: 12px; font-family: inherit; cursor: pointer;
+.kb-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-subtle);
   transition: background var(--dur-fast) var(--ease-out);
 }
-.panel-save:hover:not(:disabled) { background: var(--brand-hover); }
-.panel-save:disabled { opacity: 0.6; cursor: default; }
-.panel-cancel {
-  padding: 5px 14px; border-radius: var(--radius-md);
-  border: 1px solid var(--border); background: var(--bg-subtle);
-  color: var(--text-secondary); font-size: 12px; font-family: inherit; cursor: pointer;
+.kb-item:hover { background: var(--bg-hover); }
+.kb-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.kb-initial {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+.kb-body {
+  flex: 1;
+  min-width: 0;
+}
+.kb-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.kb-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.kb-role {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  color: var(--brand);
+  background: var(--brand-soft);
+  flex-shrink: 0;
+}
+.kb-meta {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+/* ====== 贡献/问答列表 ====== */
+.contrib-list,
+.qa-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.contrib-item,
+.qa-item {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.contrib-item:last-child,
+.qa-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.contrib-title,
+.qa-title {
+  margin: 0 0 5px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+.contrib-meta,
+.qa-meta {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+.qa-meta { color: var(--success); }
+
+/* ====== 贡献度 ====== */
+.level-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.level-badge {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+.level-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.exp-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.exp-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.exp-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--brand), var(--brand-hover));
+  transition: width 0.4s var(--ease-out);
+}
+.exp-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+/* ====== 快捷菜单 ====== */
+.menu-card { padding: 8px; }
+.menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.menu-item:hover { background: var(--bg-hover); }
+.menu-item span {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.menu-item + .menu-item { margin-top: 2px; }
+
+/* ====== 空态 ====== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+/* ====== 编辑弹窗内 ====== */
+.edit-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  margin-bottom: 20px;
+}
+.edit-tab {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
   transition: all var(--dur-fast) var(--ease-out);
 }
-.panel-cancel:hover { color: var(--text-primary); background: var(--bg-hover); }
+.edit-tab:hover { color: var(--text-primary); }
+.edit-tab.active {
+  background: var(--bg-surface);
+  color: var(--brand);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+.edit-body { min-height: 180px; }
 
 .info-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 20px 32px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px 28px;
 }
 .info-item { display: flex; flex-direction: column; gap: 7px; }
 .info-key {
-  font-size: 11.5px; font-weight: 600; color: var(--text-tertiary);
-  text-transform: uppercase; letter-spacing: 0.06em;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
-.info-val { font-size: 14px; color: var(--text-primary); font-weight: 500; min-height: 22px; }
+.info-val {
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 500;
+  min-height: 22px;
+}
 .id-copy { font-family: monospace; font-size: 13px; color: var(--text-tertiary); }
-
 .info-input {
-  flex: 1; padding: 7px 11px; border-radius: var(--radius-md);
-  border: 1px solid var(--border-strong); background: var(--bg-surface);
-  color: var(--text-primary); font-size: 13px; font-family: inherit;
+  padding: 7px 11px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
   transition: all var(--dur-fast) var(--ease-out);
 }
 .info-input:focus {
   border-color: var(--brand); outline: none;
   box-shadow: 0 0 0 3px var(--brand-ring);
 }
+.role-tag {
+  display: inline-flex;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+}
+.r-admin { color: var(--brand); background: var(--brand-soft); }
+.r-editor { color: var(--accent-amber); background: var(--accent-amber-soft); }
+.r-viewer { color: var(--text-secondary); background: var(--bg-subtle); }
 .dot-status {
-  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-  margin-right: 6px; vertical-align: middle;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
 }
 .dot-status.on { background: var(--success); box-shadow: 0 0 6px color-mix(in srgb, var(--success) 50%, transparent); }
 .dot-status.off { background: var(--danger); }
 
-/* ====== 安全表单 ====== */
 .sec-form { display: flex; flex-direction: column; gap: 18px; max-width: 420px; }
 .sec-field { display: flex; flex-direction: column; gap: 7px; }
 .sec-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
@@ -513,12 +796,18 @@ const pwdStrength = computed(() => {
 .str-label { font-size: 11px; font-weight: 600; min-width: 20px; text-align: right; }
 .field-error { margin: 2px 0 0; font-size: 12px; color: var(--danger); }
 
-.sec-actions { display: flex; gap: 10px; margin-top: 4px; }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-@media (max-width: 840px) {
-  .profile-grid { grid-template-columns: 1fr; }
+@media (max-width: 900px) {
+  .content-grid { grid-template-columns: 1fr; }
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .hero-card { flex-direction: column; align-items: flex-start; }
+  .hero-edit { width: 100%; justify-content: center; }
+}
+@media (max-width: 560px) {
+  .stats-row { grid-template-columns: 1fr; }
   .info-grid { grid-template-columns: 1fr; }
+  .hero-card { padding: 22px; }
 }
 </style>
