@@ -341,3 +341,30 @@ export interface AnnouncementUpdate {
   level?: 'info' | 'warning' | 'success' | 'error'
   pinned?: boolean
 }
+
+/** 部门树节点（递归 children）。P5 部门筛选使用。 */
+export interface DepartmentNode {
+  id: string
+  name: string
+  parentId: string | null
+  description: string | null
+  sortOrder: number
+  createdAt: string
+  children: DepartmentNode[]
+}
+
+/** 文档处理任务（P5 上传进度轮询）。progress 0~100。 */
+export interface DocumentTaskOut {
+  id: string
+  documentId: string | null
+  kbId: string
+  filename: string
+  status: string
+  progress: number
+  currentStep: string
+  errorMessage: string | null
+  startedAt: string | null
+  completedAt: string | null
+  createdAt: string
+  documentTitle: string | null
+}

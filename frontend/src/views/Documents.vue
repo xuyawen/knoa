@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // 文档管理 — 按 640(3).png 截图 1:1 还原，接真实文档生命周期。
 // section 由路由决定（mine/public/department/archive）。
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import AppModal from '@/components/ui/AppModal.vue'
+import DepartmentTree from '@/components/DepartmentTree.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
 import {
@@ -15,8 +16,12 @@ import {
   deleteDocument,
   aiReviewDocument,
   getDocument,
+  getDepartments,
+  getDocumentTags,
+  getDocumentTask,
+  getDocumentTasks,
 } from '@/api'
-import type { DocumentItem, DocumentDetail, AIReview } from '@/types/api'
+import type { DocumentItem, DocumentDetail, AIReview, DepartmentNode, DocumentTaskOut } from '@/types/api'
 
 const knowledge = useKnowledgeStore()
 const toast = useToastStore()
@@ -28,7 +33,6 @@ const selectedKb = ref<string>('')
 const docs = ref<DocumentItem[]>([])
 const total = ref(0)
 const loading = ref(false)
-const uploading = ref(false)
 const deleting = ref(false)
 
 const searchQuery = ref('')
@@ -60,6 +64,43 @@ const scopeOptions = [
   { label: '公开可见', value: 'public' },
 ]
 
+// P5：部门筛选（部门树）+ 标签筛选
+const departments = ref<DepartmentNode[]>([])
+const filterDept = ref<string>('')
+const deptPopoverOpen = ref(false)
+const tagOptions = ref<{ label: string; value: string }[]>([])
+const filterTag = ref<string>('')
+
+// 当前选中部门名（用于筛选按钮文案）
+const deptLabel = computed(() => {
+  if (!filterDept.value) return '部门'
+  const find = (nodes: DepartmentNode[]): string => {
+    for (const n of nodes) {
+      if (n.id === filterDept.value) return n.name
+      if (n.children?.length) {
+        const r = find(n.children)
+        if (r) return r
+      }
+    }
+    return ''
+  }
+  return find(departments.value) || '部门'
+})
+function onDeptSelect(id: string | null) {
+  filterDept.value = id || ''
+  deptPopoverOpen.value = false
+}
+
+// P5：上传进度（轮询 DocumentTask）
+interface UploadTask {
+  id: string
+  filename: string
+  progress: number
+  status: 'uploading' | 'processing' | 'done' | 'error'
+  message?: string
+}
+const uploadTasks = ref<UploadTask[]>([])
+
 // 选择（批量删）
 const selectedIds = ref<string[]>([])
 // 分页
@@ -84,6 +125,8 @@ function buildQuery(): Record<string, string | number | boolean> {
   if (filterType.value) q.type = filterType.value
   if (filterStatus.value) q.status = filterStatus.value
   if (searchQuery.value.trim()) q.q = searchQuery.value.trim()
+  if (filterDept.value) q.departmentId = filterDept.value
+  if (filterTag.value) q.tags = filterTag.value
   return q
 }
 
@@ -111,8 +154,10 @@ async function loadDocs() {
 
 onMounted(async () => {
   if (!knowledge.loaded) await knowledge.load()
+  await loadDepartments()
   if (knowledge.bases.length) {
     selectedKb.value = knowledge.bases[0].id
+    await loadTags()
     await loadDocs()
   }
 })
@@ -120,6 +165,9 @@ onMounted(async () => {
 watch(selectedKb, async () => {
   currentPage.value = 1
   selectedIds.value = []
+  filterDept.value = ''
+  filterTag.value = ''
+  await loadTags()
   await loadDocs()
 })
 
@@ -132,6 +180,42 @@ watch([filterType, filterStatus, filterScope], async () => {
   currentPage.value = 1
   await loadDocs()
 })
+
+// P5：部门 / 标签筛选变化 → 重新拉取（服务端真实过滤）
+watch([filterDept, filterTag], async () => {
+  currentPage.value = 1
+  await loadDocs()
+})
+
+watch(deptPopoverOpen, (open) => {
+  if (open) document.addEventListener('click', onDocClickOutside)
+  else document.removeEventListener('click', onDocClickOutside)
+})
+function onDocClickOutside(e: MouseEvent) {
+  const el = document.getElementById('dept-filter-wrap')
+  if (el && !el.contains(e.target as Node)) deptPopoverOpen.value = false
+}
+
+/* ---------- P5：部门 / 标签 数据 ---------- */
+async function loadDepartments() {
+  try {
+    departments.value = await getDepartments()
+  } catch (e: any) {
+    departments.value = []
+  }
+}
+async function loadTags() {
+  if (!selectedKb.value) {
+    tagOptions.value = []
+    return
+  }
+  try {
+    const tags = await getDocumentTags(selectedKb.value)
+    tagOptions.value = [{ label: '全部标签', value: '' }, ...tags.map((t) => ({ label: t, value: t }))]
+  } catch (e: any) {
+    tagOptions.value = [{ label: '全部标签', value: '' }]
+  }
+}
 
 // 搜索防抖后重新拉取（服务端 q 过滤）
 let searchTimer: ReturnType<typeof setTimeout> | undefined
@@ -213,7 +297,7 @@ function readFileB64(file: File): Promise<string> {
   })
 }
 
-/* ---------- 上传 ---------- */
+/* ---------- 上传 + 进度条（P5）---------- */
 async function onUploadFiles(e: Event) {
   const input = e.target as HTMLInputElement
   const files = Array.from(input.files || [])
@@ -223,23 +307,73 @@ async function onUploadFiles(e: Event) {
     input.value = ''
     return
   }
-  uploading.value = true
-  let ok = 0
   for (const f of files) {
+    const entry = reactive<UploadTask>({ id: '', filename: f.name, progress: 0, status: 'uploading' })
+    uploadTasks.value.push(entry)
     try {
       const b64 = await readFileB64(f)
-      await uploadDocument(selectedKb.value, f.name, b64)
-      ok++
+      const doc = await uploadDocument(selectedKb.value, f.name, b64)
+      // 拿到 task id（上传阶段后端已置 done/100，审核阶段会再推进）
+      const tasks = await getDocumentTasks(doc.id)
+      const task = tasks[0]
+      if (task) {
+        entry.id = task.id
+        await pollTask(entry, task.id)
+      } else {
+        tweenTo(entry, 100, 500)
+        entry.status = 'done'
+        scheduleRemove(entry)
+      }
     } catch (err: any) {
+      entry.status = 'error'
+      entry.message = err?.message || String(err)
       toast.error(`上传失败：${f.name} - ${err?.message || err}`)
+      scheduleRemove(entry)
     }
   }
-  uploading.value = false
   input.value = ''
-  if (ok) {
-    toast.success(`成功上传 ${ok} 篇文档`)
-    await loadDocs()
+}
+
+// 轮询单个文档任务的真实进度，平滑补间到目标值
+async function pollTask(entry: UploadTask, taskId: string) {
+  const tick = async () => {
+    let t: DocumentTaskOut
+    try {
+      t = await getDocumentTask(taskId)
+    } catch {
+      return
+    }
+    entry.status = t.status === 'failed' ? 'error' : (t.status === 'done' || t.status === 'completed' ? 'done' : 'processing')
+    if (t.errorMessage) entry.message = t.errorMessage
+    tweenTo(entry, t.progress, 500)
+    if (t.status === 'done' || t.status === 'completed' || t.status === 'failed') {
+      if (t.status !== 'failed') entry.progress = 100
+      scheduleRemove(entry)
+      await loadDocs()
+      return
+    }
+    setTimeout(tick, 700)
   }
+  await tick()
+}
+
+// requestAnimationFrame 平滑补间进度（让 0→100 可见，底层值来自真实 task）
+function tweenTo(entry: UploadTask, target: number, ms = 600) {
+  const from = entry.progress
+  const start = performance.now()
+  function frame(now: number) {
+    const k = Math.min(1, (now - start) / ms)
+    entry.progress = Math.round(from + (target - from) * k)
+    if (k < 1) requestAnimationFrame(frame)
+    else entry.progress = target
+  }
+  requestAnimationFrame(frame)
+}
+
+function scheduleRemove(entry: UploadTask) {
+  setTimeout(() => {
+    uploadTasks.value = uploadTasks.value.filter((x) => x !== entry)
+  }, 1400)
 }
 
 /* ---------- 审核 / 删除 ---------- */
@@ -381,8 +515,8 @@ function goPage(p: number) {
         </div>
 
         <!-- 批量上传 -->
-        <label class="btn btn-primary btn-sm upload-btn" :class="{ 'is-loading': uploading }">
-          <Icon name="upload" :size="13" /> {{ uploading ? '上传中…' : '批量上传' }}
+        <label class="btn btn-primary btn-sm upload-btn" :class="{ 'is-loading': uploadTasks.length > 0 }">
+          <Icon name="upload" :size="13" /> {{ uploadTasks.length > 0 ? '上传中…' : '批量上传' }}
           <input type="file" multiple accept=".md,.txt,.docx,.pdf" class="file-hidden" @change="onUploadFiles" />
         </label>
 
@@ -390,6 +524,21 @@ function goPage(p: number) {
         <CustomSelect v-model="filterType" :options="typeOptions" placeholder="文件类型" width="110px" />
         <CustomSelect v-model="filterStatus" :options="statusOptions" placeholder="解析状态" width="110px" />
         <CustomSelect v-model="filterScope" :options="scopeOptions" placeholder="权限范围" width="110px" />
+
+        <!-- P5：部门筛选（弹出部门树） -->
+        <div id="dept-filter-wrap" class="dept-filter-wrap">
+          <button class="btn-filter" :class="{ active: !!filterDept }" @click.stop="deptPopoverOpen = !deptPopoverOpen">
+            <Icon name="users" :size="13" />
+            <span>{{ deptLabel }}</span>
+            <Icon name="chevron-down" :size="11" />
+          </button>
+          <div v-if="deptPopoverOpen" class="dept-popover card">
+            <DepartmentTree :nodes="departments" :selected-id="filterDept" @select="onDeptSelect" />
+          </div>
+        </div>
+
+        <!-- P5：标签筛选 -->
+        <CustomSelect v-model="filterTag" :options="tagOptions" placeholder="标签" width="120px" />
 
         <!-- 刷新 -->
         <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDocs">
@@ -415,6 +564,25 @@ function goPage(p: number) {
           <Icon name="trash" :size="13" /> 批量删除
         </button>
         <button class="btn btn-ghost btn-sm" @click="clearSelection">取消选择</button>
+      </div>
+    </Transition>
+
+    <!-- ====== 上传进度条（P5 轮询 DocumentTask）====== -->
+    <Transition name="slide-down">
+      <div v-if="uploadTasks.length" class="upload-progress card">
+        <div v-for="t in uploadTasks" :key="(t.id || t.filename)" class="up-item">
+          <Icon
+            :name="t.status === 'error' ? 'alert' : (t.status === 'done' ? 'check' : 'loader')"
+            :size="14"
+            :class="{ spin: t.status === 'uploading' || t.status === 'processing' }"
+            :style="t.status === 'error' ? 'color:#dc2626' : (t.status === 'done' ? 'color:#16a34a' : '')"
+          />
+          <span class="up-name" :title="t.filename">{{ t.filename }}</span>
+          <div class="up-bar">
+            <div class="up-fill" :class="t.status" :style="{ width: t.progress + '%' }"></div>
+          </div>
+          <span class="up-pct">{{ t.status === 'error' ? '失败' : t.progress + '%' }}</span>
+        </div>
       </div>
     </Transition>
 
@@ -714,6 +882,70 @@ function goPage(p: number) {
 .btn-danger:disabled { opacity: 0.6; }
 .slide-down-enter-active, .slide-down-leave-active { transition: all 0.2s var(--ease-out); }
 .slide-down-enter-from, .slide-down-leave-to { opacity: 0; transform: translateY(-6px); }
+
+/* ---- P5：部门筛选 + 弹出树 ---- */
+.dept-filter-wrap { position: relative; }
+.btn-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--dur-fast);
+}
+.btn-filter:hover { border-color: var(--brand); color: var(--text-primary); }
+.btn-filter.active { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+.dept-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 240px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 4px;
+  box-shadow: var(--shadow-pop);
+}
+
+/* ---- P5：上传进度条 ---- */
+.upload-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+}
+.up-item { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.up-name {
+  flex: 0 0 180px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.up-bar {
+  flex: 1;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+.up-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: var(--brand);
+  transition: width 0.25s var(--ease-out);
+}
+.up-fill.done { background: #16a34a; }
+.up-fill.error { background: #dc2626; }
+.up-pct { flex: 0 0 44px; text-align: right; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 
 /* ---- 文件表格 ---- */
 .file-table-wrap { overflow-x: auto; }

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.graph import GraphStore
@@ -224,13 +224,16 @@ async def list_documents(
     status: str | None = None,
     q: str | None = None,
     mine: bool = False,
+    department_id: str | None = None,
+    tags: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_kb_access("view")),
 ):
     """列出某知识库下的文档（服务端分页 + 真实过滤）。
 
     过滤维度：scope（权限范围）/ doc_type（按扩展名）/ status（审核状态）/
-    q（标题模糊）/ mine（仅本人）。返回 {items,total,page,size} 供前端分页。
+    q（标题模糊）/ mine（仅本人）/ department_id（部门维度）/ tags（标签，逗号分隔 OR）。
+    返回 {items,total,page,size} 供前端分页。
     """
     base = select(Document).where(Document.kb_id == kb_id)
     if scope:
@@ -243,6 +246,18 @@ async def list_documents(
         base = base.where(Document.title.ilike(f"%{q}%"))
     if mine:
         base = base.where(Document.uploader_id == user.id)
+    if department_id:
+        try:
+            base = base.where(Document.department_id == uuid.UUID(department_id))
+        except Exception:
+            raise HTTPException(status_code=400, detail="department_id 非法")
+    if tags:
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        if tag_list:
+            # JSONB 数组用 ? 存在操作符逐标签匹配，OR 组合实现「含任一标签即命中」
+            # （has_any 生成 jsonb ?| jsonb、contains 生成 jsonb @> varchar 均无匹配运算符）
+            conds = [Document.tags.has_key(t) for t in tag_list]
+            base = base.where(or_(*conds))
     total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = (
         await db.execute(
@@ -255,6 +270,21 @@ async def list_documents(
         "page": page,
         "size": size,
     }
+
+
+@router.get("/knowledge-bases/{kb_id}/tags")
+async def list_doc_tags(
+    kb_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_kb_access("view")),
+):
+    """返回该知识库文档中出现过的去重标签，供前端标签筛选下拉枚举。"""
+    rows = (await db.execute(select(Document.tags).where(Document.kb_id == kb_id))).scalars().all()
+    tag_set: set[str] = set()
+    for t in rows:
+        if t:
+            tag_set.update(t)
+    return sorted(tag_set)
 
 
 @router.post("/knowledge-bases/{kb_id}/documents", response_model=DocumentOut, status_code=201)
@@ -343,13 +373,15 @@ async def upload_document(
     # 先 flush 让 doc.id 生成，否则 task.document_id 会拿到 None（FK 落空）
     await db.flush()
     # 建立处理任务记录（架构图6：异步处理状态跟踪，前端轮询进度）
+    # 方案 A 下上传即完成解析，故任务直接落到「解析完成」(progress=100)；
+    # 审核通过(approve)时会再次推进到 processing(50)→completed(100) 表示摄入完成。
     task = DocumentTask(
         document_id=doc.id,
         kb_id=kb_id,
         filename=filename,
-        status="pending",
-        progress=0,
-        current_step="等待审核",
+        status="done",
+        progress=100,
+        current_step="解析完成，待审核",
     )
     db.add(task)
     await db.commit()
@@ -536,7 +568,7 @@ async def delete_document(
     kb_id: str,
     doc_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_kb_access("edit")),
+    user: User = Depends(require_kb_access("edit")),
 ):
     """删除文档：级联清理 chunk / ES 索引 / 图谱节点 / 对象存储原始文件。
 

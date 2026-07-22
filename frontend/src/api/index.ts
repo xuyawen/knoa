@@ -23,6 +23,8 @@ import type {
   AnnouncementCreate,
   AnnouncementUpdate,
   DocStats,
+  DepartmentNode,
+  DocumentTaskOut,
   UserOut,
   DocumentList,
 } from '@/types/api'
@@ -61,7 +63,7 @@ export async function getTrending(): Promise<TrendingItem[]> {
 /** 列出某知识库下的文档（服务端分页 + 真实过滤）。 */
 export async function getDocuments(
   kbId: string,
-  opts?: { page?: number; size?: number; scope?: string; type?: string; status?: string; q?: string; mine?: boolean },
+  opts?: { page?: number; size?: number; scope?: string; type?: string; status?: string; q?: string; mine?: boolean; departmentId?: string; tags?: string },
 ): Promise<DocumentList> {
   const params = new URLSearchParams()
   if (opts?.page) params.set('page', String(opts.page))
@@ -71,6 +73,8 @@ export async function getDocuments(
   if (opts?.status) params.set('status', opts.status)
   if (opts?.q) params.set('q', opts.q)
   if (opts?.mine) params.set('mine', 'true')
+  if (opts?.departmentId) params.set('department_id', opts.departmentId)
+  if (opts?.tags) params.set('tags', opts.tags)
   const qs = params.toString()
   const resp = await fetch(`/api/knowledge-bases/${kbId}/documents${qs ? `?${qs}` : ''}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
@@ -525,4 +529,32 @@ export async function deleteAnnouncement(id: string): Promise<void> {
     const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
     throw new Error(err.detail || `HTTP ${resp.status}`)
   }
+}
+
+/** 部门树（嵌套）。P5 部门筛选使用。 */
+export async function getDepartments(): Promise<DepartmentNode[]> {
+  const resp = await fetch(`/api/departments`, { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 某知识库文档去重标签枚举。P5 标签筛选下拉使用。 */
+export async function getDocumentTags(kbId: string): Promise<string[]> {
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/tags`, { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 轮询单个文档处理任务进度（P5 上传进度条）。 */
+export async function getDocumentTask(taskId: string): Promise<DocumentTaskOut> {
+  const resp = await fetch(`/api/documents/tasks/${taskId}`, { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 按 document_id 查任务列表（取最新一条拿到 task id）。 */
+export async function getDocumentTasks(documentId: string): Promise<DocumentTaskOut[]> {
+  const resp = await fetch(`/api/documents/tasks?document_id=${documentId}`, { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
 }
