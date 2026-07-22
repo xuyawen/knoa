@@ -2,7 +2,7 @@ import base64
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -214,29 +214,47 @@ async def create_knowledge_base(
     )
 
 
-@router.get("/knowledge-bases/{kb_id}/documents", response_model=list[DocumentOut])
+@router.get("/knowledge-bases/{kb_id}/documents")
 async def list_documents(
     kb_id: str,
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
     scope: str | None = None,
-    department_id: str | None = None,
+    doc_type: str | None = None,
+    status: str | None = None,
+    q: str | None = None,
     mine: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_kb_access("view")),
 ):
-    """列出某知识库下的文档。可选过滤（P0 准备，前端 P3/P5 使用，默认全返回）。"""
-    stmt = select(Document).where(Document.kb_id == kb_id)
+    """列出某知识库下的文档（服务端分页 + 真实过滤）。
+
+    过滤维度：scope（权限范围）/ doc_type（按扩展名）/ status（审核状态）/
+    q（标题模糊）/ mine（仅本人）。返回 {items,total,page,size} 供前端分页。
+    """
+    base = select(Document).where(Document.kb_id == kb_id)
     if scope:
-        stmt = stmt.where(Document.scope == scope)
-    if department_id:
-        try:
-            stmt = stmt.where(Document.department_id == uuid.UUID(department_id))
-        except Exception:
-            pass  # 非法 department_id 忽略过滤，不报错
+        base = base.where(Document.scope == scope)
+    if doc_type:
+        base = base.where(Document.source_path.ilike(f"%{doc_type.lower()}"))
+    if status:
+        base = base.where(Document.status == status)
+    if q:
+        base = base.where(Document.title.ilike(f"%{q}%"))
     if mine:
-        stmt = stmt.where(Document.uploader_id == user.id)
-    result = await db.execute(stmt.order_by(Document.created_at.desc()))
-    docs = result.scalars().all()
-    return [_doc_out(d) for d in docs]
+        base = base.where(Document.uploader_id == user.id)
+    total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    rows = (
+        await db.execute(
+            base.order_by(Document.created_at.desc()).offset((page - 1) * size).limit(size)
+        )
+    ).scalars().all()
+    return {
+        "items": [_doc_out(d) for d in rows],
+        "total": total,
+        "page": page,
+        "size": size,
+    }
 
 
 @router.post("/knowledge-bases/{kb_id}/documents", response_model=DocumentOut, status_code=201)

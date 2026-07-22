@@ -24,15 +24,9 @@ const toast = useToastStore()
 const props = defineProps<{ section?: string }>()
 const section = computed(() => props.section ?? 'mine')
 
-// 归档分类：后端未区分 owner/公开/部门维度，这里按状态映射「归档」；
-// 其余分类（我的/公共/部门）暂共享同一文档列表，并用横幅说明后端待接入。
-const scopedDocs = computed(() => {
-  if (section.value === 'archive') return docs.value.filter((d) => d.status === '已拒绝')
-  return docs.value
-})
-
 const selectedKb = ref<string>('')
 const docs = ref<DocumentItem[]>([])
+const total = ref(0)
 const loading = ref(false)
 const uploading = ref(false)
 const deleting = ref(false)
@@ -60,8 +54,8 @@ const statusOptions = [
 ]
 const scopeOptions = [
   { label: '全部权限', value: '' },
-  { label: '仅本人可见', value: 'self' },
-  { label: '部门可见', value: 'dept' },
+  { label: '仅本人可见', value: 'private' },
+  { label: '部门可见', value: 'department' },
   { label: '公司可见', value: 'company' },
   { label: '公开可见', value: 'public' },
 ]
@@ -78,18 +72,37 @@ const previewLoading = ref(false)
 const aiReview = ref<AIReview | null>(null)
 const aiReviewLoading = ref(false)
 
-/* ---------- 数据加载 ---------- */
+// 路由分区（我的/公共/部门/归档）→ 后端查询参数；下拉 scope 可进一步收窄。
+// ponytail: 所有过滤下推后端，前端不再做客户端过滤（旧 scopedDocs 已删）。
+function buildQuery(): Record<string, string | number | boolean> {
+  const q: Record<string, string | number | boolean> = { page: currentPage.value, size: pageSize.value }
+  if (section.value === 'mine') q.mine = true
+  else if (section.value === 'public') q.scope = 'public'
+  else if (section.value === 'department') q.scope = 'department'
+  else if (section.value === 'archive') q.status = '已拒绝'
+  if (filterScope.value) q.scope = filterScope.value
+  if (filterType.value) q.type = filterType.value
+  if (filterStatus.value) q.status = filterStatus.value
+  if (searchQuery.value.trim()) q.q = searchQuery.value.trim()
+  return q
+}
+
+/* ---------- 数据加载（服务端分页 + 真实过滤）---------- */
 async function loadDocs() {
   if (!selectedKb.value) {
     docs.value = []
+    total.value = 0
     return
   }
   loading.value = true
   selectedIds.value = []
   try {
-    docs.value = await getDocuments(selectedKb.value)
+    const res = await getDocuments(selectedKb.value, buildQuery() as any)
+    docs.value = res.items
+    total.value = res.total
   } catch (e: any) {
     docs.value = []
+    total.value = 0
     toast.error(`加载文档失败：${e?.message || e}`)
   } finally {
     loading.value = false
@@ -110,24 +123,30 @@ watch(selectedKb, async () => {
   await loadDocs()
 })
 
-/* ---------- 过滤 + 分页 ---------- */
-const filteredDocs = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  const base = scopedDocs.value
-  if (!q) return base
-  return base.filter((d) => d.title.toLowerCase().includes(q))
+watch(section, async () => {
+  currentPage.value = 1
+  await loadDocs()
 })
 
+watch([filterType, filterStatus, filterScope], async () => {
+  currentPage.value = 1
+  await loadDocs()
+})
+
+// 搜索防抖后重新拉取（服务端 q 过滤）
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(searchQuery, () => {
+  currentPage.value = 1
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { void loadDocs() }, 300)
+})
+
+/* ---------- 分页（服务端已分页，仅算总页数）---------- */
 const totalPages = computed(() =>
-  Math.max(1, Math.ceil(filteredDocs.value.length / pageSize.value)),
+  Math.max(1, Math.ceil(total.value / pageSize.value)),
 )
 
-const pagedDocs = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value
-  return filteredDocs.value.slice(start, start + pageSize.value)
-})
-
-watch([filteredDocs, pageSize], () => {
+watch([total, pageSize], () => {
   if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
 })
 
@@ -299,7 +318,7 @@ function isSelected(id: string) {
   return selectedIds.value.includes(id)
 }
 function toggleSelectAllOnPage() {
-  const pageIds = pagedDocs.value.map((d) => d.id)
+  const pageIds = docs.value.map((d) => d.id)
   const allSelected = pageIds.every((id) => selectedIds.value.includes(id))
   if (allSelected) {
     selectedIds.value = selectedIds.value.filter((id) => !pageIds.includes(id))
@@ -344,13 +363,9 @@ function goPage(p: number) {
     <h2 class="page-title">文档管理</h2>
 
     <!-- 分区说明横幅 -->
-    <div v-if="section === 'public' || section === 'department'" class="scope-banner">
-      <Icon name="info" :size="14" />
-      <span>{{ section === 'public' ? '公共文档' : '部门文档' }}：后端暂未区分文档的公开 / 部门范围，当前展示全部文档。接口接入后将按范围筛选。</span>
-    </div>
-    <div v-else-if="section === 'archive'" class="scope-banner warn">
+    <div v-if="section === 'archive'" class="scope-banner warn">
       <Icon name="archive" :size="14" />
-      <span>文档归档：展示状态为「已拒绝」的文档。</span>
+      <span>文档归档：按状态「已拒绝」筛选展示（真实后端过滤）。</span>
     </div>
 
     <!-- ====== 工具栏 ====== -->
@@ -411,7 +426,7 @@ function goPage(p: number) {
             <th class="col-check">
               <input
                 type="checkbox"
-                :checked="!!pagedDocs.length && pagedDocs.every((d) => isSelected(d.id))"
+                :checked="!!docs.length && docs.every((d) => isSelected(d.id))"
                 @change="toggleSelectAllOnPage"
               />
             </th>
@@ -425,7 +440,7 @@ function goPage(p: number) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="d in pagedDocs" :key="d.id" :class="{ 'row-selected': isSelected(d.id) }">
+          <tr v-for="d in docs" :key="d.id" :class="{ 'row-selected': isSelected(d.id) }">
             <td class="col-check">
               <input type="checkbox" :checked="isSelected(d.id)" @change="toggleSelect(d.id)" />
             </td>
@@ -452,7 +467,7 @@ function goPage(p: number) {
               </div>
             </td>
           </tr>
-          <tr v-if="!loading && !pagedDocs.length">
+          <tr v-if="!loading && !docs.length">
             <td colspan="8" class="empty-cell">
               {{ selectedKb ? '该知识库暂无文档，点击「上传文档」添加' : '请选择左侧知识库' }}
             </td>
@@ -464,7 +479,7 @@ function goPage(p: number) {
     <!-- 网格视图 -->
     <div class="file-grid" v-else>
       <div
-        v-for="d in pagedDocs"
+        v-for="d in docs"
         :key="d.id"
         class="doc-card"
         :class="{ 'row-selected': isSelected(d.id) }"
@@ -486,14 +501,14 @@ function goPage(p: number) {
           <button class="action-btn" title="删除" @click="onDelete(d)"><Icon name="trash" :size="15" /></button>
         </div>
       </div>
-      <div v-if="!loading && !pagedDocs.length" class="grid-empty">
+      <div v-if="!loading && !docs.length" class="grid-empty">
         {{ selectedKb ? '该知识库暂无文档' : '请选择左侧知识库' }}
       </div>
     </div>
 
     <!-- ====== 分页 ====== -->
-    <div class="pagination-bar card" v-if="filteredDocs.length">
-      <div class="page-info">共 {{ filteredDocs.length }} 条</div>
+    <div class="pagination-bar card" v-if="total">
+      <div class="page-info">共 {{ total }} 条</div>
       <div class="page-size">
         <select class="select page-size-select" v-model.number="pageSize">
           <option :value="10">10条/页</option>

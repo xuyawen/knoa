@@ -21,6 +21,7 @@ import type {
   AnnouncementUpdate,
   DocStats,
   UserOut,
+  DocumentList,
 } from '@/types/api'
 import { authHeaders, TokenExpiredError } from './http'
 
@@ -54,9 +55,21 @@ export async function getTrending(): Promise<TrendingItem[]> {
   return resp.json()
 }
 
-/** 列出某知识库下的文档。 */
-export async function getDocuments(kbId: string): Promise<DocumentItem[]> {
-  const resp = await fetch(`/api/knowledge-bases/${kbId}/documents`, { headers: authHeaders() })
+/** 列出某知识库下的文档（服务端分页 + 真实过滤）。 */
+export async function getDocuments(
+  kbId: string,
+  opts?: { page?: number; size?: number; scope?: string; type?: string; status?: string; q?: string; mine?: boolean },
+): Promise<DocumentList> {
+  const params = new URLSearchParams()
+  if (opts?.page) params.set('page', String(opts.page))
+  if (opts?.size) params.set('size', String(opts.size))
+  if (opts?.scope) params.set('scope', opts.scope)
+  if (opts?.type) params.set('type', opts.type)
+  if (opts?.status) params.set('status', opts.status)
+  if (opts?.q) params.set('q', opts.q)
+  if (opts?.mine) params.set('mine', 'true')
+  const qs = params.toString()
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/documents${qs ? `?${qs}` : ''}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }

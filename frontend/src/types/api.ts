@@ -58,6 +58,13 @@ export interface DocumentItem {
   parseStatus?: string            // P0：解析状态 pending|parsing|done|failed
 }
 
+export interface DocumentList {
+  items: DocumentItem[]
+  total: number
+  page: number
+  size: number
+}
+
 export interface DocumentDetail {
   id: string
   title: string
