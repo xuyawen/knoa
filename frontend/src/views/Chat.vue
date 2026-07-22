@@ -6,6 +6,7 @@ import { useRouter } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import Pagination from '@/components/ui/Pagination.vue'
+import DataTable from '@/components/ui/DataTable.vue'
 import { useToastStore } from '@/stores/toast'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -72,6 +73,12 @@ function openSession(id: string) {
 
 const sessionsData = ref<Paginated<ChatSession> | null>(null)
 const sessions = computed(() => sessionsData.value?.items ?? [])
+const recordColumns = [
+  { key: 'title', title: '会话', strong: true },
+  { key: 'msgCount', title: '问答数' },
+  { key: 'updatedAt', title: '最近更新', mono: true },
+  { key: 'actions', title: '' },
+]
 const sessionPage = ref(1)
 const sessionPageSize = ref(20)
 const activeId = ref<string | null>(null)
@@ -580,22 +587,21 @@ watch(messages, scrollToBottom, { deep: false })
       <div class="secondary-page">
         <h2 class="page-title">问答记录</h2>
         <div class="card records-card">
-          <table class="records-table">
-            <thead>
-              <tr><th>会话</th><th>问答数</th><th>最近更新</th><th></th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="s in sessions" :key="s.id">
-                <td class="col-name">{{ s.title || '（新会话）' }}</td>
-                <td>{{ s.msgCount }}</td>
-                <td class="col-time">{{ s.updatedAt ? s.updatedAt.slice(0, 10) : '—' }}</td>
-                <td><button class="link-btn" @click="openSession(s.id)">查看对话</button></td>
-              </tr>
-              <tr v-if="!sessions.length">
-                <td colspan="4" class="empty-hint">暂无会话记录</td>
-              </tr>
-            </tbody>
-          </table>
+          <DataTable
+            :columns="recordColumns"
+            :rows="sessions"
+            row-key="id"
+          >
+            <template #cell="{ row, col }">
+              <template v-if="col.key === 'title'">{{ row.title || '（新会话）' }}</template>
+              <template v-else-if="col.key === 'msgCount'">{{ row.msgCount }}</template>
+              <template v-else-if="col.key === 'updatedAt'">{{ row.updatedAt ? row.updatedAt.slice(0, 10) : '—' }}</template>
+              <template v-else-if="col.key === 'actions'">
+                <button class="link-btn" @click="openSession(row.id)">查看对话</button>
+              </template>
+            </template>
+            <template #empty>暂无会话记录</template>
+          </DataTable>
           <Pagination
             v-if="(sessionsData?.total ?? 0) > 0"
             v-model:page="sessionPage"
@@ -659,6 +665,18 @@ watch(messages, scrollToBottom, { deep: false })
   width: 100%;
   cursor: pointer;
 }
+
+/* 问答记录表格内的链接按钮 */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--brand);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; }
 
 /* ============ 侧栏 ============ */
 .chat-sidebar {

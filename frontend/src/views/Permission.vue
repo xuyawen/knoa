@@ -5,6 +5,7 @@ import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Pagination from '@/components/ui/Pagination.vue'
+import DataTable from '@/components/ui/DataTable.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { getUserList, createUser, updateUser, deleteUser } from '@/api/auth'
@@ -43,6 +44,16 @@ onMounted(() => loadUsers())
 
 const pagedUsers = computed(() => usersData.value?.items ?? [])
 const totalUsers = computed(() => usersData.value?.total ?? 0)
+const userColumns = [
+  { key: 'username', title: '用户名', strong: true },
+  { key: 'displayName', title: '显示名' },
+  { key: 'email', title: '邮箱' },
+  { key: 'department', title: '部门' },
+  { key: 'employeeId', title: '工号' },
+  { key: 'role', title: '角色' },
+  { key: 'isActive', title: '状态' },
+  { key: 'actions', title: '操作' },
+]
 function clearSearch() {
   searchQuery.value = ''
   loadUsers(true)
@@ -207,47 +218,36 @@ const roleMatrix = [
           </button>
         </div>
 
-        <div class="user-table-wrap">
-          <table class="user-table">
-            <thead>
-              <tr>
-                <th>用户名</th>
-                <th>显示名</th>
-                <th>邮箱</th>
-                <th>部门</th>
-                <th>工号</th>
-                <th>角色</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="u in pagedUsers" :key="u.id">
-                <td class="u-name">
-                  <span class="u-avatar">{{ (u.displayName || u.username)[0]?.toUpperCase() }}</span>
-                  <span class="u-uname">{{ u.username }}</span>
-                </td>
-                <td class="u-dname">{{ u.displayName || '—' }}</td>
-                <td>{{ u.email || '—' }}</td>
-                <td>{{ u.department || '—' }}</td>
-                <td>{{ u.employeeId || '—' }}</td>
-                <td><span class="role-badge" :class="roleClass(u.role)">{{ ROLE_LABEL[u.role] || u.role }}</span></td>
-                <td>
-                  <span class="status-badge" :class="u.isActive ? 'success' : 'danger'">{{ u.isActive ? '启用' : '停用' }}</span>
-                </td>
-                <td>
-                  <div class="row-actions">
-                    <button class="action-btn" title="编辑" @click="openEdit(u)"><Icon name="edit" :size="15" /></button>
-                    <button class="action-btn" title="删除" @click="onDelete(u)"><Icon name="trash" :size="15" /></button>
-                  </div>
-                </td>
-              </tr>
-              <tr v-if="!loading && !pagedUsers.length">
-                <td colspan="8" class="empty-cell">暂无用户（或当前筛选无匹配）</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          :columns="userColumns"
+          :rows="pagedUsers"
+          row-key="id"
+          :loading="loading"
+        >
+          <template #cell="{ row, col }">
+            <template v-if="col.key === 'username'">
+              <span class="u-avatar">{{ (row.displayName || row.username)[0]?.toUpperCase() }}</span>
+              <span class="u-uname">{{ row.username }}</span>
+            </template>
+            <template v-else-if="col.key === 'displayName'">{{ row.displayName || '—' }}</template>
+            <template v-else-if="col.key === 'email'">{{ row.email || '—' }}</template>
+            <template v-else-if="col.key === 'department'">{{ row.department || '—' }}</template>
+            <template v-else-if="col.key === 'employeeId'">{{ row.employeeId || '—' }}</template>
+            <template v-else-if="col.key === 'role'">
+              <span class="role-badge" :class="roleClass(row.role)">{{ ROLE_LABEL[row.role] || row.role }}</span>
+            </template>
+            <template v-else-if="col.key === 'isActive'">
+              <span class="status-badge" :class="row.isActive ? 'success' : 'danger'">{{ row.isActive ? '启用' : '停用' }}</span>
+            </template>
+            <template v-else-if="col.key === 'actions'">
+              <div class="row-actions">
+                <button class="action-btn" title="编辑" @click="openEdit(row)"><Icon name="edit" :size="15" /></button>
+                <button class="action-btn" title="删除" @click="onDelete(row)"><Icon name="trash" :size="15" /></button>
+              </div>
+            </template>
+          </template>
+          <template #empty>暂无用户（或当前筛选无匹配）</template>
+        </DataTable>
 
         <Pagination
           v-if="totalUsers > 0"
@@ -411,15 +411,6 @@ const roleMatrix = [
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---- 用户表 ---- */
-.user-table-wrap { overflow-x: auto; }
-.user-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.user-table th {
-  text-align: left; padding: 11px 14px; background: var(--bg-subtle);
-  color: var(--text-secondary); font-weight: 600; font-size: 12px;
-  border-bottom: 1px solid var(--border); white-space: nowrap;
-}
-.user-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-.user-table tr:last-child td { border-bottom: none; }
 .u-name { display: flex; align-items: center; gap: 8px; }
 .u-avatar {
   width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
@@ -447,7 +438,6 @@ const roleMatrix = [
   border-radius: var(--radius-sm); color: var(--text-secondary); background: transparent; cursor: pointer; transition: all var(--dur-fast);
 }
 .action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-.empty-cell { text-align: center; color: var(--text-tertiary); padding: 32px 0 !important; }
 
 /* ---- 分页 ---- */
 .pagination-bar { display: flex; align-items: center; gap: 16px; padding: 12px 4px 2px; font-size: 13px; color: var(--text-secondary); }

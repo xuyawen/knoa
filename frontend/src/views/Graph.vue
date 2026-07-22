@@ -6,6 +6,7 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
+import DataTable from '@/components/ui/DataTable.vue'
 import { useToastStore } from '@/stores/toast'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { getGraph, getGraphHotNodes, getGraphRecent, exportGraph } from '@/api'
@@ -223,6 +224,12 @@ function nodeColor(kbId: string): string {
 function kbName(id: string): string {
   return knowledge.bases.find((b) => b.id === id)?.name || id
 }
+const nodeColumns = [
+  { key: 'label', title: '实体', strong: true },
+  { key: 'type', title: '类型' },
+  { key: 'kb', title: '知识库' },
+  { key: 'degree', title: '度数' },
+]
 const presentKbs = computed(() => {
   const ids = new Set<string>()
   for (const n of graph.value?.nodes || []) ids.add(n.kbId)
@@ -643,22 +650,21 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
           <Icon name="node" :size="14" class="info-hint" />
         </div>
         <div class="node-scroll">
-          <table class="node-table">
-            <thead>
-              <tr><th>实体</th><th>类型</th><th>知识库</th><th>度数</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="n in graph?.nodes" :key="n.id" @click="selectedId = n.id">
-                <td class="col-name">{{ n.label }}</td>
-                <td>{{ n.type || '—' }}</td>
-                <td>{{ kbName(n.kbId) }}</td>
-                <td>{{ degree[n.id] || 0 }}</td>
-              </tr>
-              <tr v-if="!graph || !graph.nodes.length">
-                <td colspan="4" class="empty-hint">暂无实体节点</td>
-              </tr>
-            </tbody>
-          </table>
+          <DataTable
+            :columns="nodeColumns"
+            :rows="graph?.nodes ?? []"
+            row-key="id"
+            clickable
+            @row-click="(n) => (selectedId = n.id)"
+          >
+            <template #cell="{ row, col }">
+              <template v-if="col.key === 'label'">{{ row.label }}</template>
+              <template v-else-if="col.key === 'type'">{{ row.type || '—' }}</template>
+              <template v-else-if="col.key === 'kb'">{{ kbName(row.kbId) }}</template>
+              <template v-else-if="col.key === 'degree'">{{ degree[row.id] || 0 }}</template>
+            </template>
+            <template #empty>暂无实体节点</template>
+          </DataTable>
         </div>
       </div>
     </template>
@@ -909,17 +915,6 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
 /* ---- 节点管理 ---- */
 .node-card { padding: 16px; }
 .node-scroll { overflow-x: auto; }
-.node-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.node-table th {
-  text-align: left; padding: 10px 14px; background: var(--bg-subtle);
-  color: var(--text-secondary); font-weight: 600; font-size: 12px;
-  border-bottom: 1px solid var(--border);
-}
-.node-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
-.node-table tr:last-child td { border-bottom: none; }
-.node-table tbody tr { cursor: pointer; transition: background var(--dur-fast); }
-.node-table tbody tr:hover { background: var(--bg-hover); }
-.col-name { font-weight: 600; }
 .empty-hint { padding: 24px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
 
 /* ---- 关系检索 ---- */

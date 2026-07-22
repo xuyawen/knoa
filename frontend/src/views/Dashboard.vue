@@ -6,6 +6,7 @@ import { storeToRefs } from 'pinia'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import Icon from '@/components/ui/Icon.vue'
 import Pagination from '@/components/ui/Pagination.vue'
+import DataTable from '@/components/ui/DataTable.vue'
 import {
   getDashboardMetrics, getTrend, getDocCategory, getOperations, getAnnouncements, getDocStats,
 } from '@/api'
@@ -147,6 +148,37 @@ const ACT_ICONS: Record<string, string> = {
   login: 'user-circle', upload: 'upload', approve: 'check', reject: 'close',
   delete: 'trash', ask: 'sparkles', download: 'download',
 }
+
+// ── 列表列定义（交给通用 DataTable 渲染）──
+const activityColumns = [
+  { key: 'time', title: '操作时间', mono: true },
+  { key: 'user', title: '操作用户' },
+  { key: 'type', title: '操作类型' },
+  { key: 'content', title: '操作内容', muted: true },
+  { key: 'file', title: '相关文档' },
+]
+const statusDistColumns = [
+  { key: 'status', title: '状态', strong: true },
+  { key: 'count', title: '文档数' },
+  { key: 'ratio', title: '占比' },
+]
+const categoryDistColumns = [
+  { key: 'category', title: '分类', strong: true },
+  { key: 'count', title: '文档数' },
+  { key: 'ratio', title: '占比' },
+]
+const healthColumns = [
+  { key: 'name', title: '知识库', strong: true },
+  { key: 'docCount', title: '文档数' },
+  { key: 'reviewRate', title: '审核率' },
+  { key: 'retrievableRate', title: '可检索率' },
+  { key: 'healthScore', title: '健康分' },
+]
+const visitColumns = [
+  { key: 'label', title: '时间', mono: true },
+  { key: 'aiAnswers', title: '问答次数' },
+  { key: 'searches', title: '搜索次数' },
+]
 
 // ── 文档统计分区（真实，来自 getDocCategory + doc-stats）──
 const docStats = ref<DocStats | null>(null)
@@ -295,29 +327,24 @@ onMounted(() => {
         <div class="panel-head">
           <span class="panel-title">近期操作记录</span>
         </div>
-        <table class="ops-table">
-          <thead>
-            <tr><th>操作时间</th><th>操作用户</th><th>操作类型</th><th>操作内容</th><th>相关文档</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in activityLog" :key="row.time + row.user + row.action">
-              <td class="col-time">{{ row.time }}</td>
-              <td>{{ row.user }}</td>
-              <td>
-                <span class="act-tag">
-                  <Icon :name="ACT_ICONS[row.action] || 'file'" :size="12" />
-                  {{ row.type }}
-                </span>
-              </td>
-              <td class="col-content">{{ row.content }}</td>
-              <td>
-                <span v-if="row.file" class="doc-link">{{ row.file }}</span>
-                <span v-else class="na">—</span>
-              </td>
-            </tr>
-            <tr v-if="!activityLog.length"><td colspan="5" class="empty-hint">暂无操作记录</td></tr>
-          </tbody>
-        </table>
+        <DataTable :columns="activityColumns" :rows="activityLog">
+          <template #cell="{ row, col }">
+            <template v-if="col.key === 'time'">{{ row.time }}</template>
+            <template v-else-if="col.key === 'user'">{{ row.user }}</template>
+            <template v-else-if="col.key === 'type'">
+              <span class="act-tag">
+                <Icon :name="ACT_ICONS[row.action] || 'file'" :size="12" />
+                {{ row.type }}
+              </span>
+            </template>
+            <template v-else-if="col.key === 'content'">{{ row.content }}</template>
+            <template v-else-if="col.key === 'file'">
+              <span v-if="row.file" class="doc-link">{{ row.file }}</span>
+              <span v-else class="na">—</span>
+            </template>
+          </template>
+          <template #empty>暂无操作记录</template>
+        </DataTable>
         <Pagination
           v-if="(opsData?.total ?? 0) > 0"
           v-model:page="opsPage"
@@ -344,47 +371,43 @@ onMounted(() => {
         <!-- 按状态分布 -->
         <div class="ops-section card">
           <div class="panel-head"><span class="panel-title">按状态分布</span></div>
-          <table class="ops-table">
-            <thead><tr><th>状态</th><th>文档数</th><th>占比</th></tr></thead>
-            <tbody>
-              <tr v-for="row in docStats?.byStatus ?? []" :key="row.status">
-                <td class="col-name">{{ row.status }}</td>
-                <td>{{ row.count }}</td>
-                <td>{{ docStatsTotal ? ((row.count / docStatsTotal) * 100).toFixed(1) + '%' : '—' }}</td>
-              </tr>
-              <tr v-if="!docStats?.byStatus?.length"><td colspan="3" class="empty-hint">暂无数据</td></tr>
-            </tbody>
-          </table>
+          <DataTable :columns="statusDistColumns" :rows="docStats?.byStatus ?? []">
+            <template #cell="{ row, col }">
+              <template v-if="col.key === 'status'">{{ row.status }}</template>
+              <template v-else-if="col.key === 'count'">{{ row.count }}</template>
+              <template v-else-if="col.key === 'ratio'">{{ docStatsTotal ? ((row.count / docStatsTotal) * 100).toFixed(1) + '%' : '—' }}</template>
+            </template>
+            <template #empty>暂无数据</template>
+          </DataTable>
         </div>
         <!-- 按分类分布 -->
         <div class="ops-section card">
           <div class="panel-head"><span class="panel-title">按分类分布</span></div>
-          <table class="ops-table">
-            <thead><tr><th>分类</th><th>文档数</th><th>占比</th></tr></thead>
-            <tbody>
-              <tr v-for="row in docStats?.byCategory ?? []" :key="row.category">
-                <td class="col-name">{{ row.category }}</td>
-                <td>{{ row.count }}</td>
-                <td>{{ docStatsTotal ? ((row.count / docStatsTotal) * 100).toFixed(1) + '%' : '—' }}</td>
-              </tr>
-              <tr v-if="!docStats?.byCategory?.length"><td colspan="3" class="empty-hint">暂无数据</td></tr>
-            </tbody>
-          </table>
+          <DataTable :columns="categoryDistColumns" :rows="docStats?.byCategory ?? []">
+            <template #cell="{ row, col }">
+              <template v-if="col.key === 'category'">{{ row.category }}</template>
+              <template v-else-if="col.key === 'count'">{{ row.count }}</template>
+              <template v-else-if="col.key === 'ratio'">{{ docStatsTotal ? ((row.count / docStatsTotal) * 100).toFixed(1) + '%' : '—' }}</template>
+            </template>
+            <template #empty>暂无数据</template>
+          </DataTable>
         </div>
       </div>
 
       <div class="ops-section card">
         <div class="panel-head"><span class="panel-title">各知识库文档分布</span></div>
-        <table class="ops-table">
-          <thead><tr><th>知识库</th><th>文档数</th><th>审核率</th><th>可检索率</th><th>健康分</th></tr></thead>
-          <tbody>
-            <tr v-for="row in healthRows" :key="row.name">
-              <td class="col-name">{{ row.name }}</td><td>{{ row.docCount }}</td><td>{{ row.reviewRate }}%</td><td>{{ row.retrievableRate }}%</td>
-              <td><span class="score-pill" :class="row.healthScore >= 70 ? 'ok' : 'bad'">{{ row.healthScore }}</span></td>
-            </tr>
-            <tr v-if="!healthRows.length"><td colspan="5" class="empty-hint">暂无数据</td></tr>
-          </tbody>
-        </table>
+        <DataTable :columns="healthColumns" :rows="healthRows">
+          <template #cell="{ row, col }">
+            <template v-if="col.key === 'name'">{{ row.name }}</template>
+            <template v-else-if="col.key === 'docCount'">{{ row.docCount }}</template>
+            <template v-else-if="col.key === 'reviewRate'">{{ row.reviewRate }}%</template>
+            <template v-else-if="col.key === 'retrievableRate'">{{ row.retrievableRate }}%</template>
+            <template v-else-if="col.key === 'healthScore'">
+              <span class="score-pill" :class="row.healthScore >= 70 ? 'ok' : 'bad'">{{ row.healthScore }}</span>
+            </template>
+          </template>
+          <template #empty>暂无数据</template>
+        </DataTable>
       </div>
     </template>
 
@@ -443,17 +466,14 @@ onMounted(() => {
       </div>
       <div class="ops-section card">
         <div class="panel-head"><span class="panel-title">访问量明细</span></div>
-        <table class="ops-table">
-          <thead><tr><th>时间</th><th>问答次数</th><th>搜索次数</th></tr></thead>
-          <tbody>
-            <tr v-for="(p, i) in (trendData?.points ?? [])" :key="i">
-              <td class="col-time">{{ trendData?.labels[i] }}</td>
-              <td>{{ p.aiAnswers }}</td>
-              <td>{{ p.searches }}</td>
-            </tr>
-            <tr v-if="!(trendData?.points?.length)"><td colspan="3" class="empty-hint">暂无数据</td></tr>
-          </tbody>
-        </table>
+        <DataTable :columns="visitColumns" :rows="trendData?.points ?? []">
+          <template #cell="{ row, col, index }">
+            <template v-if="col.key === 'label'">{{ trendData?.labels[index] }}</template>
+            <template v-else-if="col.key === 'aiAnswers'">{{ row.aiAnswers }}</template>
+            <template v-else-if="col.key === 'searches'">{{ row.searches }}</template>
+          </template>
+          <template #empty>暂无数据</template>
+        </DataTable>
       </div>
     </template>
 
@@ -572,16 +592,6 @@ onMounted(() => {
 
 /* ---- 操作记录 ---- */
 .ops-section { padding: 22px 24px; overflow: hidden; }
-.ops-table { width:100%; border-collapse:collapse; font-size:13px; }
-.ops-table th {
-  text-align:left; padding:10px 14px; background:var(--bg-subtle);
-  color:var(--text-secondary); font-weight:600; font-size:12px;
-  border-bottom:1px solid var(--border);
-}
-.ops-table td { padding:11px 14px; border-bottom:1px solid var(--border); color:var(--text-primary); }
-.ops-table tr:last-child td { border-bottom:none; }
-.col-time { font-family:monospace; font-size:12.5px; color:var(--text-tertiary); }
-.col-content { color:var(--text-secondary); }
 .act-tag {
   display:inline-flex; align-items:center; gap:4px; padding:2px 9px;
   border-radius:var(--radius-pill); font-size:12px; font-weight:500;
@@ -625,7 +635,6 @@ onMounted(() => {
 
 /* ---- 通用 ---- */
 .page-title { font-size:18px; font-weight:700; color:var(--text-primary); margin:0 0 16px; }
-.col-name { font-weight:600; }
 .score-pill {
   display:inline-block; min-width:30px; text-align:center; padding:2px 10px;
   border-radius:var(--radius-pill); font-weight:700; font-size:12px;

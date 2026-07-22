@@ -7,6 +7,7 @@ import CustomSelect from '@/components/ui/CustomSelect.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Pagination from '@/components/ui/Pagination.vue'
+import DataTable from '@/components/ui/DataTable.vue'
 import DepartmentTree from '@/components/DepartmentTree.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
@@ -110,6 +111,16 @@ const uploadTasks = ref<UploadTask[]>([])
 
 // 选择（批量删）
 const selectedIds = ref<string[]>([])
+// 列表列定义（交给通用 DataTable 渲染）
+const docColumns = [
+  { key: 'name', title: '文档名称', strong: true },
+  { key: 'type', title: '文件类型' },
+  { key: 'updatedAt', title: '上传时间', mono: true },
+  { key: 'uploaderName', title: '上传人' },
+  { key: 'parseStatus', title: '文档解析状态' },
+  { key: 'scope', title: '权限范围' },
+  { key: 'actions', title: '操作' },
+]
 // 分页
 const currentPage = ref(1)
 const pageSize = ref(10)
@@ -455,17 +466,18 @@ async function onAiReview(doc: DocumentItem) {
 }
 
 /* ---------- 批量选择 / 删除 ---------- */
-function toggleSelect(id: string) {
-  const i = selectedIds.value.indexOf(id)
+function toggleSelect(id: string | number) {
+  const sid = String(id)
+  const i = selectedIds.value.indexOf(sid)
   if (i >= 0) selectedIds.value.splice(i, 1)
-  else selectedIds.value.push(id)
+  else selectedIds.value.push(sid)
 }
 function isSelected(id: string) {
   return selectedIds.value.includes(id)
 }
-function toggleSelectAllOnPage() {
+function toggleSelectAllOnPage(checked?: boolean) {
   const pageIds = docs.value.map((d) => d.id)
-  const allSelected = pageIds.every((id) => selectedIds.value.includes(id))
+  const allSelected = checked ?? pageIds.every((id) => selectedIds.value.includes(id))
   if (allSelected) {
     selectedIds.value = selectedIds.value.filter((id) => !pageIds.includes(id))
   } else {
@@ -598,61 +610,55 @@ async function confirmBatchDelete() {
     </Transition>
 
     <!-- ====== 列表 / 网格 ====== -->
-    <div class="file-table-wrap card" v-if="viewMode === 'list'">
-      <table class="file-table">
-        <thead>
-          <tr>
-            <th class="col-check">
-              <input
-                type="checkbox"
-                :checked="!!docs.length && docs.every((d) => isSelected(d.id))"
-                @change="toggleSelectAllOnPage"
-              />
-            </th>
-            <th>文档名称</th>
-            <th>文件类型</th>
-            <th class="col-sort">上传时间 <Icon name="arrow-up-down" :size="11" /></th>
-            <th>上传人</th>
-            <th>文档解析状态</th>
-            <th>权限范围</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="d in docs" :key="d.id" :class="{ 'row-selected': isSelected(d.id) }">
-            <td class="col-check">
-              <input type="checkbox" :checked="isSelected(d.id)" @change="toggleSelect(d.id)" />
-            </td>
-            <td>
-              <div class="file-name-cell">
-                <span class="file-icon-sm" :style="{ background: fileMeta(d.type).color + '18', color: fileMeta(d.type).color }">
-                  <Icon :name="fileMeta(d.type).icon" :size="15" />
-                </span>
-                <span class="file-name" :title="d.title">{{ d.title }}</span>
-              </div>
-            </td>
-            <td><span class="type-text">{{ d.type }}</span></td>
-            <td class="col-time">{{ fmtTime(d.updatedAt) }}</td>
-            <td class="col-uploader">{{ d.uploaderName || '—' }}</td>
-            <td><span class="status-tag" :class="parseStatusType(d.parseStatus)">{{ parseStatusLabel(d.parseStatus) }}</span></td>
-            <td><span class="scope-tag" :class="{ 'scope-private': d.scope === 'private' }">{{ scopeLabel(d.scope) }}</span></td>
-            <td>
-              <div class="row-actions">
-                <button class="action-btn" title="预览" @click="onPreview(d)"><Icon name="eye" :size="15" /></button>
-                <button class="action-btn" title="通过审核" @click="onApprove(d)"><Icon name="check" :size="15" /></button>
-                <button class="action-btn" title="驳回" @click="onReject(d)"><Icon name="close" :size="15" /></button>
-                <button class="action-btn" title="AI 审核" @click="onAiReview(d)"><Icon name="sparkles" :size="15" /></button>
-                <button class="action-btn" title="删除" @click="onDelete(d)"><Icon name="trash" :size="15" /></button>
-              </div>
-            </td>
-          </tr>
-          <tr v-if="!loading && !docs.length">
-            <td colspan="8" class="empty-cell">
-              {{ selectedKb ? '该知识库暂无文档，点击「上传文档」添加' : '请选择左侧知识库' }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="card" v-if="viewMode === 'list'">
+      <DataTable
+        :columns="docColumns"
+        :rows="docs"
+        row-key="id"
+        selectable
+        :selected-keys="selectedIds"
+        :loading="loading"
+        @toggle-row="toggleSelect"
+        @toggle-all="toggleSelectAllOnPage"
+      >
+        <template #cell="{ row, col }">
+          <template v-if="col.key === 'name'">
+            <div class="file-name-cell">
+              <span class="file-icon-sm" :style="{ background: fileMeta(row.type).color + '18', color: fileMeta(row.type).color }">
+                <Icon :name="fileMeta(row.type).icon" :size="15" />
+              </span>
+              <span class="file-name" :title="row.title">{{ row.title }}</span>
+            </div>
+          </template>
+          <template v-else-if="col.key === 'type'">
+            <span class="type-text">{{ row.type }}</span>
+          </template>
+          <template v-else-if="col.key === 'updatedAt'">
+            {{ fmtTime(row.updatedAt) }}
+          </template>
+          <template v-else-if="col.key === 'uploaderName'">
+            {{ row.uploaderName || '—' }}
+          </template>
+          <template v-else-if="col.key === 'parseStatus'">
+            <span class="status-tag" :class="parseStatusType(row.parseStatus)">{{ parseStatusLabel(row.parseStatus) }}</span>
+          </template>
+          <template v-else-if="col.key === 'scope'">
+            <span class="scope-tag" :class="{ 'scope-private': row.scope === 'private' }">{{ scopeLabel(row.scope) }}</span>
+          </template>
+          <template v-else-if="col.key === 'actions'">
+            <div class="row-actions">
+              <button class="action-btn" title="预览" @click="onPreview(row)"><Icon name="eye" :size="15" /></button>
+              <button class="action-btn" title="通过审核" @click="onApprove(row)"><Icon name="check" :size="15" /></button>
+              <button class="action-btn" title="驳回" @click="onReject(row)"><Icon name="close" :size="15" /></button>
+              <button class="action-btn" title="AI 审核" @click="onAiReview(row)"><Icon name="sparkles" :size="15" /></button>
+              <button class="action-btn" title="删除" @click="onDelete(row)"><Icon name="trash" :size="15" /></button>
+            </div>
+          </template>
+        </template>
+        <template #empty>
+          {{ selectedKb ? '该知识库暂无文档，点击「上传文档」添加' : '请选择左侧知识库' }}
+        </template>
+      </DataTable>
     </div>
 
     <!-- 网格视图 -->
@@ -965,32 +971,6 @@ async function confirmBatchDelete() {
 .up-fill.error { background: var(--danger); }
 .up-pct { flex: 0 0 44px; text-align: right; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 
-/* ---- 文件表格 ---- */
-.file-table-wrap { overflow-x: auto; }
-.file-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.file-table th {
-  text-align: left;
-  padding: 11px 14px;
-  background: var(--bg-subtle);
-  color: var(--text-secondary);
-  font-weight: 600;
-  font-size: 12px;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.file-table td {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: middle;
-}
-.file-table tr:last-child td { border-bottom: none; }
-.row-selected { background: var(--brand-soft); }
-.col-check { width: 38px; text-align: center; }
-.col-check input[type='checkbox'] { accent-color: var(--brand); width: 15px; height: 15px; }
 
 .file-name-cell {
   display: flex;
@@ -1016,9 +996,6 @@ async function confirmBatchDelete() {
 }
 .type-text { color: var(--text-secondary); font-weight: 500; }
 .col-time { color: var(--text-tertiary); white-space: nowrap; }
-.col-sort { white-space: nowrap; color: var(--text-secondary); cursor: pointer; user-select: none; }
-.col-sort:hover { color: var(--brand); }
-.col-uploader { color: var(--text-secondary); }
 
 /* 状态标签（原型风格） */
 .status-tag {

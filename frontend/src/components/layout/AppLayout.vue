@@ -24,7 +24,7 @@ const unreadCount = computed(() => announcements.value.filter((a) => !a.read).le
 async function loadAnnouncements() {
   notifyLoading.value = true
   try {
-    announcements.value = await getAnnouncements()
+    announcements.value = (await getAnnouncements()).items
   } catch {
     announcements.value = []
   } finally {
