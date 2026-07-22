@@ -263,7 +263,7 @@ const pwdStrength = computed(() => {
 }
 .rail-banner {
   height: 76px;
-  background: linear-gradient(120deg, var(--brand), #7c3aed 70%, #db2777);
+  background: linear-gradient(120deg, var(--brand), var(--brand-hover) 70%, var(--brand-active));
   position: relative;
 }
 .rail-banner::after {
@@ -287,8 +287,8 @@ const pwdStrength = computed(() => {
   display: flex; align-items: center; justify-content: center;
   width: 100%; height: 100%;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--brand), #7c3aed);
-  color: #fff; font-size: 28px; font-weight: 700;
+  background: linear-gradient(135deg, var(--brand), var(--brand-active));
+  color: var(--text-on-brand); font-size: 28px; font-weight: 700;
 }
 .ra-status {
   position: absolute; right: 6px; bottom: 6px;
@@ -326,7 +326,7 @@ const pwdStrength = computed(() => {
 }
 .sec-fill {
   height: 100%; width: 78%;
-  background: linear-gradient(90deg, var(--success), #34d399);
+  background: linear-gradient(90deg, var(--success), var(--accent-green));
   border-radius: 3px;
 }
 
@@ -348,7 +348,7 @@ const pwdStrength = computed(() => {
 }
 .role-tag.sm { padding: 1px 9px; font-size: 11px; }
 .r-admin { color: var(--brand); background: var(--brand-soft); }
-.r-editor { color: #f59e0b; background: rgba(245,158,11,0.12); }
+.r-editor { color: var(--accent-amber); background: var(--accent-amber-soft); }
 .r-viewer { color: var(--text-secondary); background: var(--bg-subtle); }
 
 /* ====== 右侧 ====== */
@@ -382,7 +382,7 @@ const pwdStrength = computed(() => {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   margin-right: 6px; vertical-align: middle;
 }
-.dot-status.on { background: var(--success); box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+.dot-status.on { background: var(--success); box-shadow: 0 0 6px color-mix(in srgb, var(--success) 50%, transparent); }
 .dot-status.off { background: var(--danger); }
 
 /* ====== 安全表单 ====== */
@@ -406,7 +406,7 @@ const pwdStrength = computed(() => {
 .str-track { flex: 1; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .str-fill { height: 100%; border-radius: 2px; transition: all 0.25s ease; }
 .str-weak { background: var(--danger); }
-.str-mid { background: #f59e0b; }
+.str-mid { background: var(--accent-amber); }
 .str-strong { background: var(--success); }
 .str-label { font-size: 11px; font-weight: 600; min-width: 20px; text-align: right; }
 .field-error { margin: 2px 0 0; font-size: 12px; color: var(--danger); }
