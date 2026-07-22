@@ -895,7 +895,7 @@ function goPage(p: number) {
   transition: all var(--dur-fast);
 }
 .view-toggle:hover { background: var(--bg-hover); color: var(--text-secondary); }
-.view-toggle.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.view-toggle.active { background: var(--brand); color: var(--text-on-brand); border-color: var(--brand); }
 .icon-btn:disabled { opacity: 0.5; cursor: default; }
 .spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -910,8 +910,8 @@ function goPage(p: number) {
 }
 .batch-count { font-size: 13px; color: var(--text-secondary); }
 .batch-count b { color: var(--text-primary); }
-.btn-danger { background: #DC2626; color: #fff; border-color: #DC2626; }
-.btn-danger:hover { background: #B91C1C; }
+.btn-danger { background: var(--danger); color: var(--text-on-brand); border-color: var(--danger); }
+.btn-danger:hover { background: var(--danger-hover); }
 .btn-danger:disabled { opacity: 0.6; }
 .slide-down-enter-active, .slide-down-leave-active { transition: all 0.2s var(--ease-out); }
 .slide-down-enter-from, .slide-down-leave-to { opacity: 0; transform: translateY(-6px); }
@@ -976,8 +976,8 @@ function goPage(p: number) {
   background: var(--brand);
   transition: width 0.25s var(--ease-out);
 }
-.up-fill.done { background: #16a34a; }
-.up-fill.error { background: #dc2626; }
+.up-fill.done { background: var(--success); }
+.up-fill.error { background: var(--danger); }
 .up-pct { flex: 0 0 44px; text-align: right; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 
 /* ---- 文件表格 ---- */
@@ -1054,8 +1054,8 @@ function goPage(p: number) {
   padding: 2px 10px;
   border-radius: var(--radius-pill);
   font-size: 12px;
-  background: rgba(59,130,246,.10);
-  color: #2563eb;
+  background: var(--accent-blue-soft);
+  color: var(--accent-blue);
 }
 
 /* 兼容旧 .status-badge */
@@ -1175,7 +1175,7 @@ function goPage(p: number) {
   font-family: inherit;
 }
 .pg:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
-.pg.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.pg.active { background: var(--brand); color: var(--text-on-brand); border-color: var(--brand); }
 .pg:disabled { opacity: 0.4; cursor: default; }
 
 /* ---- 弹窗内容 ---- */
@@ -1209,9 +1209,9 @@ function goPage(p: number) {
   font-size: 13px;
   margin-bottom: 10px;
 }
-.ai-verdict.approve { background: #D1FAE5; color: #065F46; }
-.ai-verdict.reject { background: #FEE2E2; color: #991B1B; }
-.ai-verdict.manual_review, .ai-verdict.manual { background: #FEF3C7; color: #92400E; }
+.ai-verdict.approve { background: var(--success-soft); color: var(--success); }
+.ai-verdict.reject { background: var(--danger-soft); color: var(--danger); }
+.ai-verdict.manual_review, .ai-verdict.manual { background: var(--warning-soft); color: var(--warning); }
 .ai-summary { margin: 0 0 14px; color: var(--text-secondary); line-height: 1.6; }
 .ai-section h4 { font-size: 13px; color: var(--text-primary); margin: 14px 0 6px; }
 .ai-list { margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
