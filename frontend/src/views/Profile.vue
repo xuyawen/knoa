@@ -17,11 +17,9 @@ const roleLabel = computed(() => ROLE_LABEL[auth.user?.role || 'viewer'] || auth
 
 const displayName = computed(() => auth.user?.displayName || auth.user?.username || '—')
 const avatarLetter = computed(() => displayName.value[0]?.toUpperCase() || '?')
-const email = computed(() => `${auth.user?.username || 'user'}@knoa.local`)
-const employeeId = computed(() => {
-  const id = auth.user?.id || ''
-  return id.length > 6 ? id.slice(-6).toUpperCase() : id.toUpperCase() || '—'
-})
+const department = computed(() => auth.user?.department || '—')
+const email = computed(() => auth.user?.email || '—')
+const employeeId = computed(() => auth.user?.employeeId || '—')
 
 /* ---------- 真实数据加载 ---------- */
 const loading = ref(true)
@@ -80,30 +78,42 @@ const recentContribs = [
 const showEdit = ref(false)
 const editTab = ref<'info' | 'security'>('info')
 const editingInfo = ref(false)
-const displayNameDraft = ref('')
+const infoDraft = ref({ displayName: '', email: '', department: '', employeeId: '' })
 const infoSaving = ref(false)
 
+function syncInfoDraft() {
+  const u = auth.user
+  infoDraft.value = {
+    displayName: u?.displayName || '',
+    email: u?.email || '',
+    department: u?.department || '',
+    employeeId: u?.employeeId || '',
+  }
+}
 function openEdit(tab: 'info' | 'security' = 'info') {
   editTab.value = tab
-  displayNameDraft.value = auth.user?.displayName || ''
+  syncInfoDraft()
   editingInfo.value = false
   resetPwd()
   showEdit.value = true
 }
 
 function startEditInfo() {
-  displayNameDraft.value = auth.user?.displayName || ''
   editingInfo.value = true
 }
 function cancelEditInfo() {
   editingInfo.value = false
-  displayNameDraft.value = ''
 }
 async function saveInfo() {
   if (!auth.user) return
   infoSaving.value = true
   try {
-    await updateUser(auth.user.id, { displayName: displayNameDraft.value.trim() || null })
+    await updateUser(auth.user.id, {
+      displayName: infoDraft.value.displayName.trim() || null,
+      email: infoDraft.value.email.trim() || null,
+      department: infoDraft.value.department.trim() || null,
+      employeeId: infoDraft.value.employeeId.trim() || null,
+    })
     await auth.fetchMe()
     editingInfo.value = false
     toast.success('资料已更新')
@@ -173,7 +183,7 @@ const pwdStrength = computed(() => {
           <p class="hero-meta">
             <span>{{ roleLabel }}</span>
             <span class="dot" />
-            <span>北美站运营组</span>
+            <span>{{ department }}</span>
           </p>
           <p class="hero-contact">{{ email }} · 工号 {{ employeeId }}</p>
         </div>
@@ -275,7 +285,22 @@ const pwdStrength = computed(() => {
           <div class="info-item">
             <span class="info-key">显示名称</span>
             <span v-if="!editingInfo" class="info-val">{{ auth.user?.displayName || '未设置' }}</span>
-            <input v-else v-model="displayNameDraft" class="info-input" maxlength="50" :placeholder="auth.user?.displayName || '未设置'" />
+            <input v-else v-model="infoDraft.displayName" class="info-input" maxlength="50" placeholder="未设置" />
+          </div>
+          <div class="info-item">
+            <span class="info-key">邮箱</span>
+            <span v-if="!editingInfo" class="info-val">{{ auth.user?.email || '未设置' }}</span>
+            <input v-else v-model="infoDraft.email" class="info-input" type="email" placeholder="未设置" />
+          </div>
+          <div class="info-item">
+            <span class="info-key">部门</span>
+            <span v-if="!editingInfo" class="info-val">{{ auth.user?.department || '未设置' }}</span>
+            <input v-else v-model="infoDraft.department" class="info-input" placeholder="未设置" />
+          </div>
+          <div class="info-item">
+            <span class="info-key">工号</span>
+            <span v-if="!editingInfo" class="info-val">{{ auth.user?.employeeId || '未设置' }}</span>
+            <input v-else v-model="infoDraft.employeeId" class="info-input" placeholder="未设置" />
           </div>
           <div class="info-item">
             <span class="info-key">角色权限</span>
