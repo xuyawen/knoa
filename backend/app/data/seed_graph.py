@@ -128,7 +128,7 @@ async def main():
                     KGNode(
                         kb_id=kb,
                         label=lbl,
-                        type=next((t for l, t, k in NODES if l == lbl and k == kb), None),
+                        type=next((t for nl, t, k in NODES if nl == lbl and k == kb), None),
                         chunk_id=cid,
                         embedding=emb,
                     )
@@ -162,8 +162,8 @@ async def main():
 
 
 def _kb_of(label: str) -> str:
-    for l, _, kb in NODES:
-        if l == label:
+    for nl, _, kb in NODES:
+        if nl == label:
             return kb
     return ""
 

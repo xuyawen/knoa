@@ -15,7 +15,6 @@ import time
 import uuid
 from httpx import ASGITransport
 
-import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 

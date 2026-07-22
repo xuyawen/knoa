@@ -7,7 +7,6 @@ from sse_starlette.sse import EventSourceResponse
 from app.core.llm.openai_compat import OpenAICompatProvider
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.pipeline import RAGPipeline
-from app.core.rag.es_client import ESClient
 from app.core.rag.es_retriever import ESRetriever
 from app.core.rag.retriever import HybridRetriever
 from app.core.security import (

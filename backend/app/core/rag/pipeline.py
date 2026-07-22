@@ -17,7 +17,6 @@ from app.core.rag.agent import AgenticRAGAgent
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.retriever import HybridRetriever
 from app.core.store.redis_store import RedisStore
-from app.db import ChatSession
 from app.config import settings
 
 

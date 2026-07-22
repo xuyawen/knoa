@@ -8,7 +8,6 @@
 """
 
 import hashlib
-import re
 
 import numpy as np
 

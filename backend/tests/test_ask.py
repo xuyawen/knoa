@@ -11,7 +11,6 @@ import json
 import uuid
 
 import httpx
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport
 

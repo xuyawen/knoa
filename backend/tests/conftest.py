@@ -38,7 +38,6 @@ os.environ["ADMIN_DISPLAY_NAME"] = "测试管理员"
 os.environ["CORS_ORIGINS"] = "http://localhost:8080"
 os.environ["LOG_LEVEL"] = "WARNING"
 
-import asyncio  # noqa: E402
 import asyncpg  # noqa: E402
 import uuid  # noqa: E402
 import pytest  # noqa: E402

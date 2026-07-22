@@ -60,18 +60,8 @@ class OpenAICompatProvider:
             # ── 标准字段 content (OpenAI / DeepSeek / DashScope 都有) ──
             content = getattr(delta, "content", "") or ""
 
-            # ── reasoning_content (Agnes AI 推理模型塞在这里) ──
-            # OpenAI SDK 的 ChoiceDelta 不允许 getattr(x, "reasoning_content", "")
-            # 因为它用了 extra="forbid"，多余字段不存进去
-            # 所以用 __pydantic_extra__ 取原始 JSON 透传过来的字段
-            try:
-                extra_fields = delta.__pydantic_extra__ or {}
-            except AttributeError:
-                extra_fields = {}
-            reasoning = extra_fields.get("reasoning_content", "") or ""
-
-            # ponytail: 推理内容只用于服务端调试/可观测，绝不拼进用户可见的回答，
-            # 否则会把模型的"思考过程"整段泄漏给用户（表现为回答又臭又长）
+            # ponytail: reasoning_content（Agnes 推理模型）按约定丢弃，只透出 content；
+            # 否则会把模型思考过程整段泄漏给用户（回答又臭又长）。
             if content:
                 yield content
 

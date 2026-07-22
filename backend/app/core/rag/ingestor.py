@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import asyncio
@@ -10,6 +11,8 @@ from app.core.graph import GraphStore
 from app.core.rag.es_client import ESClient
 from app.database import AsyncSessionLocal
 from app.db import DocChunk, Document
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentIngester:

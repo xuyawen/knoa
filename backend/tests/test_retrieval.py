@@ -4,7 +4,6 @@
 """
 import uuid
 
-import pytest
 
 from app.core.rag.ingestor import DocumentIngester
 from app.core.rag.retriever import HybridRetriever

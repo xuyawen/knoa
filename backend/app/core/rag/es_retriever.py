@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 
-from app.config import settings
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.es_client import ESClient
 

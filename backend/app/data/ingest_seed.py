@@ -70,7 +70,7 @@ async def main():
                 print(f"Ingesting {kb_id} ({count} files)...")
                 await ingester.ingest_dir(kb_id, dir_path, db)
                 total += count
-                print(f"  done.")
+                print("  done.")
 
     print(f"All done: {total} documents ingested.")
 

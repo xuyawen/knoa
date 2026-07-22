@@ -48,6 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.llm.base import ToolCallResult
+from app.core.graph import GraphStore
 from app.core.memory import MemoryStore
 from app.core.rag.retriever import HybridRetriever
 from app.core.metrics import record_ask_trace
