@@ -5,6 +5,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
+import Pagination from '@/components/ui/Pagination.vue'
 import { useToastStore } from '@/stores/toast'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -24,6 +25,7 @@ import type {
   ThinkingStep,
   SourceItem,
   ChatAttachment,
+  Paginated,
 } from '@/types/api'
 
 const toast = useToastStore()
@@ -68,7 +70,10 @@ function openSession(id: string) {
   router.push('/chat/new')
 }
 
-const sessions = ref<ChatSession[]>([])
+const sessionsData = ref<Paginated<ChatSession> | null>(null)
+const sessions = computed(() => sessionsData.value?.items ?? [])
+const sessionPage = ref(1)
+const sessionPageSize = ref(20)
 const activeId = ref<string | null>(null)
 const messages = ref<ChatMessage[]>([])
 const streaming = ref(false)
@@ -152,9 +157,11 @@ function toChatMessage(m: SessionMessage): ChatMessage {
 }
 
 /* ---------- 会话 ---------- */
-async function loadSessions() {
+async function loadSessions(page = sessionPage.value, size = sessionPageSize.value) {
   try {
-    sessions.value = await getSessions()
+    sessionPage.value = page
+    sessionPageSize.value = size
+    sessionsData.value = await getSessions(page, size)
   } catch (e: any) {
     toast.error(`加载会话失败：${e?.message || e}`)
   }
@@ -179,10 +186,10 @@ async function newChat() {
   streaming.value = false
   try {
     const s = await createSession()
-    sessions.value = [s, ...sessions.value]
     activeId.value = s.id
     messages.value = []
     errorMsg.value = ''
+    await loadSessions(1)
   } catch (e: any) {
     toast.error(`新建会话失败：${e?.message || e}`)
   }
@@ -192,11 +199,11 @@ async function onDeleteSession(id: string) {
   if (!confirm('确认删除该会话？删除后无法恢复。')) return
   try {
     await deleteSession(id)
-    sessions.value = sessions.value.filter((s) => s.id !== id)
     if (activeId.value === id) {
       activeId.value = null
       messages.value = []
     }
+    await loadSessions()
     toast.success('会话已删除')
   } catch (e: any) {
     toast.error(`删除失败：${e?.message || e}`)
@@ -213,7 +220,10 @@ async function send() {
     try {
       const s = await createSession()
       sid = s.id
-      sessions.value = [s, ...sessions.value]
+      const cur = sessionsData.value
+      sessionsData.value = cur
+        ? { ...cur, items: [s, ...cur.items], total: cur.total + 1 }
+        : { items: [s], total: 1, page: 1, pageSize: 20, pages: 1 }
       activeId.value = sid
     } catch (e: any) {
       toast.error(`创建会话失败：${e?.message || e}`)
@@ -374,6 +384,15 @@ watch(messages, scrollToBottom, { deep: false })
         </button>
         <p v-if="!sessions.length" class="conv-empty">还没有对话，点击右上角开始。</p>
       </div>
+      <Pagination
+        v-if="(sessionsData?.total ?? 0) > 0"
+        v-model:page="sessionPage"
+        v-model:page-size="sessionPageSize"
+        :total="sessionsData?.total ?? 0"
+        :page-sizes="[10, 20]"
+        @update:page="loadSessions()"
+        @update:page-size="loadSessions(1)"
+      />
     </aside>
 
     <!-- ====== 中栏：对话区 ====== -->
@@ -577,6 +596,15 @@ watch(messages, scrollToBottom, { deep: false })
               </tr>
             </tbody>
           </table>
+          <Pagination
+            v-if="(sessionsData?.total ?? 0) > 0"
+            v-model:page="sessionPage"
+            v-model:page-size="sessionPageSize"
+            :total="sessionsData?.total ?? 0"
+            :page-sizes="[10, 20, 50]"
+            @update:page="loadSessions()"
+            @update:page-size="loadSessions(1)"
+          />
         </div>
       </div>
     </template>

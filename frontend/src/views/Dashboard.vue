@@ -5,12 +5,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import Icon from '@/components/ui/Icon.vue'
+import Pagination from '@/components/ui/Pagination.vue'
 import {
-  getDashboardMetrics, getTrend, getDocCategory, getOperations, getAnnouncements, getUsers, getDocStats,
+  getDashboardMetrics, getTrend, getDocCategory, getOperations, getAnnouncements, getDocStats,
 } from '@/api'
+import { getUserList } from '@/api/auth'
 import type {
   DashboardMetrics, TrendResponse, DocCategory, DocStats,
-  OperationsResponse, OperationLogItem, Announcement, UserOut,
+  OperationsResponse, OperationLogItem, Announcement, UserOut, Paginated,
 } from '@/types/api'
 
 const kb = useKnowledgeStore()
@@ -116,9 +118,11 @@ const dotCoords = computed(() =>
 // ── 操作记录（真实，来自 getOperations 分页）──
 const opsData = ref<OperationsResponse | null>(null)
 const opsPage = ref(1)
-async function loadOps(page = 1) {
+const opsPageSize = ref(10)
+async function loadOps(page = opsPage.value, size = opsPageSize.value) {
   opsPage.value = page
-  opsData.value = await getOperations(page, 20)
+  opsPageSize.value = size
+  opsData.value = await getOperations(page, size)
 }
 const activityLog = computed<Array<{ time: string; user: string; type: string; content: string; file: string; action: string }>>(() =>
   (opsData.value?.items ?? []).map((o: OperationLogItem) => ({
@@ -154,7 +158,7 @@ function byStatusCount(status: string): number {
 
 // ── 系统公告（真实，来自 getAnnouncements）──
 const announcements = ref<Announcement[]>([])
-async function loadAnnouncements() { announcements.value = await getAnnouncements() }
+async function loadAnnouncements() { announcements.value = (await getAnnouncements()).items }
 
 // ── 用户统计分区（真实，来自 dashboard.activeUsers + /api/auth/users）──
 const totalUsers = ref<number | null>(null)
@@ -162,10 +166,10 @@ const newUsers30 = ref<number | null>(null)
 async function loadUsers() {
   // 活跃用户已在 metrics 中；总用户/近30天新增需 admin 接口，失败则降级只显示活跃数
   try {
-    const users: UserOut[] = await getUsers()
-    totalUsers.value = users.length
+    const users: Paginated<UserOut> = await getUserList(1, 1000)
+    totalUsers.value = users.total
     const cutoff = Date.now() - 30 * 24 * 3600 * 1000
-    newUsers30.value = users.filter((u) => {
+    newUsers30.value = users.items.filter((u) => {
       const t = u.createdAt ? new Date(u.createdAt).getTime() : NaN
       return !isNaN(t) && t >= cutoff
     }).length
@@ -290,7 +294,6 @@ onMounted(() => {
       <div class="ops-section card">
         <div class="panel-head">
           <span class="panel-title">近期操作记录</span>
-          <a href="#" class="view-more" @click.prevent="loadOps(opsPage + 1)">查看更多</a>
         </div>
         <table class="ops-table">
           <thead>
@@ -315,6 +318,15 @@ onMounted(() => {
             <tr v-if="!activityLog.length"><td colspan="5" class="empty-hint">暂无操作记录</td></tr>
           </tbody>
         </table>
+        <Pagination
+          v-if="(opsData?.total ?? 0) > 0"
+          v-model:page="opsPage"
+          v-model:page-size="opsPageSize"
+          :total="opsData?.total ?? 0"
+          :page-sizes="[10, 20, 50]"
+          @update:page="loadOps()"
+          @update:page-size="loadOps(1)"
+        />
       </div>
     </template>
 

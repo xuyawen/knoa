@@ -4,64 +4,56 @@ import { ref, computed, onMounted, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import Pagination from '@/components/ui/Pagination.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { getUserList, createUser, updateUser, deleteUser } from '@/api/auth'
-import type { UserOut, UserCreate, UserUpdate } from '@/types/api'
+import type { Paginated, UserOut, UserCreate, UserUpdate } from '@/types/api'
 
 const auth = useAuthStore()
 const toast = useToastStore()
 
-/* ---------- 用户列表 ---------- */
-const users = ref<UserOut[]>([])
+/* ---------- 用户列表（服务端分页） ---------- */
+const usersData = ref<Paginated<UserOut> | null>(null)
 const loading = ref(false)
 const searchQuery = ref('')
 const roleFilter = ref<'all' | 'admin' | 'editor' | 'viewer'>('all')
 const currentPage = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(20)
 
-async function loadUsers() {
+async function loadUsers(resetPage = false) {
+  if (resetPage) currentPage.value = 1
   loading.value = true
   try {
-    users.value = await getUserList()
+    usersData.value = await getUserList(
+      currentPage.value,
+      pageSize.value,
+      roleFilter.value === 'all' ? null : roleFilter.value,
+      searchQuery.value.trim() || null,
+    )
   } catch (e: any) {
-    users.value = []
+    usersData.value = null
     toast.error(`加载用户列表失败：${e?.message || e}`)
   } finally {
     loading.value = false
   }
 }
 
-onMounted(loadUsers)
+onMounted(() => loadUsers())
 
-const filteredUsers = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  return users.value.filter((u) => {
-    if (roleFilter.value !== 'all' && u.role !== roleFilter.value) return false
-    if (!q) return true
-    return (
-      u.username.toLowerCase().includes(q) ||
-      (u.displayName || '').toLowerCase().includes(q)
-    )
-  })
-})
-
-const totalPages = computed(() =>
-  Math.max(1, Math.ceil(filteredUsers.value.length / pageSize.value)),
-)
-const pagedUsers = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value
-  return filteredUsers.value.slice(start, start + pageSize.value)
-})
-function goPage(p: number) {
-  if (p >= 1 && p <= totalPages.value) currentPage.value = p
-}
+const pagedUsers = computed(() => usersData.value?.items ?? [])
+const totalUsers = computed(() => usersData.value?.total ?? 0)
 function clearSearch() {
   searchQuery.value = ''
+  loadUsers(true)
 }
-watch([filteredUsers, pageSize], () => {
-  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+watch(searchQuery, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => loadUsers(true), 250)
 })
+watch([roleFilter, pageSize], () => loadUsers(true))
 
 /* ---------- 角色样式 ---------- */
 function roleClass(r: string) {
@@ -210,7 +202,7 @@ const roleMatrix = [
               @click="roleFilter = r; currentPage = 1"
             >{{ r === 'all' ? '全部' : ROLE_LABEL[r] }}</button>
           </div>
-          <button class="icon-btn" title="刷新" :disabled="loading" @click="loadUsers">
+          <button class="icon-btn" title="刷新" :disabled="loading" @click="() => loadUsers()">
             <Icon name="refresh" :size="15" :class="{ spin: loading }" />
           </button>
         </div>
@@ -257,20 +249,14 @@ const roleMatrix = [
           </table>
         </div>
 
-        <div class="pagination-bar" v-if="filteredUsers.length">
-          <div class="page-info">共 {{ filteredUsers.length }} 个用户</div>
-          <div class="page-numbers">
-            <button class="pg" :disabled="currentPage === 1" @click="goPage(currentPage - 1)">&lt;</button>
-            <button
-              v-for="p in totalPages"
-              :key="p"
-              class="pg"
-              :class="{ active: p === currentPage }"
-              @click="goPage(p)"
-            >{{ p }}</button>
-            <button class="pg" :disabled="currentPage === totalPages" @click="goPage(currentPage + 1)">&gt;</button>
-          </div>
-        </div>
+        <Pagination
+          v-if="totalUsers > 0"
+          v-model:page="currentPage"
+          v-model:page-size="pageSize"
+          :total="totalUsers"
+          @update:page="loadUsers()"
+          @update:page-size="loadUsers(true)"
+        />
       </section>
 
       <!-- 角色权限矩阵（后端固定策略参考） -->

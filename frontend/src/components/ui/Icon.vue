@@ -7,7 +7,7 @@ import type { Component } from 'vue'
 import {
   LayoutDashboard, FileText, Search, MessageSquare, Share2, Shield,
   User, UserCircle, Settings, Bell, LogOut, Lock, Key, ShieldCheck, Loader2,
-  ChevronRight, ChevronDown,
+  ChevronLeft, ChevronRight, ChevronDown,
   Sun, Moon, Monitor, Plus, Minus, X, Check, AlertTriangle, Pencil, Trash2,
   MoreHorizontal, Menu, Folder, Upload, Download, Archive, File, FileSpreadsheet,
   Presentation, FileType, Filter, RefreshCw, Eye, LayoutGrid, BarChart3, Users,
@@ -24,7 +24,8 @@ const ICONS: Record<string, Component> = {
   dashboard: LayoutDashboard, doc: FileText, search: Search, chat: MessageSquare,
   graph: Share2, shield: Shield, user: User, 'user-circle': UserCircle,
   settings: Settings, bell: Bell,
-  logout: LogOut, lock: Lock, key: Key, 'shield-check': ShieldCheck, loader: Loader2, chevron: ChevronRight, 'chevron-down': ChevronDown,
+  logout: LogOut, lock: Lock, key: Key, 'shield-check': ShieldCheck, loader: Loader2,
+  chevron: ChevronRight, 'chevron-left': ChevronLeft, 'chevron-down': ChevronDown,
   sun: Sun, moon: Moon, monitor: Monitor, plus: Plus, minus: Minus, close: X,
   check: Check, alert: AlertTriangle, edit: Pencil, trash: Trash2, more: MoreHorizontal,
   menu: Menu, folder: Folder, upload: Upload, download: Download, archive: Archive,

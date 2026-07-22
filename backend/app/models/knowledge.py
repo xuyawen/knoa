@@ -58,6 +58,10 @@ class SourceDetailOut(CamelModel):
 class KnowledgeBasesResponse(CamelModel):
     knowledge_bases: list[KnowledgeBaseOut]
     health: list[HealthItemOut]
+    total: int = 0
+    page: int = 1
+    page_size: int = 20
+    pages: int = 1
 
 
 # ── AI 辅助审核 ──────────────────────────────────────────────

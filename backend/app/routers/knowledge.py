@@ -20,6 +20,7 @@ from app.core.rag.multimodal import (
     VIDEO_EXTS,
     parse_multimodal,
 )
+from app.core.pagination import paginate
 from app.core.storage import get_object_store
 from app.config import settings
 from app.database import AsyncSessionLocal
@@ -31,6 +32,7 @@ from app.core.security import (
 )
 from app.db import DocChunk, Document, DocumentTask, KBPermission, KnowledgeBase, User
 from app.deps import get_db, get_embedder, get_llm, get_es
+from app.models.common import PaginatedOut
 from app.models.knowledge import (
     AIReviewOut,
     DocumentDetailOut,
@@ -53,6 +55,8 @@ router = APIRouter()
 
 @router.get("/knowledge-bases", response_model=KnowledgeBasesResponse)
 async def get_knowledge_bases(
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -188,7 +192,18 @@ async def get_knowledge_bases(
             )
         )
 
-    return KnowledgeBasesResponse(knowledge_bases=kb_list, health=health_list)
+    total = len(kb_list)
+    pages = max(1, (total + size - 1) // size) if total else 1
+    start = (page - 1) * size
+    end = start + size
+    return KnowledgeBasesResponse(
+        knowledge_bases=kb_list[start:end],
+        health=health_list[start:end],
+        total=total,
+        page=page,
+        page_size=size,
+        pages=pages,
+    )
 
 
 @router.post("/knowledge-bases", response_model=KnowledgeBaseOut, status_code=201)
@@ -225,7 +240,7 @@ async def create_knowledge_base(
     )
 
 
-@router.get("/knowledge-bases/{kb_id}/documents")
+@router.get("/knowledge-bases/{kb_id}/documents", response_model=PaginatedOut[DocumentOut])
 async def list_documents(
     kb_id: str,
     page: int = Query(1, ge=1),
@@ -244,7 +259,7 @@ async def list_documents(
 
     过滤维度：scope（权限范围）/ doc_type（按扩展名）/ status（审核状态）/
     q（标题模糊）/ mine（仅本人）/ department_id（部门维度）/ tags（标签，逗号分隔 OR）。
-    返回 {items,total,page,size} 供前端分页。
+    返回统一分页结构 {items,total,page,pageSize,pages}。
     """
     base = select(Document).where(Document.kb_id == kb_id)
     if scope:
@@ -269,17 +284,16 @@ async def list_documents(
             # （has_any 生成 jsonb ?| jsonb、contains 生成 jsonb @> varchar 均无匹配运算符）
             conds = [Document.tags.has_key(t) for t in tag_list]
             base = base.where(or_(*conds))
-    total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
-    rows = (
-        await db.execute(
-            base.order_by(Document.created_at.desc()).offset((page - 1) * size).limit(size)
-        )
-    ).scalars().all()
+
+    stmt = base.order_by(Document.created_at.desc())
+    rows, total = await paginate(db, stmt, page=page, page_size=size)
+    pages = max(1, (total + size - 1) // size) if total else 1
     return {
-        "items": [_doc_out(d) for d in rows],
+        "items": [_doc_out(r[0]) for r in rows],
         "total": total,
         "page": page,
-        "size": size,
+        "page_size": size,
+        "pages": pages,
     }
 
 

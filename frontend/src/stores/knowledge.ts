@@ -14,7 +14,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     if (loaded.value) return
     try {
       const [kbResp, trendResp] = await Promise.all([
-        getKnowledgeBases(),
+        getKnowledgeBases(1, 100),
         getTrending(),
       ])
       bases.value = kbResp.knowledgeBases

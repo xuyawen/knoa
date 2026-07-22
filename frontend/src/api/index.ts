@@ -28,13 +28,16 @@ import type {
   DocStats,
   DepartmentNode,
   DocumentTaskOut,
-  UserOut,
   DocumentList,
+  Paginated,
 } from '@/types/api'
 import { authHeaders, TokenExpiredError } from './http'
 
-export async function getKnowledgeBases(): Promise<KnowledgeBasesResponse> {
-  const resp = await fetch('/api/knowledge-bases', { headers: authHeaders() })
+export async function getKnowledgeBases(
+  page = 1,
+  size = 20,
+): Promise<KnowledgeBasesResponse> {
+  const resp = await fetch(`/api/knowledge-bases?page=${page}&size=${size}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }
@@ -173,9 +176,12 @@ export async function getSourceDetail(chunkId: string): Promise<SourceDetail> {
   return resp.json()
 }
 
-/** 会话列表。 */
-export async function getSessions(): Promise<ChatSession[]> {
-  const resp = await fetch('/api/sessions', { headers: authHeaders() })
+/** 会话列表（分页）。 */
+export async function getSessions(
+  page = 1,
+  size = 20,
+): Promise<Paginated<ChatSession>> {
+  const resp = await fetch(`/api/sessions?page=${page}&size=${size}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }
@@ -467,16 +473,6 @@ export async function getDocStats(): Promise<DocStats> {
   return resp.json()
 }
 
-/** 用户列表（admin）。用于用户统计分区的总用户数 / 近30天新增。 */
-export async function getUsers(): Promise<UserOut[]> {
-  const resp = await fetch('/api/auth/users', { headers: authHeaders() })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
-  return resp.json()
-}
-
 /** 操作日志分页列表（仅 admin）。 */
 export async function getOperations(page = 1, size = 20): Promise<OperationsResponse> {
   const resp = await fetch(`/api/operations?page=${page}&size=${size}`, { headers: authHeaders() })
@@ -484,9 +480,12 @@ export async function getOperations(page = 1, size = 20): Promise<OperationsResp
   return resp.json()
 }
 
-/** 公告列表（所有登录用户可见）。 */
-export async function getAnnouncements(): Promise<Announcement[]> {
-  const resp = await fetch('/api/announcements', { headers: authHeaders() })
+/** 公告列表（所有登录用户可见，分页）。 */
+export async function getAnnouncements(
+  page = 1,
+  size = 20,
+): Promise<Paginated<Announcement>> {
+  const resp = await fetch(`/api/announcements?page=${page}&size=${size}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }
@@ -602,9 +601,13 @@ export async function getDocumentTask(taskId: string): Promise<DocumentTaskOut> 
   return resp.json()
 }
 
-/** 按 document_id 查任务列表（取最新一条拿到 task id）。 */
-export async function getDocumentTasks(documentId: string): Promise<DocumentTaskOut[]> {
-  const resp = await fetch(`/api/documents/tasks?document_id=${documentId}`, { headers: authHeaders() })
+/** 按 document_id 查任务列表（取最新一条拿到 task id，分页）。 */
+export async function getDocumentTasks(
+  documentId: string,
+  page = 1,
+  size = 20,
+): Promise<Paginated<DocumentTaskOut>> {
+  const resp = await fetch(`/api/documents/tasks?document_id=${documentId}&page=${page}&size=${size}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }

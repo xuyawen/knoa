@@ -45,6 +45,14 @@ export interface TrendingItem {
   count: number
 }
 
+export interface Paginated<T> {
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+  pages: number
+}
+
 export interface DocumentItem {
   id: string
   title: string
@@ -59,12 +67,7 @@ export interface DocumentItem {
   parseStatus?: string            // P0：解析状态 pending|parsing|done|failed
 }
 
-export interface DocumentList {
-  items: DocumentItem[]
-  total: number
-  page: number
-  size: number
-}
+export type DocumentList = Paginated<DocumentItem>
 
 export interface DocumentDetail {
   id: string
@@ -223,6 +226,10 @@ export interface GraphFilter {
 export interface KnowledgeBasesResponse {
   knowledgeBases: KnowledgeBase[]
   health: HealthItem[]
+  total: number
+  page: number
+  pageSize: number
+  pages: number
 }
 
 export interface UserOut {
@@ -323,12 +330,7 @@ export interface OperationLogItem {
   createdAt: string
 }
 
-export interface OperationsResponse {
-  items: OperationLogItem[]
-  total: number
-  page: number
-  size: number
-}
+export type OperationsResponse = Paginated<OperationLogItem>
 
 export interface Announcement {
   id: string

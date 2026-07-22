@@ -7,7 +7,7 @@ import { changePassword, updateUser } from '@/api/auth'
 import { getSessions, getKnowledgeBases } from '@/api'
 import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
-import type { KnowledgeBase, ChatSession } from '@/types/api'
+import type { ChatSession, Paginated, KnowledgeBasesResponse } from '@/types/api'
 
 const auth = useAuthStore()
 const toast = useToastStore()
@@ -23,13 +23,16 @@ const employeeId = computed(() => auth.user?.employeeId || '—')
 
 /* ---------- 真实数据加载 ---------- */
 const loading = ref(true)
-const sessions = ref<ChatSession[]>([])
-const knowledgeBases = ref<KnowledgeBase[]>([])
+const sessionsData = ref<Paginated<ChatSession> | null>(null)
+const kbData = ref<KnowledgeBasesResponse | null>(null)
 onMounted(async () => {
   try {
-    const [sList, kbResp] = await Promise.all([getSessions(), getKnowledgeBases()])
-    sessions.value = sList
-    knowledgeBases.value = kbResp.knowledgeBases
+    const [sList, kbResp] = await Promise.all([
+      getSessions(1, 3),
+      getKnowledgeBases(1, 4),
+    ])
+    sessionsData.value = sList
+    kbData.value = kbResp
   } catch {
     toast.error('加载个人数据失败')
   } finally {
@@ -40,9 +43,9 @@ onMounted(async () => {
 /* ---------- 统计 ---------- */
 const stats = computed(() => [
   { label: '贡献文档', value: '—' }, // ponytail: 后端暂无用户贡献文档 API，先占位
-  { label: '提问', value: sessions.value.length },
+  { label: '提问', value: sessionsData.value?.total ?? 0 },
   { label: '采纳回答', value: '—' }, // ponytail: 后端暂无采纳统计 API，先占位
-  { label: '加入知识库', value: knowledgeBases.value.length },
+  { label: '加入知识库', value: kbData.value?.total ?? 0 },
 ])
 
 /* ---------- 我的知识库 ---------- */
@@ -53,7 +56,7 @@ function kbColor(name: string) {
   return KB_PALETTE[Math.abs(hash) % KB_PALETTE.length]
 }
 const myKBs = computed(() =>
-  knowledgeBases.value.slice(0, 4).map((kb) => ({
+  (kbData.value?.knowledgeBases ?? []).slice(0, 4).map((kb) => ({
     ...kb,
     initial: kb.name[0] || '?',
     color: kbColor(kb.name),
@@ -62,7 +65,7 @@ const myKBs = computed(() =>
 
 /* ---------- 我的问答（用会话标题兜底） ---------- */
 const myQuestions = computed(() =>
-  sessions.value.slice(0, 3).map((s) => ({
+  (sessionsData.value?.items ?? []).slice(0, 3).map((s) => ({
     title: s.title || '未命名问题',
     meta: s.msgCount > 1 ? `${s.msgCount - 1} 个来源 · 已回答` : '新提问',
   })),

@@ -1,8 +1,8 @@
 """Phase 2 鉴权路由：登录、当前用户、用户管理（仅 admin）。"""
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import delete, func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
@@ -22,6 +22,8 @@ from app.models.auth import (
     UserOut,
     UserUpdateIn,
 )
+from app.models.common import PaginatedOut
+from app.core.pagination import paginate
 
 router = APIRouter()
 
@@ -109,13 +111,31 @@ async def change_password(
     return {"detail": "密码修改成功"}
 
 
-@router.get("/auth/users", response_model=list[UserOut])
+@router.get("/auth/users", response_model=PaginatedOut[UserOut])
 async def list_users(
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    role: str | None = Query(default=None),
+    q: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles("admin")),
 ):
-    rows = (await db.execute(select(User).order_by(User.created_at))).scalars().all()
-    return [_to_out(u) for u in rows]
+    """用户列表分页，支持角色/用户名/显示名搜索过滤。仅 admin 可见。"""
+    stmt = select(User).order_by(User.created_at)
+    if role:
+        stmt = stmt.where(User.role == role)
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(or_(User.username.ilike(like), User.display_name.ilike(like)))
+    rows, total = await paginate(db, stmt, page=page, page_size=size)
+    pages = max(1, (total + size - 1) // size) if total else 1
+    return {
+        "items": [_to_out(r[0]) for r in rows],
+        "total": total,
+        "page": page,
+        "page_size": size,
+        "pages": pages,
+    }
 
 
 @router.post("/auth/users", response_model=UserOut, status_code=201)

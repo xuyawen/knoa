@@ -1,4 +1,4 @@
-import type { TokenOut, UserCreate, UserOut, UserUpdate } from '@/types/api'
+import type { Paginated, TokenOut, UserCreate, UserOut, UserUpdate } from '@/types/api'
 import { authHeaders } from './http'
 
 const HTTP_MSG: Record<number, string> = {
@@ -50,9 +50,19 @@ export async function logout(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() })
 }
 
-/** 用户列表（仅 admin）。 */
-export async function getUserList(): Promise<UserOut[]> {
-  const resp = await fetch('/api/auth/users', { headers: authHeaders() })
+/** 用户列表（仅 admin，分页 + 角色/关键词过滤）。 */
+export async function getUserList(
+  page = 1,
+  size = 20,
+  role?: string | null,
+  q?: string | null,
+): Promise<Paginated<UserOut>> {
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('size', String(size))
+  if (role) params.set('role', role)
+  if (q) params.set('q', q)
+  const resp = await fetch(`/api/auth/users?${params.toString()}`, { headers: authHeaders() })
   if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }

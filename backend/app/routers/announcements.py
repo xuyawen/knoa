@@ -1,14 +1,17 @@
 """Phase 1 业务统计：系统公告（通知中心 / 系统设置管理）。"""
 import uuid
+from math import ceil
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pagination import paginate
 from app.db import Announcement, User, UserAnnouncementRead
 from app.deps import get_db
 from app.models.announcement import AnnouncementOut
+from app.models.common import PaginatedOut
 from app.core.security import get_current_user, require_roles
 
 router = APIRouter()
@@ -28,29 +31,39 @@ class AnnouncementUpdate(BaseModel):
     pinned: bool | None = None
 
 
-@router.get("/announcements")
+@router.get("/announcements", response_model=PaginatedOut[AnnouncementOut])
 async def list_announcements(
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """公告列表：pinned 置顶优先，再按时间倒序。所有登录用户可见。
+    """公告列表分页：pinned 置顶优先，再按时间倒序。所有登录用户可见。
 
     按当前用户标注 read 字段：查该用户已读的公告 id 集合，列表里命中即 read=True。
     """
-    rows = (
-        await db.execute(
-            select(Announcement)
-            .order_by(Announcement.pinned.desc(), Announcement.created_at.desc())
-        )
-    ).scalars().all()
+    stmt = select(Announcement).order_by(
+        Announcement.pinned.desc(), Announcement.created_at.desc()
+    )
+    rows, total = await paginate(db, stmt, page=page, page_size=size)
+    ann_ids = [r[0].id for r in rows]
     read_ids = set(
         (await db.scalars(
             select(UserAnnouncementRead.announcement_id).where(
-                UserAnnouncementRead.user_id == user.id
+                UserAnnouncementRead.user_id == user.id,
+                UserAnnouncementRead.announcement_id.in_(ann_ids),
             )
         )).all()
     )
-    return [AnnouncementOut.from_orm(r, read=(r.id in read_ids)) for r in rows]
+    items = [AnnouncementOut.from_orm(r[0], read=(r[0].id in read_ids)) for r in rows]
+    pages = max(1, ceil(total / size)) if total else 1
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": size,
+        "pages": pages,
+    }
 
 
 @router.post("/announcements/{ann_id}/read", status_code=200)

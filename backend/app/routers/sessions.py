@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pagination import paginate
 from app.core.security import get_current_user
 from app.db import ChatMessage, ChatSession, User
 from app.deps import get_db
@@ -11,45 +12,51 @@ from app.models.chat import (
     SessionMessageOut,
     SessionOut,
 )
+from app.models.common import PaginatedOut
 
 router = APIRouter()
 
 
-@router.get("/sessions", response_model=list[SessionOut])
+@router.get("/sessions", response_model=PaginatedOut[SessionOut])
 async def list_sessions(
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """会话列表：仅返回当前登录用户自己的会话。"""
-    result = await db.execute(
+    """会话列表分页：仅返回当前登录用户自己的会话。"""
+    user_id = str(user.id)
+    stmt = (
         select(ChatSession)
-        .where(ChatSession.user_id == str(user.id))
+        .where(ChatSession.user_id == user_id)
         .order_by(ChatSession.updated_at.desc())
     )
-    sessions = result.scalars().all()
-    if not sessions:
-        return []
+    rows, total = await paginate(db, stmt, page=page, page_size=size)
+    sessions = [r[0] for r in rows]
 
-    # 聚合查询消除 N+1：一次性取全部会话的消息数与首条用户消息，而非逐条查
+    # 聚合查询消除 N+1：一次性取当前页会话的消息数与首条用户消息
     ids = [s.id for s in sessions]
-    counts = (
-        await db.execute(
-            select(ChatMessage.session_id, func.count(ChatMessage.id))
-            .where(ChatMessage.session_id.in_(ids))
-            .group_by(ChatMessage.session_id)
-        )
-    ).all()
-    count_by_id = {sid: c for sid, c in counts}
+    count_by_id: dict = {}
+    first_by_id: dict = {}
+    if ids:
+        counts = (
+            await db.execute(
+                select(ChatMessage.session_id, func.count(ChatMessage.id))
+                .where(ChatMessage.session_id.in_(ids))
+                .group_by(ChatMessage.session_id)
+            )
+        ).all()
+        count_by_id = {sid: c for sid, c in counts}
 
-    first_msgs = (
-        await db.execute(
-            select(ChatMessage.session_id, ChatMessage.content)
-            .where(ChatMessage.session_id.in_(ids), ChatMessage.role == "user")
-            .order_by(ChatMessage.session_id, ChatMessage.created_at)
-            .distinct(ChatMessage.session_id)
-        )
-    ).all()
-    first_by_id = {sid: content for sid, content in first_msgs}
+        first_msgs = (
+            await db.execute(
+                select(ChatMessage.session_id, ChatMessage.content)
+                .where(ChatMessage.session_id.in_(ids), ChatMessage.role == "user")
+                .order_by(ChatMessage.session_id, ChatMessage.created_at)
+                .distinct(ChatMessage.session_id)
+            )
+        ).all()
+        first_by_id = {sid: content for sid, content in first_msgs}
 
     out = []
     for s in sessions:
@@ -66,7 +73,14 @@ async def list_sessions(
                 summary=s.summary,
             )
         )
-    return out
+    pages = max(1, (total + size - 1) // size) if total else 1
+    return {
+        "items": out,
+        "total": total,
+        "page": page,
+        "page_size": size,
+        "pages": pages,
+    }
 
 
 @router.post("/sessions", response_model=SessionOut, status_code=201)

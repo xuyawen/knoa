@@ -6,6 +6,7 @@ import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import Pagination from '@/components/ui/Pagination.vue'
 import DepartmentTree from '@/components/DepartmentTree.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
@@ -321,7 +322,7 @@ async function onUploadFiles(e: Event) {
       const doc = await uploadDocument(selectedKb.value, f.name, b64)
       // 拿到 task id（上传阶段后端已置 done/100，审核阶段会再推进）
       const tasks = await getDocumentTasks(doc.id)
-      const task = tasks[0]
+      const task = tasks.items[0]
       if (task) {
         entry.id = task.id
         await pollTask(entry, task.id)
@@ -500,10 +501,6 @@ async function confirmBatchDelete() {
   await loadDocs()
 }
 
-/* ---------- 分页跳转 ---------- */
-function goPage(p: number) {
-  if (p >= 1 && p <= totalPages.value) currentPage.value = p
-}
 </script>
 
 <template>
@@ -689,27 +686,15 @@ function goPage(p: number) {
     </div>
 
     <!-- ====== 分页 ====== -->
-    <div class="pagination-bar card" v-if="total">
-      <div class="page-info">共 {{ total }} 条</div>
-      <div class="page-size">
-        <select class="select page-size-select" v-model.number="pageSize">
-          <option :value="10">10条/页</option>
-          <option :value="20">20条/页</option>
-          <option :value="50">50条/页</option>
-        </select>
-      </div>
-      <div class="page-numbers">
-        <button class="pg" :disabled="currentPage === 1" @click="goPage(currentPage - 1)">&lt;</button>
-        <button
-          v-for="p in totalPages"
-          :key="p"
-          class="pg"
-          :class="{ active: p === currentPage }"
-          @click="goPage(p)"
-        >{{ p }}</button>
-        <button class="pg" :disabled="currentPage === totalPages" @click="goPage(currentPage + 1)">&gt;</button>
-      </div>
-    </div>
+    <Pagination
+      v-if="total > 0"
+      v-model:page="currentPage"
+      v-model:page-size="pageSize"
+      :total="total"
+      :page-sizes="[10, 20, 50]"
+      @update:page="loadDocs()"
+      @update:page-size="currentPage = 1; loadDocs()"
+    />
 
     <!-- ====== 预览弹窗 ====== -->
     <AppModal :show="!!previewDoc" title="文档预览" wide @close="previewDoc = null">
