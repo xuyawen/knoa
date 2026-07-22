@@ -64,7 +64,6 @@ const topNavItems = [
   { to: '/search', label: '智能搜索' },
   { to: '/chat', label: 'AI智能问答' },
   { to: '/graph', label: '知识图谱' },
-  { to: '/profile', label: '个人中心' },
   { to: '/permission', label: '系统管理' },
 ]
 
