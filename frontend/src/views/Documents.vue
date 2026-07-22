@@ -522,7 +522,7 @@ async function confirmBatchDelete() {
     <!-- 分区说明横幅 -->
     <div v-if="section === 'archive'" class="scope-banner warn">
       <Icon name="archive" :size="14" />
-      <span>文档归档：按状态「已拒绝」筛选展示（真实后端过滤）。</span>
+      <span>文档归档：仅展示状态为「已拒绝」的文档。</span>
     </div>
 
     <!-- ====== 工具栏 ====== -->

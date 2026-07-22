@@ -7,6 +7,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import DataTable from '@/components/ui/DataTable.vue'
+import Pagination from '@/components/ui/Pagination.vue'
 import { useToastStore } from '@/stores/toast'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { getGraph, getGraphHotNodes, getGraphRecent, exportGraph } from '@/api'
@@ -230,6 +231,13 @@ const nodeColumns = [
   { key: 'kb', title: '知识库' },
   { key: 'degree', title: '度数' },
 ]
+const nodePage = ref(1)
+const nodePageSize = ref(15)
+const pagedNodes = computed(() => {
+  const nodes = graph.value?.nodes || []
+  const start = (nodePage.value - 1) * nodePageSize.value
+  return nodes.slice(start, start + nodePageSize.value)
+})
 const presentKbs = computed(() => {
   const ids = new Set<string>()
   for (const n of graph.value?.nodes || []) ids.add(n.kbId)
@@ -652,7 +660,7 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
         <div class="node-scroll">
           <DataTable
             :columns="nodeColumns"
-            :rows="graph?.nodes ?? []"
+            :rows="pagedNodes"
             row-key="id"
             clickable
             @row-click="(n) => (selectedId = n.id)"
@@ -666,6 +674,13 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
             <template #empty>暂无实体节点</template>
           </DataTable>
         </div>
+        <Pagination
+          v-if="(graph?.nodes.length || 0) > 0"
+          v-model:page="nodePage"
+          v-model:page-size="nodePageSize"
+          :total="graph?.nodes.length || 0"
+          :page-sizes="[10, 15, 30]"
+        />
       </div>
     </template>
 
@@ -892,8 +907,8 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
 .hot-list { display: flex; flex-direction: column; gap: 6px; }
 .hot-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: var(--radius-sm); transition: background var(--dur-fast); cursor: pointer; }
 .hot-item:hover { background: var(--bg-hover); }
-.hot-rank { width: 18px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; background: var(--bg-subtle); color: var(--text-tertiary); flex-shrink: 0; }
-.hot-rank.top3 { background: var(--brand-soft); color: var(--brand); }
+.hot-rank { width: 18px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; background: var(--bg-surface); color: var(--text-secondary); border: 1px solid var(--border); flex-shrink: 0; }
+.hot-rank.top3 { background: var(--brand-soft); color: var(--brand); border-color: transparent; }
 .hot-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .hot-name { font-size: 12.5px; color: var(--text-primary); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hot-count { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }

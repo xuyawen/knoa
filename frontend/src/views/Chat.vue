@@ -354,9 +354,10 @@ function pick(s: string) {
 
 onMounted(async () => {
   await loadSessions()
-  // 历史会话分区：默认打开最新一条会话做只读浏览
+  // 历史会话分区：默认打开最新一条有消息的会话做只读浏览
   if (section.value === 'history' && sessions.value.length && !activeId.value) {
-    selectSession(sessions.value[0].id)
+    const firstWithMsg = sessions.value.find((s) => s.msgCount > 0) || sessions.value[0]
+    selectSession(firstWithMsg.id)
   }
 })
 watch(messages, scrollToBottom, { deep: false })
@@ -413,7 +414,7 @@ watch(messages, scrollToBottom, { deep: false })
       <header class="chat-header">
         <div class="chat-head-left">
           <div class="chat-eyebrow">AI 智能问答</div>
-          <h1 class="chat-question">{{ firstQuestion || '有什么可以帮你？' }}</h1>
+          <h1 class="chat-question">{{ section === 'history' ? '历史会话' : (firstQuestion || '有什么可以帮你？') }}</h1>
         </div>
         <div class="chat-head-actions">
           <button class="ghost-btn" @click="newChat">

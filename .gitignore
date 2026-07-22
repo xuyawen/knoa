@@ -50,3 +50,6 @@ interview/
 *.key.pem
 .DS_Store
 
+# screenshot artifacts from UI review runs
+.screenshots/
+

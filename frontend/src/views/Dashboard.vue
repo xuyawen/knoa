@@ -85,9 +85,10 @@ async function loadTrend(range: TrendRange) { trendData.value = await getTrend(r
 watch(trendRange, (r) => { void loadTrend(r) })
 const activeTrend = computed(() => {
   const t = trendData.value
-  if (!t) return { points: [] as number[], labels: [] as string[], max: 1 }
+  if (!t) return { points: [] as number[], labels: [] as string[], max: 1, labelStep: 1 }
   const pts = t.points.map((p) => p.aiAnswers)
-  return { points: pts, labels: t.labels, max: Math.max(1, ...pts) }
+  const labelStep = t.labels.length > 12 ? Math.ceil(t.labels.length / 8) : 1
+  return { points: pts, labels: t.labels, max: Math.max(1, ...pts), labelStep }
 })
 const chartH = 220
 const chartW = 520
@@ -286,7 +287,9 @@ onMounted(() => {
               </g>
             </svg>
             <div class="x-axis">
-              <span v-for="(lbl, i) in activeTrend.labels" :key="i" class="x-lbl">{{ lbl }}</span>
+              <span v-for="(lbl, i) in activeTrend.labels" :key="i" class="x-lbl">
+                <template v-if="i % activeTrend.labelStep === 0">{{ lbl }}</template>
+              </span>
             </div>
           </div>
         </div>
@@ -403,7 +406,7 @@ onMounted(() => {
             <template v-else-if="col.key === 'reviewRate'">{{ row.reviewRate }}%</template>
             <template v-else-if="col.key === 'retrievableRate'">{{ row.retrievableRate }}%</template>
             <template v-else-if="col.key === 'healthScore'">
-              <span class="score-pill" :class="row.healthScore >= 70 ? 'ok' : 'bad'">{{ row.healthScore }}</span>
+              <span class="score-pill" :class="row.healthScore >= 0.7 ? 'ok' : 'bad'">{{ Math.round(row.healthScore * 100) }}%</span>
             </template>
           </template>
           <template #empty>暂无数据</template>
@@ -460,7 +463,9 @@ onMounted(() => {
             </g>
           </svg>
           <div class="x-axis">
-            <span v-for="(lbl, i) in activeTrend.labels" :key="i" class="x-lbl">{{ lbl }}</span>
+            <span v-for="(lbl, i) in activeTrend.labels" :key="i" class="x-lbl">
+              <template v-if="i % activeTrend.labelStep === 0">{{ lbl }}</template>
+            </span>
           </div>
         </div>
       </div>
@@ -564,10 +569,14 @@ onMounted(() => {
 .grid-lines line { stroke-opacity: .5; }
 
 .x-axis {
-  display: flex; justify-content: space-between;
+  display: flex;
   margin-top: 8px; padding: 0 2px;
 }
-.x-lbl { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+.x-lbl {
+  flex: 1; text-align: center;
+  font-size: 11px; color: var(--text-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* ---- 饼图 ---- */
 .pie-panel { padding: 22px 24px; }
@@ -611,7 +620,7 @@ onMounted(() => {
 .trend-rank {
   width:22px; height:22px; flex-shrink:0; border-radius:6px;
   display:inline-flex; align-items:center; justify-content:center;
-  font-size:12px; font-weight:700; background:var(--bg-subtle); color:var(--text-tertiary);
+  font-size:12px; font-weight:700; background:var(--bg-surface); color:var(--text-secondary); border:1px solid var(--border);
 }
 .trend-rank.rk-1{background:var(--brand);color:var(--text-on-brand)}.trend-rank.rk-2{background:var(--brand-soft);color:var(--brand)}
 .trend-rank.rk-3{background:var(--warning-soft);color:var(--warning)}

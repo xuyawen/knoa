@@ -179,7 +179,7 @@ function clearSearch() {
           <span class="panel-title">搜索筛选</span>
           <Icon name="filter" :size="14" class="info-hint" />
         </div>
-        <p class="filter-desc">配置检索范围与来源类型，提交搜索时生效（后端筛选能力建设中）。</p>
+        <p class="filter-desc">配置检索范围与来源类型，提交搜索时生效。</p>
         <div class="filter-group">
           <div class="filter-label">来源类型</div>
           <div class="filter-toggles">
@@ -618,8 +618,9 @@ function clearSearch() {
   justify-content: center;
   font-size: 12px;
   font-weight: 700;
-  background: var(--bg-subtle);
-  color: var(--text-tertiary);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
 }
 .rank.rk-1 { background: var(--brand); color: var(--text-on-brand); }
 .rank.rk-2 { background: var(--brand-soft); color: var(--brand); }

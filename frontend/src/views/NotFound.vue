@@ -10,7 +10,7 @@ const router = useRouter()
     <h1>页面走丢了</h1>
     <p>你访问的页面不存在或已被移动。</p>
     <button class="btn btn-primary" @click="router.push('/dashboard')">
-      <Icon name="dashboard" :size="15" />返回首页大盘
+      <Icon name="dashboard" :size="15" />返回首页
     </button>
   </div>
 </template>
