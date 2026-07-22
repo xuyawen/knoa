@@ -135,6 +135,9 @@ function onLogout() {
 
 const user = computed(() => auth.user)
 const userInitial = computed(() => user.value?.name?.[0] ?? '管')
+
+/* ---------- 子侧栏折叠 ---------- */
+const sidebarCollapsed = ref(false)
 </script>
 
 <template>
@@ -237,7 +240,7 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
     <!-- ====== 主体：左侧边栏 + 内容区 ====== -->
     <div class="body-row">
       <!-- 左侧子菜单 -->
-      <aside v-if="currentSubItems.length" class="sub-sidebar">
+      <aside v-if="currentSubItems.length" class="sub-sidebar" :class="{ collapsed: sidebarCollapsed }">
         <div class="sub-sidebar-header">{{ (route.meta.title as string) || '' }}</div>
         <div class="sub-nav">
           <router-link
@@ -252,7 +255,7 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
           </router-link>
         </div>
         <div class="sub-footer">
-          <button class="sub-collapse">
+          <button class="sub-collapse" @click="sidebarCollapsed = true">
             <Icon name="collapse" :size="14" /> 收起菜单
           </button>
         </div>
@@ -260,6 +263,14 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
 
       <!-- 主内容区 -->
       <main class="main-content">
+        <button
+          v-if="sidebarCollapsed && currentSubItems.length"
+          class="sidebar-expand"
+          title="展开菜单"
+          @click="sidebarCollapsed = false"
+        >
+          <Icon name="chevron-right" :size="16" />
+        </button>
         <router-view />
       </main>
     </div>
@@ -578,6 +589,14 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
   background: var(--bg-surface);
   padding-top: 20px;
   overflow-y: auto;
+  transition: width var(--dur) var(--ease-out);
+}
+.sub-sidebar.collapsed {
+  width: 0;
+  min-width: 0;
+  padding-top: 0;
+  border-right: none;
+  overflow: hidden;
 }
 .sub-sidebar-header {
   padding: 0 18px 14px;
@@ -650,5 +669,24 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
   min-width: 0;
   overflow-y: auto;
   padding: 24px 28px;
+  position: relative;
 }
+.sidebar-expand {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 20;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.sidebar-expand:hover { background: var(--bg-hover); color: var(--text-primary); }
 </style>
