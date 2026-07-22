@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     # 知识图谱 / Graph RAG（Phase 3 T1；Postgres 图存储，无需 Neo4j server）
     GRAPH_ENABLED: bool = True         # 总开关：false 则跳过建图与图检索，回退普通 RAG
     GRAPH_TOP_K: int = 5               # 每轮问答图检索召回的实体种子数（再去 1 跳扩展）
+    GRAPH_MULTI_HOP_MAX: int = 2       # 8.5 图谱多跳推理最大跳数（complex 意图触发）
+    GRAPH_MULTI_HOP_TOP_CHAINS: int = 8  # 8.5 多跳推理返回的最多链路条数
+    # Reranker（8.2）：RRF 融合后的精细重排层
+    RERANKER_ENABLED: bool = True      # 总开关：false 则跳过重排，直接返回 RRF 结果
+    RERANKER_METHOD: str = "auto"      # auto(优先 cross-encoder，否则规则) | cross-encoder | lexical-semantic
+    # 意图分类（8.3）：LLM 判断 simple/complex/greeting/web_search，complex 触发图谱多跳
+    INTENT_ENABLED: bool = True        # 总开关：false 则退化为正则启发式（greeting/web）
     ES_URL: str = "http://localhost:9200"
     ES_USERNAME: str = ""            # 留空 = 不启用 Basic Auth
     ES_PASSWORD: str = ""

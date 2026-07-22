@@ -33,7 +33,8 @@ async def main():
     # 双写：若 ES_ENABLED=True 则摄入同时写入 ES 索引（幂等覆盖）
     ingester = DocumentIngester(
         embedder, settings.RAG_CHUNK_SIZE, settings.RAG_CHUNK_OVERLAP,
-        settings.RAG_CHUNK_MIN_CHARS, es=ESClient(), graph=graph
+        settings.RAG_CHUNK_MIN_CHARS, es=ESClient(), graph=graph,
+        background_graph=False,  # seed 跑在 asyncio.run 内，必须内联同步完成
     )
 
     async with AsyncSessionLocal() as db:

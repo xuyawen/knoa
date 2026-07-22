@@ -1,13 +1,19 @@
 import time
 
+import logging
+
 import jieba
 import numpy as np
 from rank_bm25 import BM25Okapi
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.rag.embeddings import EmbeddingModel
+from app.core.rag.reranker import Reranker
 from app.db import DocChunk, Document, KnowledgeBase
+
+logger = logging.getLogger(__name__)
 
 try:
     from langsmith import traceable
@@ -64,6 +70,8 @@ class HybridRetriever:
         self._kb_ids_filter = kb_ids
         self._bm25: BM25Okapi | None = None
         self._bm25_chunks: list = []
+        # 8.2 Reranker：RRF 之后的精细重排层（零依赖规则，可换 cross-encoder）
+        self.reranker = Reranker(settings.RERANKER_METHOD, settings.RERANKER_ENABLED)
 
     async def _load_chunks(self, kb_id: str | None = None):
         query = select(DocChunk)
@@ -148,10 +156,29 @@ class HybridRetriever:
             if idx < len(chunks):
                 add_chunk(idx, rank, 0.0)
 
-        # 排序取 top_k
-        sorted_ids = sorted(rrf_scores, key=rrf_scores.get, reverse=True)[:top_k]
+        # 排序取 top_k（RRF 原始顺序，留作重排对比基线）
+        pre_ids = sorted(rrf_scores, key=rrf_scores.get, reverse=True)[:top_k]
+
+        # 8.2 Reranker：用原始语义/BM25 分数做精细重排（接口不变，只调顺序）
+        idx_by_cid = {str(chunks[i]["id"]): i for i in range(len(chunks))}
+        candidates = []
+        for cid in pre_ids:
+            i = idx_by_cid.get(cid)
+            if i is None:
+                continue
+            candidates.append({
+                "cid": cid,
+                "content": chunk_map[cid]["content"],
+                "vector_score": float(cosine_scores[i]),
+                "bm25_score": float(bm25_scores[i]),
+            })
+        reranked = self.reranker.rerank(question, candidates, top_k)
+        reranked_ids = [c["cid"] for c in reranked]
+        if self.reranker.enabled:
+            logger.info("rerank order change: before=%s after=%s", pre_ids, reranked_ids)
+
         results = []
-        for seq, cid in enumerate(sorted_ids, 1):
+        for seq, cid in enumerate(reranked_ids, 1):
             info = chunk_map[cid]
             confidence = max(0.0, min(1.0, 1.0 - info["distance"]))
             results.append({

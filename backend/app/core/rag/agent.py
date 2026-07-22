@@ -217,6 +217,17 @@ def _should_web_search(question: str) -> bool:
     return any(p.search(q) for p in _WEB_SEARCH_PATTERNS)
 
 
+_INTENT_PROMPT = (
+    "你是跨境电商知识助手「知海 Knoa」的意图分类器。\n"
+    "只输出一个英文标签，不要任何解释或标点：\n"
+    "- greeting：打招呼 / 闲聊 / 常识 / 时间 / 简单寒暄（不涉及具体业务知识）\n"
+    "- web_search：需要实时或易变信息（天气、股价、汇率、最新政策新闻）\n"
+    "- simple：可用单篇知识库检索直接回答的具体业务问题\n"
+    "- complex：需要跨实体 / 跨流程关联推理的复杂业务问题"
+    "（如「A 流程和 B 流程的关系」「某政策对物流的影响」）"
+)
+
+
 _ROLL_SUMMARY_SYSTEM = (
     "你是一个对话摘要压缩器。给定某跨境电商运营知识助手会话里「较早的对话片段」，"
     "请把它压缩成一段简洁的摘要，供后续轮次理解上下文。\n"
@@ -250,6 +261,10 @@ class _AgentState:
         self.next = "__end__"                # 下一节点名；"__end__" 终止
         # web_search 后是否回到 route 再决策：agent 循环内=True，启发式直搜=False
         self.web_loop = True
+        # 8.3/8.5：意图分类结果 + 是否触发图谱多跳推理
+        self.intent: str = "simple"          # greeting | web_search | simple | complex
+        self.use_multihop: bool = False       # complex 意图 → 图谱多跳推理
+        self.graph_reasoning: str = ""        # 多跳推理链路文本（注入 final prompt）
 
 
 class AgenticRAGAgent:
@@ -279,6 +294,44 @@ class AgenticRAGAgent:
         self._memories: list[str] = []  # 本轮召回的该用户长期记忆
         self._graph_chunks: list[dict] = []  # 本轮图检索召回的相关 chunk
         self._summary_text: str = ""  # 本轮会话的滚动摘要文本（注入 system）
+
+    async def _classify_intent(self, question: str) -> "str | None":
+        """LLM 意图分类（greeting/web_search/simple/complex）。
+
+        失败或返回空 → 返回 None，由调用方退化为正则启发式兜底。
+        用流式通道拿短输出，规避推理模型非流式 content 为空的老问题。
+        """
+        if not self.llm:
+            return None
+        try:
+            text = ""
+            async for piece in self.llm.stream_chat(
+                [
+                    {"role": "system", "content": _INTENT_PROMPT},
+                    {"role": "user", "content": f"问题：{question}"},
+                ],
+                temperature=0.0,
+                max_tokens=20,
+            ):
+                text += piece
+            text = text.strip().lower()
+            for label in ("greeting", "web_search", "complex", "simple"):
+                if label in text:
+                    return label
+            return None
+        except Exception as e:
+            logger.warning("intent classify failed (fallback heuristic): %s", e)
+            return None
+
+    @staticmethod
+    def _heuristic_intent(question: str) -> str:
+        """LLM 不可用时的兜底意图判断（保留问候/实时快路 + 关系类判 complex）。"""
+        if _should_web_search(question):
+            return "web_search"
+        # 含关系/对比/影响类措辞 → 视为复杂业务问题，触发图谱多跳推理
+        if re.search(r"(关系|区别|差异|对比|影响|联系|关联|和.{1,6}的|与.{1,6}的|vs|VS|相对于|导致|因为)", question):
+            return "complex"
+        return "simple"
 
     @traceable(name="agentic_rag_stream", tags=["agent", "rag"])
     async def stream_answer(
@@ -327,6 +380,20 @@ class AgenticRAGAgent:
 
             all_sources: list[dict] = []
             final_answer_text: str = ""
+            graph_reasoning_text: str = ""  # 8.5 多跳推理链路，注入 final prompt
+
+            # ── 8.3 意图分类：LLM 判断 simple/complex/greeting/web_search ──
+            # 纯 trivial（打招呼/数学/时间）直接走 greeting 快路，不浪费 LLM 调用；
+            # 其余业务问题才调 LLM 分类，失败退化为正则启发式（保留问候/实时兜底）。
+            intent = "simple"
+            if _should_skip_retrieval(question):
+                intent = "greeting"
+            elif settings.INTENT_ENABLED:
+                classified = await self._classify_intent(question)
+                intent = classified if classified is not None else self._heuristic_intent(question)
+            else:
+                intent = self._heuristic_intent(question)
+            use_multihop = intent == "complex"
 
             # ── Graph RAG：图感知检索，把实体关系相关的 chunk 也拉进来当来源 ──
             # 仅对真实业务问题生效（跳过打招呼/闲聊）；kb_id 为空（纯通用问答）也跳过。
@@ -344,8 +411,28 @@ class AgenticRAGAgent:
                             g["id"] = i
                         all_sources.extend(self._graph_chunks)
                         yield {"event": "sources", "data": self._format_sources(self._graph_chunks)}
+                    # 8.5 complex 意图 → 图谱多跳推理，产出推理链路 + 追加沿途来源
+                    if use_multihop:
+                        chains, mh_chunks = await self.graph.multi_hop_reason(
+                            question, kb_id, self.db, settings.GRAPH_MULTI_HOP_MAX
+                        )
+                        if chains:
+                            graph_reasoning_text = "\n".join(chains)
+                            yield {"event": "thinking", "data": {
+                                "step": 0, "action": "graph_reason",
+                                "detail": f"图谱多跳推理链路（{len(chains)} 条）",
+                                "raw_reasoning": "",
+                            }}
+                        existing_ids = {s.get("chunk_id") for s in all_sources}
+                        for c in mh_chunks:
+                            if c["chunk_id"] not in existing_ids:
+                                c["id"] = len(all_sources) + 1
+                                all_sources.append(c)
+                                existing_ids.add(c["chunk_id"])
+                        if mh_chunks:
+                            yield {"event": "sources", "data": self._format_sources(mh_chunks)}
                 except Exception as e:
-                    logger.warning("graph retrieve failed (skip inject): %s", e)
+                    logger.warning("graph retrieve/multihop failed (skip inject): %s", e)
 
             # ── 构造共享状态 + 选择入口节点（LangGraph 的 start 边）──
             # 多模态:把文本 + 图片拼成 OpenAI 多模态 content blocks
@@ -353,6 +440,9 @@ class AgenticRAGAgent:
             user_content = self._build_user_content(question, files)
             st = _AgentState(question, kb_id)
             st.all_sources = all_sources
+            st.intent = intent
+            st.use_multihop = use_multihop
+            st.graph_reasoning = graph_reasoning_text
 
             # ── 加载会话历史 + 滚动摘要，注入上下文 ──
             raw_history, summary = await self._load_session_history(session)
@@ -365,13 +455,13 @@ class AgenticRAGAgent:
             if files:
                 # 带图必须让 LLM 亲眼看,不走问候/常识快路(即使问题像打招呼)
                 st.next = "_n_route"
-            elif _should_skip_retrieval(question):
+            elif intent == "greeting":
                 st.next = "_n_start_skip"          # 问候/常识 → 直接友好回答
-            elif _should_web_search(question):
+            elif intent == "web_search":
                 st.web_loop = False
                 st.next = "_n_web_search"          # 实时信息 → 搜一次即生成
             else:
-                st.next = "_n_route"               # 业务问题 → agent 决策循环
+                st.next = "_n_route"               # simple/complex 业务问题 → agent 决策循环
 
             # ── 跑图：按 st.next 派发节点，直到 __end__ ──
             async for ev in self._run_agent_loop(st):
@@ -617,6 +707,10 @@ class AgenticRAGAgent:
         final_messages = list(st.messages)  # 浅拷贝：system + history + user(含图)
         if st.all_sources:
             ctx = self._sources_to_context(st.all_sources)
+            if st.graph_reasoning:
+                # 8.5：把图谱多跳推理链路作为独立段落拼进上下文，
+                # 让 LLM 在生成时能显式引用实体间关系（"据图谱，A 经由 B 影响 C"）。
+                ctx += "\n\n【知识图谱推理链路】\n" + st.graph_reasoning
             final_messages.append({
                 "role": "user",
                 "content": (

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +8,7 @@ from app.core.rag.chunker import MarkdownChunker
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.graph import GraphStore
 from app.core.rag.es_client import ESClient
+from app.database import AsyncSessionLocal
 from app.db import DocChunk, Document
 
 
@@ -19,6 +21,7 @@ class DocumentIngester:
         min_chunk_chars: int = 10,
         es: ESClient | None = None,
         graph: GraphStore | None = None,
+        background_graph: bool = True,
     ):
         self.embedder = embedder
         self.chunker = MarkdownChunker(chunk_size, overlap, min_chunk_chars)
@@ -26,6 +29,47 @@ class DocumentIngester:
         self._es = es
         # 知识图谱（可选）：传入则摄入时抽取实体/关系写入图（Phase 3 T1）
         self._graph = graph
+        # 8.4 KG 回填：建图抽取是否后台独立会话执行。
+        # True（API 审核/上传路径）= 不阻塞主响应、失败隔离；
+        # False（seed 全量重建，跑在 asyncio.run 内）= 内联同步，确保进程退出前完成。
+        self.background_graph = background_graph
+
+    async def _maybe_graph_extract(self, kb_id: str, doc: Document, db: AsyncSession) -> None:
+        """建图抽取：后台（独立会话，不阻塞主流程、失败隔离）或内联（seed 重建）。"""
+        if self._graph is None:
+            return
+        if self.background_graph:
+            self._schedule_graph_extract(kb_id, doc.id)
+        else:
+            chunk_infos = await self._chunk_infos(db, doc.id)
+            if chunk_infos:
+                await self._graph.extract(kb_id, doc.title, chunk_infos, db)
+
+    def _schedule_graph_extract(self, kb_id: str, doc_id: object) -> None:
+        """后台异步抽取图谱：用独立 DB 会话，无运行事件环则跳过（不阻塞）。"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is None:
+            logger.warning("graph extract skipped (no running loop) for doc %s", doc_id)
+            return
+        loop.create_task(self._background_graph_extract(kb_id, doc_id))
+
+    async def _background_graph_extract(self, kb_id: str, doc_id: object) -> None:
+        """独立会话重抽图谱：重新拉 chunk → LLM 抽取 → 独立提交；失败不影响主流程。"""
+        try:
+            async with AsyncSessionLocal() as s:
+                doc = await s.get(Document, doc_id)
+                if doc is None:
+                    return
+                chunk_infos = await self._chunk_infos(s, doc_id)
+                if not chunk_infos:
+                    return
+                await self._graph.extract(kb_id, doc.title, chunk_infos, s)
+                await s.commit()
+        except Exception as e:
+            logger.warning("background graph extract failed (kb=%s doc=%s): %s", kb_id, doc_id, e)
 
     async def ingest_dir(self, kb_id: str, dir_path: Path, db: AsyncSession):
         md_files = sorted(dir_path.glob("*.md"))
@@ -66,10 +110,10 @@ class DocumentIngester:
                 await self._sync_es_chunk(kb_id, doc, chunk_data, embedding)
             await db.flush()
 
-            # 建图：把这篇文档的 chunk 交给 GraphStore 抽取实体/关系（失败静默跳过）
+            # 建图：把这篇文档的 chunk 交给 GraphStore 抽取实体/关系
+            # （失败静默跳过；后台或内联由 background_graph 决定）
             if self._graph is not None:
-                chunk_infos = await self._chunk_infos(db, doc.id)
-                await self._graph.extract(kb_id, doc.title, chunk_infos, db)
+                await self._maybe_graph_extract(kb_id, doc, db)
         await db.commit()
 
     async def _sync_es_chunk(
@@ -133,10 +177,9 @@ class DocumentIngester:
                 await self._sync_es_chunk(doc.kb_id, doc, chunk_data, embedding)
             await db.flush()
 
-            # 建图：抽实体进图谱（与 ingest_dir 一致）
+            # 建图：抽实体进图谱（与 ingest_dir 一致；后台或内联由 background_graph 决定）
             if self._graph is not None:
-                chunk_infos = await self._chunk_infos(db, doc.id)
-                await self._graph.extract(doc.kb_id, doc.title, chunk_infos, db)
+                await self._maybe_graph_extract(doc.kb_id, doc, db)
         await db.commit()
 
     async def ingest_text(

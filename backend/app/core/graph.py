@@ -97,24 +97,50 @@ def _extract_json(text: str):
 
 
 def _coerce_graph(obj) -> dict:
-    """容错解析 LLM 返回的图结构：支持裸对象 / 数组 / 带 ```json 围栏 / 包装对象。"""
+    """容错解析 LLM 返回的图结构：支持裸对象 / 数组 / 带 ```json 围栏 / 包装对象。
+
+    额外容错：部分模型把 entities 输出成字符串数组（["A","B"]）而非对象数组
+    （[{"label":"A"}]），这里统一归一化成 {"label": ...} 字典，避免后续
+    `e.get("label")` 在 str 上抛 AttributeError（曾导致整条抽取静默失败）。
+    """
     if isinstance(obj, str):
         obj = _extract_json(obj)
     if isinstance(obj, list):
         # 顶层数组视为实体列表（LLM 偷懒省略外层包裹时的兜底）
-        return {"entities": obj, "relations": []}
-    if not isinstance(obj, dict):
+        raw_entities = obj
+        raw_relations: list = []
+    elif isinstance(obj, dict):
+        raw_entities = []
+        for k in ("entities", "nodes", "entity", "node"):
+            if isinstance(obj.get(k), list):
+                raw_entities = obj[k]
+                break
+        raw_relations = []
+        for k in ("relations", "edges", "relation", "edge"):
+            if isinstance(obj.get(k), list):
+                raw_relations = obj[k]
+                break
+    else:
         return {"entities": [], "relations": []}
+
+    # 实体归一化：字符串 → {"label": s}；字典 → 原样保留（取 label/type）
     entities = []
-    for k in ("entities", "nodes", "entity", "node"):
-        if isinstance(obj.get(k), list):
-            entities = obj[k]
-            break
+    for e in raw_entities:
+        if isinstance(e, str):
+            s = e.strip()
+            if s:
+                entities.append({"label": s})
+        elif isinstance(e, dict):
+            entities.append(e)
+        # 其他类型（数字等）忽略
+
+    # 关系归一化：仅保留含 from/to/relation 的字典
     relations = []
-    for k in ("relations", "edges", "relation", "edge"):
-        if isinstance(obj.get(k), list):
-            relations = obj[k]
-            break
+    for r in raw_relations:
+        if isinstance(r, dict) and ("from" in r or "from_label" in r) and ("to" in r or "to_label" in r):
+            relations.append(r)
+        # 字符串/其他形态的关系难以可靠解析，best-effort 丢弃
+
     return {"entities": entities, "relations": relations}
 
 
@@ -180,9 +206,11 @@ class GraphStore:
             return
 
         # 去重：本 KB 已存在的实体 label 不再插（保留首次出现的 chunk）
+        # 注意：select(KGNode.label).scalars().all() 返回的是标量字符串列表，
+        # 不是 KGNode 对象，直接 collect 即可（之前误写 row.label 导致 AttributeError，
+        # LLM 抽取链路长期静默失效，图谱节点全靠 curated seed 兜底）。
         existing_labels = set(
-            row.label
-            for row in (await db.execute(select(KGNode.label).where(KGNode.kb_id == kb_id)))
+            (await db.execute(select(KGNode.label).where(KGNode.kb_id == kb_id)))
             .scalars()
             .all()
         )
@@ -315,6 +343,36 @@ class GraphStore:
     # ------------------------------------------------------------------
     # 检索（问答时调用）
     # ------------------------------------------------------------------
+    async def _load_graph(self, kb_id: str, db: AsyncSession) -> "tuple[list, list]":
+        """取本 KB 的节点/边（带 TTL 缓存，转纯 dict 避免跨请求复用 detached ORM）。
+
+        1 跳检索与多跳推理共用同一份加载逻辑，保证一致性。
+        """
+        key = _graph_cache_key(kb_id)
+        now = time.monotonic()
+        entry = _GRAPH_CACHE.get(key)
+        if entry and now - entry["ts"] < _GRAPH_TTL:
+            return entry["nodes"], entry["edges"]
+        nodes = (
+            await db.execute(select(KGNode).where(KGNode.kb_id == kb_id))
+        ).scalars().all()
+        if not nodes:
+            return [], []
+        edges = (
+            await db.execute(select(KGEdge).where(KGEdge.kb_id == kb_id))
+        ).scalars().all()
+        node_list = [
+            {"label": n.label, "type": n.type, "chunk_id": n.chunk_id, "embedding": n.embedding}
+            for n in nodes
+            if n.embedding is not None
+        ]
+        edge_list = [
+            {"from_label": e.from_label, "to_label": e.to_label, "relation": e.relation}
+            for e in edges
+        ]
+        _GRAPH_CACHE[key] = {"ts": now, "nodes": node_list, "edges": edge_list}
+        return node_list, edge_list
+
     async def retrieve_related_chunks(
         self,
         question: str,
@@ -328,33 +386,10 @@ class GraphStore:
         （extract / delete_by_doc）会主动失效对应 kb 的缓存，保证一致性。
         全程纯确定性计算，不调 LLM，即使 LLM/向量降级也能靠已有图谱工作。
         """
-        # 1) 取本 KB 节点/边（带 TTL 缓存，避免每请求全表扫描）
-        key = _graph_cache_key(kb_id)
-        now = time.monotonic()
-        entry = _GRAPH_CACHE.get(key)
-        if entry and now - entry["ts"] < _GRAPH_TTL:
-            node_list = entry["nodes"]
-            edge_list = entry["edges"]
-        else:
-            nodes = (
-                await db.execute(select(KGNode).where(KGNode.kb_id == kb_id))
-            ).scalars().all()
-            if not nodes:
-                return []
-            edges = (
-                await db.execute(select(KGEdge).where(KGEdge.kb_id == kb_id))
-            ).scalars().all()
-            # 转纯 dict 缓存，避免跨请求复用已过期（detached）的 ORM 对象
-            node_list = [
-                {"label": n.label, "chunk_id": n.chunk_id, "embedding": n.embedding}
-                for n in nodes
-                if n.embedding is not None
-            ]
-            edge_list = [
-                {"from_label": e.from_label, "to_label": e.to_label, "relation": e.relation}
-                for e in edges
-            ]
-            _GRAPH_CACHE[key] = {"ts": now, "nodes": node_list, "edges": edge_list}
+        # 1) 取本 KB 节点/边（带 TTL 缓存）
+        node_list, edge_list = await self._load_graph(kb_id, db)
+        if not node_list:
+            return []
 
         # 2) 问题向量，与节点向量做余弦，挑最相关的作为种子实体
         try:
@@ -421,3 +456,133 @@ class GraphStore:
                 }
             )
         return out[:top_k]
+
+    async def multi_hop_reason(
+        self,
+        question: str,
+        kb_id: str,
+        db: AsyncSession,
+        max_hops: int = 2,
+        top_chains: int = 8,
+    ) -> "tuple[list[str], list[dict]]":
+        """多跳推理（Phase 6 §8.5）：问题向量 → 种子实体 → 沿关系边 BFS 多跳
+        → 产出可读推理链路文本 + 沿途命中的相关 chunk。
+
+        返回 (chains, chunks)：
+        - chains: 形如 "实体A --关系--> 实体B <--关系-- 实体C" 的推理链路列表
+        - chunks: 多跳沿途实体对应的 DocChunk  dict（结构同 retrieve_related_chunks）
+
+        与 1 跳检索共享 `_load_graph` 与向量种子逻辑；同样纯确定性、不调 LLM。
+        """
+        node_list, edge_list = await self._load_graph(kb_id, db)
+        if not node_list:
+            return [], []
+
+        try:
+            q_emb = await self.embedder.embed_query(question)
+        except Exception as e:
+            logger.warning("graph multihop embed failed (skip): %s", e)
+            return [], []
+
+        # 种子实体：问题向量最相关的若干节点
+        scored = sorted(
+            ((_cosine(nd["embedding"], q_emb), nd) for nd in node_list),
+            key=lambda x: x[0],
+            reverse=True,
+        )
+        seeds = [nd["label"] for s, nd in scored if s >= 0.55][: settings.GRAPH_TOP_K]
+        if not seeds:
+            seeds = [nd["label"] for _, nd in scored[: settings.GRAPH_TOP_K]]
+        seed_set = set(seeds)
+
+        # 无向邻接表（BFS 双向可达），保留边方向与关系文本
+        from collections import deque
+
+        adj: dict[str, list] = {}
+        for e in edge_list:
+            adj.setdefault(e["from_label"], []).append((e["to_label"], e["relation"], "fwd"))
+            adj.setdefault(e["to_label"], []).append((e["from_label"], e["relation"], "bwd"))
+
+        # BFS：记录前驱 + 关系段，便于回溯出完整推理链路
+        visited: set = set(seed_set)
+        parent: dict[str, "tuple[str, str] | None"] = {lbl: None for lbl in seed_set}
+        depth: dict[str, int] = {lbl: 0 for lbl in seed_set}
+        q: "deque[str]" = deque(seed_set)
+        while q:
+            cur = q.popleft()
+            if depth[cur] >= max_hops:
+                continue
+            for nb, rel, tag in adj.get(cur, []):
+                if nb in visited:
+                    continue
+                visited.add(nb)
+                # 从 seed 往外走时，链路方向统一写成「起点 --关系--> 终点」；
+                # 反向遍历（cur 是 to_label）则写成「起点 <--关系-- 终点」。
+                seg = f"{cur} --{rel}--> {nb}" if tag == "fwd" else f"{cur} <--{rel}-- {nb}"
+                parent[nb] = (cur, seg)
+                depth[nb] = depth[cur] + 1
+                q.append(nb)
+
+        # 回溯链路：从每个非种子可达节点沿 parent 走回种子，再用箭头拼接
+        def build_chain(node: str) -> str:
+            segs: list[str] = []
+            cur = node
+            while cur in parent and parent[cur] is not None:
+                prev, seg = parent[cur]  # type: ignore[misc]
+                segs.append(seg)
+                cur = prev
+            segs.reverse()
+            text = segs[0].split(" ", 1)[0] if segs else node  # 种子名
+            for seg in segs:
+                text += " " + seg.split(" ", 1)[1]  # 追加 " --关系--> 邻居"
+            return text
+
+        chains: list[str] = []
+        seen_chains: set[str] = set()
+        # 浅跳优先（更直接），最多取 top_chains 条
+        for node in sorted(visited - seed_set, key=lambda n: depth[n]):
+            ch = build_chain(node)
+            if ch and ch not in seen_chains:
+                seen_chains.add(ch)
+                chains.append(ch)
+            if len(chains) >= top_chains:
+                break
+        if not chains:
+            chains = [f"种子实体：{s}" for s in seeds[:top_chains]]
+
+        # 收集多跳沿途实体对应的 chunk（去重保序），拼成可注入的来源
+        node_by_label = {nd["label"]: nd for nd in node_list}
+        chunk_ids: list = []
+        seen_cid: set = set()
+        for lbl in visited:
+            nd = node_by_label.get(lbl)
+            if nd and nd["chunk_id"] not in seen_cid:
+                chunk_ids.append(nd["chunk_id"])
+                seen_cid.add(nd["chunk_id"])
+        chunks: list[dict] = []
+        if chunk_ids:
+            rows = (
+                await db.execute(
+                    select(DocChunk, Document.title)
+                    .join(Document, Document.id == DocChunk.document_id)
+                    .where(DocChunk.id.in_(chunk_ids))
+                )
+            ).all()
+            by_id = {c.id: (c, title) for c, title in rows}
+            for cid in chunk_ids:
+                item = by_id.get(cid)
+                if not item:
+                    continue
+                c, title = item
+                chunks.append(
+                    {
+                        "chunk_id": str(c.id),
+                        "kb": c.kb_id,
+                        "title": title or c.kb_id,
+                        "snippet": c.content[:300],
+                        "content": c.content,
+                        "confidence": 0.7,
+                        "source_type": "graph-multihop",
+                    }
+                )
+        return chains, chunks
