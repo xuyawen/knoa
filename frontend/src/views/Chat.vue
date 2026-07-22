@@ -7,6 +7,7 @@ import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useToastStore } from '@/stores/toast'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -82,6 +83,7 @@ const recordColumns = [
 const sessionPage = ref(1)
 const sessionPageSize = ref(20)
 const activeId = ref<string | null>(null)
+const deleteTargetId = ref<string | null>(null)
 const messages = ref<ChatMessage[]>([])
 const streaming = ref(false)
 const inputText = ref('')
@@ -202,11 +204,15 @@ async function newChat() {
   }
 }
 
-async function onDeleteSession(id: string) {
-  if (!confirm('确认删除该会话？删除后无法恢复。')) return
+function onDeleteSession(id: string) {
+  deleteTargetId.value = id
+}
+
+async function confirmDeleteSession() {
+  if (!deleteTargetId.value) return
   try {
-    await deleteSession(id)
-    if (activeId.value === id) {
+    await deleteSession(deleteTargetId.value)
+    if (activeId.value === deleteTargetId.value) {
       activeId.value = null
       messages.value = []
     }
@@ -214,6 +220,8 @@ async function onDeleteSession(id: string) {
     toast.success('会话已删除')
   } catch (e: any) {
     toast.error(`删除失败：${e?.message || e}`)
+  } finally {
+    deleteTargetId.value = null
   }
 }
 
@@ -665,6 +673,16 @@ watch(messages, scrollToBottom, { deep: false })
         </div>
       </div>
     </template>
+
+  <ConfirmDialog
+    :show="!!deleteTargetId"
+    title="删除会话"
+    message="确认删除该会话？删除后无法恢复。"
+    confirm-text="删除"
+    danger
+    @close="deleteTargetId = null"
+    @confirm="confirmDeleteSession"
+  />
 </template>
 
 <style scoped>
