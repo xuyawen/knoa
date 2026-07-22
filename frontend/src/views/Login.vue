@@ -221,14 +221,14 @@ async function handleLogin() {
 }
 
 .platform-bottom {
-  top: 406px;
+  top: 400px;
   width: 540px;
   height: 36px;
   background: linear-gradient(180deg, #e4eaf3, #dce3ee);
 }
 
 .platform-middle {
-  top: 376px;
+  top: 372px;
   width: 420px;
   height: 28px;
   background: linear-gradient(180deg, #edf1f7, #e5ebf2);
