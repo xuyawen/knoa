@@ -3,7 +3,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
-import { changePassword } from '@/api/auth'
+import { changePassword, updateUser } from '@/api/auth'
 import { getSessions } from '@/api'
 import Icon from '@/components/ui/Icon.vue'
 
@@ -43,6 +43,34 @@ onMounted(async () => {
 /* ---------- Tab ---------- */
 type TabKey = 'info' | 'security'
 const activeTab = ref<TabKey>('info')
+
+/* ---------- 基本信息：显示名可编辑 ---------- */
+const editingInfo = ref(false)
+const displayNameDraft = ref('')
+const infoSaving = ref(false)
+
+function startEditInfo() {
+  displayNameDraft.value = auth.user?.displayName || ''
+  editingInfo.value = true
+}
+function cancelEditInfo() {
+  editingInfo.value = false
+  displayNameDraft.value = ''
+}
+async function saveInfo() {
+  if (!auth.user) return
+  infoSaving.value = true
+  try {
+    await updateUser(auth.user.id, { displayName: displayNameDraft.value.trim() || null })
+    await auth.fetchMe()
+    editingInfo.value = false
+    toast.success('资料已更新')
+  } catch (e: any) {
+    toast.error(e?.message || '更新失败')
+  } finally {
+    infoSaving.value = false
+  }
+}
 
 /* ---------- 安全：修改密码 ---------- */
 const pwdOld = ref('')
@@ -134,16 +162,6 @@ const pwdStrength = computed(() => {
             </div>
           </div>
 
-          <!-- 安全评分 -->
-          <div class="rail-sec">
-            <div class="sec-head">
-              <Icon name="shield" :size="14" class="sec-ic" />
-              <span>账户安全</span>
-              <span class="sec-score">良好</span>
-            </div>
-            <div class="sec-bar"><div class="sec-fill" /></div>
-          </div>
-
           <button class="rail-edit" @click="activeTab = 'security'">
             <Icon name="key" :size="14" /> 修改密码
           </button>
@@ -167,7 +185,16 @@ const pwdStrength = computed(() => {
 
         <!-- 基本信息 -->
         <section v-if="activeTab === 'info'" class="tab-panel card">
-          <h3 class="panel-title">基本信息</h3>
+          <h3 class="panel-title">
+            基本信息
+            <button v-if="!editingInfo" class="panel-edit" @click="startEditInfo">
+              <Icon name="pen-line" :size="13" /> 编辑
+            </button>
+            <span v-else class="panel-edit-actions">
+              <button class="panel-save" :disabled="infoSaving" @click="saveInfo">保存</button>
+              <button class="panel-cancel" @click="cancelEditInfo">取消</button>
+            </span>
+          </h3>
           <p class="panel-desc">你的账户公开资料和权限信息。</p>
           <div class="info-grid">
             <div class="info-item">
@@ -176,7 +203,14 @@ const pwdStrength = computed(() => {
             </div>
             <div class="info-item">
               <span class="info-key">显示名称</span>
-              <span class="info-val">{{ auth.user?.displayName || '未设置' }}</span>
+              <span v-if="!editingInfo" class="info-val">{{ auth.user?.displayName || '未设置' }}</span>
+              <input
+                v-else
+                v-model="displayNameDraft"
+                class="info-input"
+                maxlength="50"
+                :placeholder="auth.user?.displayName || '未设置'"
+              />
             </div>
             <div class="info-item">
               <span class="info-key">角色权限</span>
@@ -316,20 +350,6 @@ const pwdStrength = computed(() => {
 .rs-label { font-size: 12px; color: var(--text-tertiary); }
 .rs-divider { width: 1px; height: 28px; background: var(--border); }
 
-.rail-sec { margin-top: 18px; }
-.sec-head { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
-.sec-ic { color: var(--brand); }
-.sec-score { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--success); }
-.sec-bar {
-  margin-top: 8px; height: 5px; border-radius: 3px;
-  background: var(--border); overflow: hidden;
-}
-.sec-fill {
-  height: 100%; width: 78%;
-  background: linear-gradient(90deg, var(--success), var(--accent-green));
-  border-radius: 3px;
-}
-
 .rail-edit {
   margin-top: 20px;
   width: 100%; height: 40px;
@@ -365,7 +385,7 @@ const pwdStrength = computed(() => {
 .tab-btn.active { color: var(--brand); background: var(--brand-soft); font-weight: 600; }
 
 .tab-panel { padding: 26px 28px; }
-.panel-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.panel-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 10px; }
 .panel-desc { margin: 0 0 22px; font-size: 13px; color: var(--text-tertiary); line-height: 1.5; }
 
 .info-grid {
@@ -378,6 +398,35 @@ const pwdStrength = computed(() => {
 }
 .info-val { font-size: 14px; color: var(--text-primary); font-weight: 500; min-height: 22px; }
 .id-copy { font-family: monospace; font-size: 13px; color: var(--text-tertiary); }
+
+/* 基本信息编辑态 */
+.panel-edit {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 11px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); background: var(--bg-subtle);
+  color: var(--text-secondary); font-size: 12px; font-family: inherit; cursor: pointer;
+  transition: all var(--dur-fast);
+}
+.panel-edit:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+.panel-edit-actions { margin-left: auto; display: inline-flex; gap: 8px; }
+.panel-save {
+  padding: 4px 14px; border-radius: var(--radius-md);
+  border: 1px solid var(--brand); background: var(--brand); color: var(--text-on-brand);
+  font-size: 12px; font-family: inherit; cursor: pointer;
+}
+.panel-save:disabled { opacity: 0.6; cursor: default; }
+.panel-cancel {
+  padding: 4px 14px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); background: var(--bg-subtle);
+  color: var(--text-secondary); font-size: 12px; font-family: inherit; cursor: pointer;
+}
+.info-input {
+  flex: 1; padding: 6px 10px; border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong); background: var(--bg-surface);
+  color: var(--text-primary); font-size: 13px; font-family: inherit;
+}
+.info-input:focus { border-color: var(--brand); outline: none; }
 .dot-status {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   margin-right: 6px; vertical-align: middle;

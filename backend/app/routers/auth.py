@@ -141,30 +141,39 @@ async def update_user(
     user_id: str,
     payload: UserUpdateIn,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    current: User = Depends(get_current_user),
 ):
     u = await db.scalar(select(User).where(User.id == user_id))
     if u is None:
         raise HTTPException(status_code=404, detail="用户不存在")
+    # ponytail: 本人可改自己的 display_name；改他人或改角色/状态/密码需 admin
+    is_self = u.id == current.id
+    if not is_self and current.role != "admin":
+        raise HTTPException(status_code=403, detail="无权修改其他用户")
+    privileged = payload.role is not None or payload.is_active is not None or payload.password
+    if privileged and current.role != "admin":
+        raise HTTPException(status_code=403, detail="无权修改该字段")
     # 保护最后一个 admin：降级或停用当前 admin 时，必须仍有其他启用 admin
-    demoting = payload.role is not None and payload.role != "admin"
-    disabling = payload.is_active is False
-    if u.role == "admin" and (demoting or disabling):
-        other_active_admins = await db.scalar(
-            select(func.count())
-            .select_from(User)
-            .where(User.role == "admin", User.is_active.is_(True), User.id != u.id)
-        )
-        if not other_active_admins:
-            raise HTTPException(status_code=400, detail="不能降级或停用最后一个管理员")
+    if current.role == "admin":
+        demoting = payload.role is not None and payload.role != "admin"
+        disabling = payload.is_active is False
+        if u.role == "admin" and (demoting or disabling):
+            other_active_admins = await db.scalar(
+                select(func.count())
+                .select_from(User)
+                .where(User.role == "admin", User.is_active.is_(True), User.id != u.id)
+            )
+            if not other_active_admins:
+                raise HTTPException(status_code=400, detail="不能降级或停用最后一个管理员")
     if payload.display_name is not None:
         u.display_name = payload.display_name
-    if payload.role is not None:
-        u.role = payload.role
-    if payload.is_active is not None:
-        u.is_active = payload.is_active
-    if payload.password:
-        u.password_hash = User.hash_password(payload.password)
+    if current.role == "admin":
+        if payload.role is not None:
+            u.role = payload.role
+        if payload.is_active is not None:
+            u.is_active = payload.is_active
+        if payload.password:
+            u.password_hash = User.hash_password(payload.password)
     await db.commit()
     await db.refresh(u)
     return _to_out(u)
