@@ -98,7 +98,8 @@ async def test_document_upload_and_status(client):
         docs = (await client.get(
             f"/api/knowledge-bases/{kb_id}/documents", headers=h
         )).json()
-        assert len(docs) == 1 and docs[0]["title"] == "退款政策"
+        # 文档列表返回分页信封 {items,total,page,size}，取 items 校验
+        assert len(docs["items"]) == 1 and docs["items"][0]["title"] == "退款政策"
     finally:
         await client.delete(f"/api/knowledge-bases/{kb_id}", headers=h)
 
