@@ -70,9 +70,6 @@ const myQuestions = computed(() =>
   })),
 )
 
-/* ---------- 贡献度（mock，后端暂无等级 API） ---------- */
-const contribution = { level: 'Lv.1', title: '新手贡献者', current: 12, next: 100, percent: 12 }
-
 /* ---------- 近期贡献（mock，后端暂无贡献流 API） ---------- */
 const recentContribs = [
   { title: '亚马逊美国站退货政策 2026 更新', action: '编辑', time: '3 小时前' },
@@ -182,7 +179,7 @@ const pwdStrength = computed(() => {
         </div>
       </div>
       <button class="btn btn-primary hero-edit" @click="openEdit('info')">
-        <Icon name="edit" :size="14" /> 编辑资料
+        <Icon name="settings" :size="14" /> 设置
       </button>
     </section>
 
@@ -248,37 +245,11 @@ const pwdStrength = computed(() => {
           </div>
         </section>
 
-        <!-- 贡献度 -->
-        <section class="section-card card">
-          <h2 class="section-title">贡献度</h2>
-          <div class="level-row">
-            <span class="level-badge">{{ contribution.level }}</span>
-            <span class="level-name">{{ contribution.title }}</span>
-          </div>
-          <div class="exp-bar">
-            <div class="exp-track">
-              <div class="exp-fill" :style="{ width: contribution.percent + '%' }" />
-            </div>
-            <span class="exp-text">{{ contribution.current }}/{{ contribution.next }}</span>
-          </div>
-        </section>
-
-        <!-- 快捷菜单 -->
-        <section class="section-card card menu-card">
-          <button class="menu-item" @click="openEdit('info')">
-            <span><Icon name="user" :size="16" /> 资料与账号</span>
-            <Icon name="chevron" :size="16" />
-          </button>
-          <button class="menu-item" @click="openEdit('security')">
-            <span><Icon name="shield-check" :size="16" /> 安全设置</span>
-            <Icon name="chevron" :size="16" />
-          </button>
-        </section>
       </div>
     </div>
 
-    <!-- ====== 编辑资料弹窗 ====== -->
-    <AppModal :show="showEdit" title="编辑资料" wide @close="showEdit = false">
+    <!-- ====== 设置弹窗 ====== -->
+    <AppModal :show="showEdit" title="设置" wide @close="showEdit = false">
       <div class="edit-tabs">
         <button
           v-for="t in [
@@ -598,78 +569,6 @@ const pwdStrength = computed(() => {
   color: var(--text-tertiary);
 }
 .qa-meta { color: var(--success); }
-
-/* ====== 贡献度 ====== */
-.level-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.level-badge {
-  font-size: 12px;
-  font-weight: 700;
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
-  color: var(--brand);
-  background: var(--brand-soft);
-}
-.level-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.exp-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.exp-track {
-  flex: 1;
-  height: 8px;
-  border-radius: 4px;
-  background: var(--border);
-  overflow: hidden;
-}
-.exp-fill {
-  height: 100%;
-  border-radius: 4px;
-  background: linear-gradient(90deg, var(--brand), var(--brand-hover));
-  transition: width 0.4s var(--ease-out);
-}
-.exp-text {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-/* ====== 快捷菜单 ====== */
-.menu-card { padding: 8px; }
-.menu-item {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: var(--radius-md);
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out);
-}
-.menu-item:hover { background: var(--bg-hover); }
-.menu-item span {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-.menu-item + .menu-item { margin-top: 2px; }
 
 /* ====== 空态 ====== */
 .empty-state {
