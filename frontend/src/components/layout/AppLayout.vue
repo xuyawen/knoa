@@ -138,7 +138,8 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
 </script>
 
 <template>
-  <div class="layout" @click.self="closeUserMenu(); closeNotify()">
+  <!-- 点击弹窗外部关闭通知/用户下拉；弹窗内部已 @click.stop -->
+  <div class="layout" @click="closeUserMenu(); closeNotify()">
     <!-- ====== 顶部水平导航栏 ====== -->
     <header class="topbar">
       <!-- 左：品牌 -->
