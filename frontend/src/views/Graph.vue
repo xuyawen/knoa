@@ -457,7 +457,7 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
         >
           <defs>
             <marker id="arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto-start-reverse" markerUnits="strokeWidth">
-              <path d="M0,0 L0,6 L8,3 z" fill="#94A3B8" />
+              <path d="M0,0 L0,6 L8,3 z" fill="var(--text-tertiary)" />
             </marker>
           </defs>
 
@@ -530,14 +530,14 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
 
         <!-- 图例 -->
         <div v-if="graph && graph.nodes.length" class="graph-legend">
-          <span class="leg-item"><i class="leg-dot" style="background:#3b82f6"></i> 文档</span>
-          <span class="leg-item"><i class="leg-dot" style="background:#22c55e"></i> 知识点</span>
-          <span class="leg-item"><i class="leg-dot" style="background:#a855f7"></i> 标签</span>
-          <span class="leg-item"><i class="leg-dot" style="background:#f59e0b"></i> 业务分类</span>
+          <span class="leg-item"><i class="leg-dot" style="background:var(--accent-blue)"></i> 文档</span>
+          <span class="leg-item"><i class="leg-dot" style="background:var(--accent-green)"></i> 知识点</span>
+          <span class="leg-item"><i class="leg-dot" style="background:var(--accent-violet)"></i> 标签</span>
+          <span class="leg-item"><i class="leg-dot" style="background:var(--accent-amber)"></i> 业务分类</span>
           <span class="leg-divider"></span>
-          <span class="leg-item leg-line"><i class="leg-line-dash" style="border-color:#94a3b8"></i> 关联</span>
-          <span class="leg-item leg-line"><i class="leg-line-solid" style="border-color:#3b82f6"></i> 引用</span>
-          <span class="leg-item leg-line"><i class="leg-line-solid" style="border-color:#22c55e"></i> 包含</span>
+          <span class="leg-item leg-line"><i class="leg-line-dash" style="border-color:var(--text-tertiary)"></i> 关联</span>
+          <span class="leg-item leg-line"><i class="leg-line-solid" style="border-color:var(--accent-blue)"></i> 引用</span>
+          <span class="leg-item leg-line"><i class="leg-line-solid" style="border-color:var(--accent-green)"></i> 包含</span>
         </div>
       </div>
 
@@ -551,28 +551,28 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
         <!-- 统计数字（原型 #6 风格） -->
         <div class="stat-grid">
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#3B82F614"><Icon name="graph" :size="18" style="color:#3b82f6"/></div>
-            <div class="sc-info"><div class="sc-label">节点总数</div><div class="sc-value" style="color:#3b82f6">{{ stats?.nodeCount ?? 0 }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-blue-soft)"><Icon name="graph" :size="18" style="color:var(--accent-blue)"/></div>
+            <div class="sc-info"><div class="sc-label">节点总数</div><div class="sc-value" style="color:var(--accent-blue)">{{ stats?.nodeCount ?? 0 }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#10B98114"><Icon name="link" :size="18" style="color:#10b981"/></div>
-            <div class="sc-info"><div class="sc-label">关系总数</div><div class="sc-value" style="color:#10b981">{{ stats?.edgeCount ?? 0 }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-green-soft)"><Icon name="link" :size="18" style="color:var(--accent-green)"/></div>
+            <div class="sc-info"><div class="sc-label">关系总数</div><div class="sc-value" style="color:var(--accent-green)">{{ stats?.edgeCount ?? 0 }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#3B82F614"><Icon name="doc" :size="18" style="color:#3b82f6"/></div>
-            <div class="sc-info"><div class="sc-label">文档节点</div><div class="sc-value" style="color:#3b82f6">{{ docNodeCount }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-blue-soft)"><Icon name="doc" :size="18" style="color:var(--accent-blue)"/></div>
+            <div class="sc-info"><div class="sc-label">文档节点</div><div class="sc-value" style="color:var(--accent-blue)">{{ docNodeCount }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#22c55e14"><Icon name="lightbulb" :size="18" style="color:#22c55e"/></div>
-            <div class="sc-info"><div class="sc-label">知识点</div><div class="sc-value" style="color:#22c55e">{{ conceptCount }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-green-soft)"><Icon name="lightbulb" :size="18" style="color:var(--accent-green)"/></div>
+            <div class="sc-info"><div class="sc-label">知识点</div><div class="sc-value" style="color:var(--accent-green)">{{ conceptCount }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#a855f714"><Icon name="tag" :size="18" style="color:#a855f7"/></div>
-            <div class="sc-info"><div class="sc-label">标签</div><div class="sc-value" style="color:#a855f7">{{ tagCount }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-violet-soft)"><Icon name="tag" :size="18" style="color:var(--accent-violet)"/></div>
+            <div class="sc-info"><div class="sc-label">标签</div><div class="sc-value" style="color:var(--accent-violet)">{{ tagCount }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#f59e0b14"><Icon name="folder" :size="18" style="color:#f59e0b"/></div>
-            <div class="sc-info"><div class="sc-label">业务分类</div><div class="sc-value" style="color:#f59e0b">{{ bizCatCount }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-amber-soft)"><Icon name="folder" :size="18" style="color:var(--accent-amber)"/></div>
+            <div class="sc-info"><div class="sc-label">业务分类</div><div class="sc-value" style="color:var(--accent-amber)">{{ bizCatCount }}</div></div>
           </div>
         </div>
 
@@ -690,20 +690,20 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
       <div class="stats-page">
         <div class="stat-grid wide">
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#3B82F614"><Icon name="graph" :size="18" style="color:#3B82F6" /></div>
-            <div class="sc-info"><div class="sc-label">实体节点</div><div class="sc-value" style="color:#3B82F6">{{ stats?.nodeCount ?? 0 }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-blue-soft)"><Icon name="graph" :size="18" style="color:var(--accent-blue)" /></div>
+            <div class="sc-info"><div class="sc-label">实体节点</div><div class="sc-value" style="color:var(--accent-blue)">{{ stats?.nodeCount ?? 0 }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#10B98114"><Icon name="link" :size="18" style="color:#10B981" /></div>
-            <div class="sc-info"><div class="sc-label">关系边</div><div class="sc-value" style="color:#10B981">{{ stats?.edgeCount ?? 0 }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-green-soft)"><Icon name="link" :size="18" style="color:var(--accent-green)" /></div>
+            <div class="sc-info"><div class="sc-label">关系边</div><div class="sc-value" style="color:var(--accent-green)">{{ stats?.edgeCount ?? 0 }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#8B5CF614"><Icon name="folder" :size="18" style="color:#8B5CF6" /></div>
-            <div class="sc-info"><div class="sc-label">覆盖知识库</div><div class="sc-value" style="color:#8B5CF6">{{ stats?.kbCount ?? 0 }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-violet-soft)"><Icon name="folder" :size="18" style="color:var(--accent-violet)" /></div>
+            <div class="sc-info"><div class="sc-label">覆盖知识库</div><div class="sc-value" style="color:var(--accent-violet)">{{ stats?.kbCount ?? 0 }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:#F59E0B14"><Icon name="tag" :size="18" style="color:#F59E0B" /></div>
-            <div class="sc-info"><div class="sc-label">实体类型</div><div class="sc-value" style="color:#F59E0B">{{ Object.keys(stats?.typeCounts || {}).length }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-amber-soft)"><Icon name="tag" :size="18" style="color:var(--accent-amber)" /></div>
+            <div class="sc-info"><div class="sc-label">实体类型</div><div class="sc-value" style="color:var(--accent-amber)">{{ Object.keys(stats?.typeCounts || {}).length }}</div></div>
           </div>
         </div>
 
@@ -820,8 +820,8 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
 .leg-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .leg-divider { width: 1px; height: 14px; background: var(--border); }
 .leg-line { display: inline-flex; align-items: center; gap: 4px; }
-.leg-arrow { width: 20px; height: 0; border-top: 1.5px solid #94A3B8; position: relative; }
-.leg-arrow::after { content: ''; position: absolute; right: -1px; top: -4px; border: 4px solid transparent; border-left: 4px solid #94A3B8; }
+.leg-arrow { width: 20px; height: 0; border-top: 1.5px solid var(--text-tertiary); position: relative; }
+.leg-arrow::after { content: ''; position: absolute; right: -1px; top: -4px; border: 4px solid transparent; border-left: 4px solid var(--text-tertiary); }
 .canvas-hint { text-align: center; font-size: 11px; color: var(--text-placeholder); padding: 6px; margin: 0; }
 
 /* 图例 */
@@ -880,7 +880,7 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
 .type-bar { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
 .tb-label { width: 56px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-track { flex: 1; height: 6px; border-radius: 3px; background: var(--bg-subtle); overflow: hidden; }
-.tb-fill { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--brand), #8B5CF6); }
+.tb-fill { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--brand), var(--accent-violet)); }
 .tb-count { width: 28px; text-align: right; color: var(--text-tertiary); }
 
 .hot-list { display: flex; flex-direction: column; gap: 6px; }
