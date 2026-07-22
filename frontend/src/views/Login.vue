@@ -56,20 +56,18 @@ async function handleLogin() {
         <div class="platform platform-top" />
 
         <div class="cube-scene">
-          <svg class="cube-svg" width="195" height="195" viewBox="0 0 195 195" fill="none">
-            <g transform="translate(32.5, 32.5)">
-              <path fill="#014DB2" d="M65 0L130 32.5L130 97.5L65 130L0 97.5L0 32.5L65 0Z" />
-              <path fill="#3B82F6" d="M65 0L130 32.5L65 65L0 32.5L65 0Z" />
-              <path fill="#1E40AF" d="M130 32.5L65 65L65 130L130 97.5Z" />
-              <path fill="#60A5FA" d="M0 32.5L65 65L65 130L0 97.5Z" />
-            </g>
+          <svg class="cube-svg" viewBox="0 0 130 130" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path fill="#014DB2" d="M65 0L130 32.5L130 97.5L65 130L0 97.5L0 32.5L65 0Z" />
+            <path fill="#3B82F6" d="M65 0L130 32.5L65 65L0 32.5L65 0Z" />
+            <path fill="#1E40AF" d="M130 32.5L65 65L65 130L130 97.5Z" />
+            <path fill="#60A5FA" d="M0 32.5L65 65L65 130L0 97.5Z" />
           </svg>
         </div>
 
-        <div class="icon-circle ic-chart"><Icon name="chart" :size="22" /></div>
-        <div class="icon-circle ic-search"><Icon name="search" :size="22" /></div>
-        <div class="icon-circle ic-doc"><Icon name="doc" :size="22" /></div>
-        <div class="icon-circle ic-settings"><Icon name="settings" :size="22" /></div>
+        <div class="icon-circle ic-chart"><Icon name="chart" :size="24" /></div>
+        <div class="icon-circle ic-search"><Icon name="search" :size="24" /></div>
+        <div class="icon-circle ic-doc"><Icon name="doc" :size="24" /></div>
+        <div class="icon-circle ic-settings"><Icon name="settings" :size="24" /></div>
       </div>
     </div>
 
@@ -245,10 +243,10 @@ async function handleLogin() {
 
 .cube-scene {
   position: absolute;
-  left: 259px;
-  top: 143px;
-  width: 195px;
-  height: 195px;
+  left: 257px;
+  top: 141px;
+  width: 200px;
+  height: 200px;
 }
 
 .cube-svg {
@@ -259,8 +257,8 @@ async function handleLogin() {
 
 .icon-circle {
   position: absolute;
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   background: #fff;
   border: 1px solid #e5e7eb;
@@ -273,26 +271,26 @@ async function handleLogin() {
 }
 
 .ic-chart {
-  left: 190px;
-  top: 90px;
+  left: 157px;
+  top: 60px;
   animation-delay: 0s;
 }
 
 .ic-search {
-  left: 470px;
-  top: 90px;
+  left: 493px;
+  top: 60px;
   animation-delay: 0.8s;
 }
 
 .ic-doc {
-  left: 150px;
-  top: 230px;
+  left: 109px;
+  top: 228px;
   animation-delay: 1.6s;
 }
 
 .ic-settings {
-  left: 510px;
-  top: 230px;
+  left: 541px;
+  top: 228px;
   animation-delay: 2.3s;
 }
 
