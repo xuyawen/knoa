@@ -95,11 +95,12 @@ class FakeLLM:
             raw_text="已有足够信息，直接回答",
         )
 
-    async def stream_chat(self, messages, temperature=None):
+    async def stream_chat(self, messages, temperature=None, max_tokens=None, model=None):
+        # model 为 P8 多模型透传新增的参数，桩需与之对齐，否则调用抛 TypeError
         for tok in ["您可以", "申请", "7 天无理由退款。"]:
             yield tok
 
-    async def chat(self, messages, temperature=None) -> str:
+    async def chat(self, messages, temperature=None, model=None) -> str:
         return "您可以申请 7 天无理由退款。"
 
 
