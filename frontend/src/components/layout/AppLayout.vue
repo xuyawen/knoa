@@ -8,6 +8,8 @@ import { useThemeStore } from '@/stores/theme'
 import { getAnnouncements, markAnnouncementRead } from '@/api'
 import type { Announcement } from '@/types/api'
 import Icon from '@/components/ui/Icon.vue'
+import AppModal from '@/components/ui/AppModal.vue'
+import SystemSettingsPanel from '@/components/user/SystemSettingsPanel.vue'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
@@ -134,7 +136,22 @@ function onLogout() {
 }
 function goAccountSettings() {
   closeUserMenu()
-  router.push({ path: '/profile', state: { openSettings: true } })
+  showSettings.value = true
+}
+
+/* ---------- 账号设置弹框 ---------- */
+const showSettings = ref(false)
+const settingsSaving = ref(false)
+const settingsRef = ref<InstanceType<typeof SystemSettingsPanel> | null>(null)
+
+async function onSaveSettings() {
+  if (!settingsRef.value) return
+  settingsSaving.value = true
+  try {
+    await settingsRef.value.onSave()
+  } finally {
+    settingsSaving.value = false
+  }
 }
 
 const user = computed(() => auth.user)
@@ -240,6 +257,18 @@ const sidebarCollapsed = ref(false)
         </div>
       </div>
     </header>
+
+    <!-- 账号设置弹框 -->
+    <AppModal :show="showSettings" title="账号设置" wide @close="showSettings = false">
+      <SystemSettingsPanel ref="settingsRef" />
+      <template #foot>
+        <button class="btn btn-ghost" @click="showSettings = false">关闭</button>
+        <button class="btn btn-primary" :disabled="settingsSaving" @click="onSaveSettings">
+          <Icon v-if="settingsSaving" name="loader" :size="14" class="spin" />
+          {{ settingsSaving ? '保存中…' : '保存设置' }}
+        </button>
+      </template>
+    </AppModal>
 
     <!-- ====== 主体：左侧边栏 + 内容区 ====== -->
     <div class="body-row">

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // 个人中心 — 参考用户设计图：顶部资料卡 + 统计 + 左（知识库/贡献）右（问答/贡献度/菜单）
 import { computed, ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { changePassword, updateUser } from '@/api/auth'
@@ -12,7 +11,6 @@ import SystemSettingsPanel from '@/components/user/SystemSettingsPanel.vue'
 import type { ChatSession, Paginated, KnowledgeBasesResponse } from '@/types/api'
 
 const auth = useAuthStore()
-const route = useRoute()
 const toast = useToastStore()
 
 const ROLE_LABEL: Record<string, string> = { admin: '管理员', editor: '编辑者', viewer: '访客' }
@@ -40,15 +38,6 @@ onMounted(async () => {
     toast.error('加载个人数据失败')
   } finally {
     loading.value = false
-  }
-
-  const tab = route.query.tab
-  if (tab === 'info' || tab === 'security' || tab === 'system') {
-    openEdit(tab)
-  }
-  if (history.state?.openSettings) {
-    openEdit('info')
-    history.replaceState({ ...history.state, openSettings: false }, '')
   }
 })
 
