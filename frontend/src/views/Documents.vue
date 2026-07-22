@@ -5,6 +5,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import AppModal from '@/components/ui/AppModal.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import DepartmentTree from '@/components/DepartmentTree.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
@@ -34,6 +35,8 @@ const docs = ref<DocumentItem[]>([])
 const total = ref(0)
 const loading = ref(false)
 const deleting = ref(false)
+const deleteTarget = ref<DocumentItem | null>(null)
+const showBatchDelete = ref(false)
 
 const searchQuery = ref('')
 const viewMode = ref<'list' | 'grid'>('list')
@@ -402,9 +405,14 @@ async function onReject(doc: DocumentItem) {
   }
 }
 
-async function onDelete(doc: DocumentItem) {
+function onDelete(doc: DocumentItem) {
   if (!selectedKb.value) return
-  if (!confirm(`确认删除文档「${doc.title}」？该操作会级联清理向量与图谱数据。`)) return
+  deleteTarget.value = doc
+}
+async function confirmDelete() {
+  const doc = deleteTarget.value
+  deleteTarget.value = null
+  if (!doc || !selectedKb.value) return
   deleting.value = true
   try {
     await deleteDocument(selectedKb.value, doc.id)
@@ -469,10 +477,13 @@ function clearSelection() {
   selectedIds.value = []
 }
 
-async function onBatchDelete() {
+function onBatchDelete() {
   if (!selectedIds.value.length || !selectedKb.value) return
+  showBatchDelete.value = true
+}
+async function confirmBatchDelete() {
   const n = selectedIds.value.length
-  if (!confirm(`确认批量删除选中的 ${n} 篇文档？该操作不可恢复。`)) return
+  showBatchDelete.value = false
   deleting.value = true
   let ok = 0
   for (const id of [...selectedIds.value]) {
@@ -578,7 +589,7 @@ function goPage(p: number) {
             :name="t.status === 'error' ? 'alert' : (t.status === 'done' ? 'check' : 'loader')"
             :size="14"
             :class="{ spin: t.status === 'uploading' || t.status === 'processing' }"
-            :style="t.status === 'error' ? 'color:#dc2626' : (t.status === 'done' ? 'color:#16a34a' : '')"
+            :style="t.status === 'error' ? 'color:var(--danger)' : (t.status === 'done' ? 'color:var(--success)' : '')"
           />
           <span class="up-name" :title="t.filename">{{ t.filename }}</span>
           <div class="up-bar">
@@ -741,6 +752,25 @@ function goPage(p: number) {
         </div>
       </template>
     </AppModal>
+
+    <ConfirmDialog
+      :show="!!deleteTarget"
+      title="删除文档"
+      :message="deleteTarget ? `确认删除文档「${deleteTarget.title}」？该操作会级联清理向量与图谱数据。` : ''"
+      confirm-text="删除"
+      danger
+      @close="deleteTarget = null"
+      @confirm="confirmDelete"
+    />
+    <ConfirmDialog
+      :show="showBatchDelete"
+      title="批量删除文档"
+      :message="`确认批量删除选中的 ${selectedIds.length} 篇文档？该操作不可恢复。`"
+      confirm-text="批量删除"
+      danger
+      @close="showBatchDelete = false"
+      @confirm="confirmBatchDelete"
+    />
   </div>
 </template>
 
@@ -1014,9 +1044,9 @@ function goPage(p: number) {
   font-size: 12px;
   font-weight: 500;
 }
-.status-tag.success { background: rgba(34,197,94,.10); color: #16a34a; }
-.status-tag.warning { background: rgba(245,158,11,.12); color: #d97706; }
-.status-tag.danger { background: rgba(239,68,68,.10); color: #dc2626; }
+.status-tag.success { background: var(--success-soft); color: var(--success); }
+.status-tag.warning { background: var(--warning-soft); color: var(--warning); }
+.status-tag.danger { background: var(--danger-soft); color: var(--danger); }
 
 /* 权限范围标签 */
 .scope-tag {
@@ -1033,9 +1063,9 @@ function goPage(p: number) {
   display: inline-flex; align-items: center; padding: 2px 10px;
   border-radius: var(--radius-pill); font-size: 12px; font-weight: 500;
 }
-.status-badge.success { background: #D1FAE5; color: #065F46; }
-.status-badge.warning { background: #FEF3C7; color: #92400E; }
-.status-badge.danger { background: #FEE2E2; color: #991B1B; }
+.status-badge.success { background: var(--success-soft); color: var(--success); }
+.status-badge.warning { background: var(--warning-soft); color: var(--warning); }
+.status-badge.danger { background: var(--danger-soft); color: var(--danger); }
 .status-badge.mini { padding: 1px 8px; font-size: 11px; }
 
 .row-actions {
