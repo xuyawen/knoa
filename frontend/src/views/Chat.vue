@@ -620,32 +620,45 @@ watch(messages, scrollToBottom, { deep: false })
       <div class="secondary-page">
         <h2 class="page-title">模型配置</h2>
         <div class="card model-card">
-          <div class="panel-head"><span class="panel-title">问答模型</span></div>
-          <p class="model-note">当前后端统一使用 agnes 推理模型；以下配置为本地偏好，便于后续接入多模型路由。</p>
-          <div class="model-field">
-            <label>模型</label>
-            <CustomSelect v-model="modelName" :options="[
-              { value: 'agnes-2.0-flash', label: 'agnes-2.0-flash（快）' },
-              { value: 'agnes-2.0-pro', label: 'agnes-2.0-pro（强）' },
-              { value: 'gpt-4o', label: 'gpt-4o' },
-            ]" />
+          <div class="model-card-header">
+            <h3 class="model-card-title">问答模型</h3>
+            <p class="model-card-desc">当前后端统一使用 agnes 推理模型；以下配置为本地偏好，便于后续接入多模型路由。</p>
           </div>
-          <div class="model-field">
-            <label>温度（创造性）</label>
-            <div class="field-row">
-              <input type="range" min="0" max="1" step="0.1" v-model.number="temperature" class="range" />
-              <span class="field-val">{{ temperature.toFixed(1) }}</span>
+          <div class="model-form">
+            <div class="model-form-row">
+              <label class="model-form-label">模型</label>
+              <div class="model-form-control">
+                <CustomSelect v-model="modelName" :options="[
+                  { value: 'agnes-2.0-flash', label: 'agnes-2.0-flash（快）' },
+                  { value: 'agnes-2.0-pro', label: 'agnes-2.0-pro（强）' },
+                  { value: 'gpt-4o', label: 'gpt-4o' },
+                ]" />
+              </div>
+            </div>
+            <div class="model-form-row">
+              <label class="model-form-label">温度（创造性）</label>
+              <div class="model-form-control">
+                <div class="model-slider">
+                  <input type="range" min="0" max="1" step="0.1" v-model.number="temperature" class="model-range" />
+                  <span class="model-range-val">{{ temperature.toFixed(1) }}</span>
+                </div>
+                <p class="model-hint">数值越低回答越稳定，越高越随机</p>
+              </div>
+            </div>
+            <div class="model-form-row">
+              <label class="model-form-label">最大生成长度</label>
+              <div class="model-form-control">
+                <CustomSelect v-model.number="maxTokens" :options="[
+                  { value: 1000, label: '1000' },
+                  { value: 2000, label: '2000' },
+                  { value: 4000, label: '4000' },
+                ]" />
+              </div>
             </div>
           </div>
-          <div class="model-field">
-            <label>最大生成长度</label>
-            <CustomSelect v-model.number="maxTokens" :options="[
-              { value: 1000, label: '1000' },
-              { value: 2000, label: '2000' },
-              { value: 4000, label: '4000' },
-            ]" />
+          <div class="model-actions">
+            <button class="btn btn-primary" @click="saveModel">保存配置</button>
           </div>
-          <button class="btn btn-primary" @click="saveModel">保存配置</button>
         </div>
       </div>
     </template>
@@ -1217,6 +1230,109 @@ watch(messages, scrollToBottom, { deep: false })
   transition: all var(--dur-fast) var(--ease-out);
 }
 .stop-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ============ 模型配置 ============ */
+.model-card {
+  max-width: 720px;
+  padding: 24px;
+}
+.model-card-header {
+  margin-bottom: 24px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.model-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.model-card-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+.model-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.model-form-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.model-form-label {
+  width: 120px;
+  flex-shrink: 0;
+  padding-top: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}
+.model-form-control {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.model-slider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.model-range {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.model-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--brand);
+  border: 2px solid var(--bg-surface);
+  box-shadow: 0 1px 4px rgba(1, 77, 178, 0.35);
+  cursor: pointer;
+}
+.model-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--brand);
+  border: 2px solid var(--bg-surface);
+  box-shadow: 0 1px 4px rgba(1, 77, 178, 0.35);
+  cursor: pointer;
+}
+.model-range-val {
+  min-width: 32px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand);
+}
+.model-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.model-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.model-actions .btn { min-width: 96px; }
 
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(10px); }
