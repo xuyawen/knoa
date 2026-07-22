@@ -4,6 +4,7 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
+import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useToastStore } from '@/stores/toast'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -589,11 +590,11 @@ watch(messages, scrollToBottom, { deep: false })
           <p class="model-note">当前后端统一使用 agnes 推理模型；以下配置为本地偏好，便于后续接入多模型路由。</p>
           <div class="model-field">
             <label>模型</label>
-            <select v-model="modelName" class="select">
-              <option value="agnes-2.0-flash">agnes-2.0-flash（快）</option>
-              <option value="agnes-2.0-pro">agnes-2.0-pro（强）</option>
-              <option value="gpt-4o">gpt-4o</option>
-            </select>
+            <CustomSelect v-model="modelName" :options="[
+              { value: 'agnes-2.0-flash', label: 'agnes-2.0-flash（快）' },
+              { value: 'agnes-2.0-pro', label: 'agnes-2.0-pro（强）' },
+              { value: 'gpt-4o', label: 'gpt-4o' },
+            ]" />
           </div>
           <div class="model-field">
             <label>温度（创造性）</label>
@@ -604,11 +605,11 @@ watch(messages, scrollToBottom, { deep: false })
           </div>
           <div class="model-field">
             <label>最大生成长度</label>
-            <select v-model.number="maxTokens" class="select">
-              <option :value="1000">1000</option>
-              <option :value="2000">2000</option>
-              <option :value="4000">4000</option>
-            </select>
+            <CustomSelect v-model.number="maxTokens" :options="[
+              { value: 1000, label: '1000' },
+              { value: 2000, label: '2000' },
+              { value: 4000, label: '4000' },
+            ]" />
           </div>
           <button class="btn btn-primary" @click="saveModel">保存配置</button>
         </div>

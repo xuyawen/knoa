@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { getSettings, updateSettings } from '@/api'
 import Icon from '@/components/ui/Icon.vue'
+import CustomSelect from '@/components/ui/CustomSelect.vue'
 
 const auth = useAuthStore()
 const toast = useToastStore()
@@ -73,9 +74,7 @@ async function onSave() {
             <div class="set-hint">指定后，所有问答默认使用该模型；留空则使用系统默认。</div>
           </div>
           <div class="set-control">
-            <select v-model="preferredModel" class="select" :disabled="saving">
-              <option v-for="o in MODEL_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-            </select>
+            <CustomSelect v-model="preferredModel" :options="MODEL_OPTIONS" :disabled="saving" />
           </div>
         </div>
 
