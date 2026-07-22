@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 个人中心 — 参考用户设计图：顶部资料卡 + 统计 + 左（知识库/贡献）右（问答/贡献度/菜单）
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
@@ -46,16 +46,11 @@ onMounted(async () => {
   if (tab === 'info' || tab === 'security' || tab === 'system') {
     openEdit(tab)
   }
+  if (history.state?.openSettings) {
+    openEdit('info')
+    history.replaceState({ ...history.state, openSettings: false }, '')
+  }
 })
-
-watch(
-  () => route.query.tab,
-  (tab) => {
-    if (tab === 'info' || tab === 'security' || tab === 'system') {
-      openEdit(tab)
-    }
-  },
-)
 
 /* ---------- 统计 ---------- */
 const stats = computed(() => [
