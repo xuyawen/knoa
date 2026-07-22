@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 个人中心 — 专业版（参考 Ant Design Pro 个人页）：左侧资料卡 + 右侧 Tab 内容区
+// 个人中心 — impeccable 标杆风格（克制精致企业工作区），与 Chat.vue 同调性
 import { computed, ref, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
@@ -123,26 +123,34 @@ const pwdStrength = computed(() => {
 
 <template>
   <div class="profile-page fade-up">
+    <!-- 页面头 -->
+    <header class="page-head">
+      <span class="page-eyebrow">个人中心</span>
+      <h1 class="page-title">账户与资料</h1>
+      <p class="page-desc">管理你的公开资料、登录安全与账户状态。</p>
+    </header>
+
     <div class="profile-grid">
-      <!-- ====== 左侧资料卡 ====== -->
+      <!-- ====== 左：资料卡 ====== -->
       <aside class="profile-rail card">
-        <div class="rail-banner" />
+        <div class="rail-banner">
+          <span class="rail-orb" />
+        </div>
         <div class="rail-body">
           <div class="rail-avatar">
             <span class="ra-text">{{ avatarLetter }}</span>
             <span class="ra-status" :class="auth.user?.isActive ? 'on' : 'off'" />
           </div>
-          <h1 class="rail-name">{{ auth.user?.displayName || auth.user?.username || '—' }}</h1>
+          <h2 class="rail-name">{{ auth.user?.displayName || auth.user?.username || '—' }}</h2>
           <div class="rail-role">
             <span class="role-tag" :class="roleClass">{{ roleLabel }}</span>
             <span class="rail-uname">@{{ auth.user?.username }}</span>
           </div>
 
           <p class="rail-bio" v-if="auth.user?.displayName">
-            这是你在 Knoa 智能知识库的工作账号，负责 {{ roleLabel }} 相关工作。
+            你在 Knoa 知识库的工作账号，负责 {{ roleLabel }} 相关工作。
           </p>
 
-          <!-- 统计 -->
           <div class="rail-stats">
             <div class="rs-item">
               <span class="rs-num">{{ daysSince }}</span>
@@ -168,7 +176,7 @@ const pwdStrength = computed(() => {
         </div>
       </aside>
 
-      <!-- ====== 右侧内容 ====== -->
+      <!-- ====== 右：内容 ====== -->
       <div class="profile-main">
         <nav class="tab-nav card">
           <button
@@ -185,17 +193,24 @@ const pwdStrength = computed(() => {
 
         <!-- 基本信息 -->
         <section v-if="activeTab === 'info'" class="tab-panel card">
-          <h3 class="panel-title">
-            基本信息
-            <button v-if="!editingInfo" class="panel-edit" @click="startEditInfo">
-              <Icon name="pen-line" :size="13" /> 编辑
-            </button>
-            <span v-else class="panel-edit-actions">
-              <button class="panel-save" :disabled="infoSaving" @click="saveInfo">保存</button>
-              <button class="panel-cancel" @click="cancelEditInfo">取消</button>
-            </span>
-          </h3>
-          <p class="panel-desc">你的账户公开资料和权限信息。</p>
+          <div class="panel-head">
+            <div>
+              <h3 class="panel-title">基本信息</h3>
+              <p class="panel-desc">你的账户公开资料和权限信息。</p>
+            </div>
+            <div class="panel-actions">
+              <button v-if="!editingInfo" class="panel-edit" @click="startEditInfo">
+                <Icon name="pen-line" :size="13" /> 编辑
+              </button>
+              <template v-else>
+                <button class="panel-cancel" @click="cancelEditInfo">取消</button>
+                <button class="panel-save" :disabled="infoSaving" @click="saveInfo">
+                  <Icon v-if="infoSaving" name="loader" :size="13" class="spin" /> 保存
+                </button>
+              </template>
+            </div>
+          </div>
+
           <div class="info-grid">
             <div class="info-item">
               <span class="info-key">用户名</span>
@@ -235,9 +250,13 @@ const pwdStrength = computed(() => {
         </section>
 
         <!-- 安全设置 -->
-        <section v-if="activeTab === 'security'" class="tab-panel card">
-          <h3 class="panel-title">修改登录密码</h3>
-          <p class="panel-desc">定期更换密码有助于保护账户安全，新密码长度不少于 6 位。</p>
+        <section v-else class="tab-panel card">
+          <div class="panel-head">
+            <div>
+              <h3 class="panel-title">修改登录密码</h3>
+              <p class="panel-desc">定期更换密码有助于保护账户安全，新密码长度不少于 6 位。</p>
+            </div>
+          </div>
           <form class="sec-form" @submit.prevent="onSubmitPassword">
             <div class="sec-field">
               <label class="sec-label">当前密码 <span class="req">*</span></label>
@@ -283,6 +302,23 @@ const pwdStrength = computed(() => {
 
 <style scoped>
 .profile-page { max-width: 1040px; }
+.page-head { margin-bottom: 22px; }
+.page-eyebrow {
+  display: inline-block;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--brand);
+  margin-bottom: 6px;
+}
+.page-title {
+  margin: 0; font-size: 18px; font-weight: 700;
+  letter-spacing: -0.01em; color: var(--text-primary);
+}
+.page-desc {
+  margin: 6px 0 0; font-size: 13.5px; color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
 .profile-grid {
   display: grid;
   grid-template-columns: 300px 1fr;
@@ -291,37 +327,35 @@ const pwdStrength = computed(() => {
 }
 
 /* ====== 左侧资料卡 ====== */
-.profile-rail {
-  overflow: hidden;
-  padding: 0;
-}
+.profile-rail { overflow: hidden; padding: 0; }
 .rail-banner {
-  height: 76px;
-  background: linear-gradient(120deg, var(--brand), var(--brand-hover) 70%, var(--brand-active));
   position: relative;
+  height: 84px;
+  background: linear-gradient(120deg, var(--brand) 0%, var(--brand-hover) 100%);
+  overflow: hidden;
 }
-.rail-banner::after {
-  content: '';
+.rail-orb {
   position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 80% 20%, rgba(255,255,255,0.25), transparent 60%);
+  right: -28px; top: -36px;
+  width: 130px; height: 130px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.35), transparent 70%);
 }
 .rail-body { padding: 0 22px 22px; }
 .rail-avatar {
   position: relative;
   width: 76px; height: 76px;
-  margin-top: -38px;
-  margin-bottom: 14px;
+  margin-top: -38px; margin-bottom: 14px;
   border-radius: 50%;
   background: var(--bg-surface);
   padding: 4px;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  box-shadow: var(--shadow-float);
 }
 .ra-text {
   display: flex; align-items: center; justify-content: center;
   width: 100%; height: 100%;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--brand), var(--brand-active));
+  background: linear-gradient(135deg, var(--brand), var(--brand-hover));
   color: var(--text-on-brand); font-size: 28px; font-weight: 700;
 }
 .ra-status {
@@ -329,10 +363,13 @@ const pwdStrength = computed(() => {
   width: 14px; height: 14px; border-radius: 50%;
   border: 3px solid var(--bg-surface);
 }
-.ra-status.on { background: var(--success); }
+.ra-status.on { background: var(--success); box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 22%, transparent); }
 .ra-status.off { background: var(--danger); }
 
-.rail-name { margin: 0; font-size: 19px; font-weight: 700; color: var(--text-primary); }
+.rail-name {
+  margin: 0; font-size: 19px; font-weight: 700;
+  letter-spacing: -0.01em; color: var(--text-primary);
+}
 .rail-role { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .rail-uname { font-size: 13px; color: var(--text-tertiary); font-family: monospace; }
 .rail-bio { margin: 14px 0 0; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
@@ -343,8 +380,8 @@ const pwdStrength = computed(() => {
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
-.rs-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.rs-num { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.rs-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.rs-num { font-size: 16px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em; }
 .rs-num.ok { color: var(--success); }
 .rs-num.bad { color: var(--danger); }
 .rs-label { font-size: 12px; color: var(--text-tertiary); }
@@ -357,7 +394,7 @@ const pwdStrength = computed(() => {
   border: 1px solid var(--border); border-radius: var(--radius-md);
   background: var(--bg-subtle); color: var(--text-primary);
   font-size: 13px; font-weight: 500; font-family: inherit; cursor: pointer;
-  transition: all var(--dur-fast);
+  transition: all var(--dur-fast) var(--ease-out);
 }
 .rail-edit:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
 
@@ -379,54 +416,67 @@ const pwdStrength = computed(() => {
   padding: 10px 18px; border-radius: var(--radius-md);
   font-size: 14px; font-weight: 500;
   color: var(--text-secondary); background: transparent;
-  cursor: pointer; border: none; font-family: inherit; transition: all var(--dur-fast);
+  cursor: pointer; border: none; font-family: inherit;
+  transition: all var(--dur-fast) var(--ease-out);
 }
 .tab-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 .tab-btn.active { color: var(--brand); background: var(--brand-soft); font-weight: 600; }
 
 .tab-panel { padding: 26px 28px; }
-.panel-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 10px; }
-.panel-desc { margin: 0 0 22px; font-size: 13px; color: var(--text-tertiary); line-height: 1.5; }
+.panel-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; margin-bottom: 22px;
+}
+.panel-title { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-primary); }
+.panel-desc { margin: 4px 0 0; font-size: 13px; color: var(--text-tertiary); line-height: 1.5; }
+.panel-actions { display: inline-flex; gap: 8px; flex-shrink: 0; }
+
+.panel-edit {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 12px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); background: var(--bg-subtle);
+  color: var(--text-secondary); font-size: 12px; font-family: inherit; cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.panel-edit:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+.panel-save {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 14px; border-radius: var(--radius-md);
+  border: 1px solid var(--brand); background: var(--brand); color: var(--text-on-brand);
+  font-size: 12px; font-family: inherit; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.panel-save:hover:not(:disabled) { background: var(--brand-hover); }
+.panel-save:disabled { opacity: 0.6; cursor: default; }
+.panel-cancel {
+  padding: 5px 14px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); background: var(--bg-subtle);
+  color: var(--text-secondary); font-size: 12px; font-family: inherit; cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.panel-cancel:hover { color: var(--text-primary); background: var(--bg-hover); }
 
 .info-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 18px 32px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 20px 32px;
 }
-.info-item { display: flex; flex-direction: column; gap: 6px; }
+.info-item { display: flex; flex-direction: column; gap: 7px; }
 .info-key {
-  font-size: 12px; font-weight: 500; color: var(--text-tertiary);
-  text-transform: uppercase; letter-spacing: 0.5px;
+  font-size: 11.5px; font-weight: 600; color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: 0.06em;
 }
 .info-val { font-size: 14px; color: var(--text-primary); font-weight: 500; min-height: 22px; }
 .id-copy { font-family: monospace; font-size: 13px; color: var(--text-tertiary); }
 
-/* 基本信息编辑态 */
-.panel-edit {
-  margin-left: auto;
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 4px 11px; border-radius: var(--radius-md);
-  border: 1px solid var(--border); background: var(--bg-subtle);
-  color: var(--text-secondary); font-size: 12px; font-family: inherit; cursor: pointer;
-  transition: all var(--dur-fast);
-}
-.panel-edit:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
-.panel-edit-actions { margin-left: auto; display: inline-flex; gap: 8px; }
-.panel-save {
-  padding: 4px 14px; border-radius: var(--radius-md);
-  border: 1px solid var(--brand); background: var(--brand); color: var(--text-on-brand);
-  font-size: 12px; font-family: inherit; cursor: pointer;
-}
-.panel-save:disabled { opacity: 0.6; cursor: default; }
-.panel-cancel {
-  padding: 4px 14px; border-radius: var(--radius-md);
-  border: 1px solid var(--border); background: var(--bg-subtle);
-  color: var(--text-secondary); font-size: 12px; font-family: inherit; cursor: pointer;
-}
 .info-input {
-  flex: 1; padding: 6px 10px; border-radius: var(--radius-md);
+  flex: 1; padding: 7px 11px; border-radius: var(--radius-md);
   border: 1px solid var(--border-strong); background: var(--bg-surface);
   color: var(--text-primary); font-size: 13px; font-family: inherit;
+  transition: all var(--dur-fast) var(--ease-out);
 }
-.info-input:focus { border-color: var(--brand); outline: none; }
+.info-input:focus {
+  border-color: var(--brand); outline: none;
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
 .dot-status {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   margin-right: 6px; vertical-align: middle;
@@ -435,8 +485,8 @@ const pwdStrength = computed(() => {
 .dot-status.off { background: var(--danger); }
 
 /* ====== 安全表单 ====== */
-.sec-form { display: flex; flex-direction: column; gap: 20px; max-width: 420px; }
-.sec-field { display: flex; flex-direction: column; gap: 6px; }
+.sec-form { display: flex; flex-direction: column; gap: 18px; max-width: 420px; }
+.sec-field { display: flex; flex-direction: column; gap: 7px; }
 .sec-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
 .req { color: var(--danger); }
 .sec-input-wrap { position: relative; display: flex; align-items: center; }
@@ -446,9 +496,12 @@ const pwdStrength = computed(() => {
   border: 1px solid var(--border); border-radius: var(--radius-md);
   font-size: 13.5px; color: var(--text-primary);
   background: var(--bg-subtle); font-family: inherit;
-  transition: all var(--dur-fast); box-sizing: border-box;
+  transition: all var(--dur-fast) var(--ease-out); box-sizing: border-box;
 }
-.sec-inp:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); background: var(--bg-surface); }
+.sec-inp:focus {
+  outline: none; border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring); background: var(--bg-surface);
+}
 .sec-inp::placeholder { color: var(--text-tertiary); }
 
 .strength-bar { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
@@ -461,7 +514,7 @@ const pwdStrength = computed(() => {
 .field-error { margin: 2px 0 0; font-size: 12px; color: var(--danger); }
 
 .sec-actions { display: flex; gap: 10px; margin-top: 4px; }
-.spin { animation: spin 0.8s linear infinite; }
+.spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 840px) {
