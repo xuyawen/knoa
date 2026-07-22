@@ -382,7 +382,7 @@ const pwdStrength = computed(() => {
         <SystemSettingsPanel />
       </div>
 
-      <template v-if="editTab !== 'system'" #foot>
+      <template #foot>
         <template v-if="editTab === 'info'">
           <button v-if="!editingInfo" class="btn btn-ghost" @click="showEdit = false">关闭</button>
           <button v-if="!editingInfo" class="btn btn-primary" @click="startEditInfo">
@@ -395,11 +395,14 @@ const pwdStrength = computed(() => {
             </button>
           </template>
         </template>
-        <template v-else>
+        <template v-else-if="editTab === 'security'">
           <button class="btn btn-ghost" @click="showEdit = false">关闭</button>
           <button class="btn btn-primary" :disabled="saving" @click="onSubmitPassword">
             <Icon v-if="saving" name="loader" :size="14" class="spin" /> 确认修改
           </button>
+        </template>
+        <template v-else>
+          <button class="btn btn-ghost" @click="showEdit = false">关闭</button>
         </template>
       </template>
     </AppModal>
@@ -661,7 +664,7 @@ const pwdStrength = computed(() => {
   font-weight: 600;
   box-shadow: var(--shadow-sm);
 }
-.edit-body { min-height: 180px; }
+.edit-body { min-height: 360px; }
 
 .info-grid {
   display: grid;
