@@ -222,29 +222,29 @@ async function handleLogin() {
   top: 406px;
   width: 540px;
   height: 36px;
-  background: linear-gradient(180deg, #e4eaf3, #dce3ee);
+  background: #e0e6f0;
 }
 
 .platform-middle {
   top: 376px;
   width: 420px;
   height: 28px;
-  background: linear-gradient(180deg, #edf1f7, #e5ebf2);
+  background: #e8edf4;
 }
 
 .platform-top {
   top: 350px;
   width: 300px;
   height: 22px;
-  background: linear-gradient(180deg, #fbfcfe, #f4f7fb);
+  background: #f8fafd;
 }
 
 .cube-scene {
   position: absolute;
-  left: 257px;
-  top: 141px;
-  width: 200px;
-  height: 200px;
+  left: 259px;
+  top: 143px;
+  width: 195px;
+  height: 195px;
   cursor: pointer;
 }
 
@@ -265,8 +265,8 @@ async function handleLogin() {
 
 .icon-circle {
   position: absolute;
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   background: #fff;
   border: 1px solid #e5e7eb;
@@ -289,26 +289,26 @@ async function handleLogin() {
 }
 
 .ic-chart {
-  left: 157px;
-  top: 60px;
+  left: 190px;
+  top: 90px;
   animation-delay: 0s;
 }
 
 .ic-search {
-  left: 493px;
-  top: 60px;
+  left: 470px;
+  top: 90px;
   animation-delay: 0.8s;
 }
 
 .ic-doc {
-  left: 109px;
-  top: 228px;
+  left: 150px;
+  top: 230px;
   animation-delay: 1.6s;
 }
 
 .ic-settings {
-  left: 541px;
-  top: 228px;
+  left: 510px;
+  top: 230px;
   animation-delay: 2.3s;
 }
 
