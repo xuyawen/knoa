@@ -21,6 +21,8 @@ from app.database import AsyncSessionLocal
 from app.deps import get_es
 from app.db import ChatSession, User
 from app.routers import (
+    analytics,
+    announcements,
     ask,
     auth,
     departments,
@@ -31,6 +33,7 @@ from app.routers import (
     knowledge,
     memory,
     metrics,
+    operations,
     sessions,
     sources,
     tasks,
@@ -180,3 +183,6 @@ app.include_router(events.router, prefix="/api")
 app.include_router(graph.router, prefix="/api")
 app.include_router(departments.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
+app.include_router(analytics.router, prefix="/api")
+app.include_router(operations.router, prefix="/api")
+app.include_router(announcements.router, prefix="/api")

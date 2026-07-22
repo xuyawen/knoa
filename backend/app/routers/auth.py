@@ -12,6 +12,7 @@ from app.core.security import (
 )
 from app.db import ChatSession, KBPermission, Memory, User
 from app.deps import get_db
+from app.models.operation_log import record_operation
 from app.config import settings
 from app.models.auth import (
     ChangePasswordIn,
@@ -59,6 +60,7 @@ async def login(payload: LoginIn, response: Response, db: AsyncSession = Depends
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = create_access_token(str(user.id), user.username, user.role)
     _set_auth_cookie(response, token)
+    await record_operation(db, user, "login")
     return TokenOut(access_token=token, user=_to_out(user))
 
 

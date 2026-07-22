@@ -35,6 +35,7 @@ from app.models.knowledge import (
     KnowledgeBaseOut,
     KnowledgeBasesResponse,
 )
+from app.models.operation_log import record_operation
 
 router = APIRouter()
 
@@ -335,6 +336,7 @@ async def upload_document(
     db.add(task)
     await db.commit()
     await db.refresh(doc)
+    await record_operation(db, user, "upload", related_doc_id=str(doc.id), detail=filename)
 
     return _doc_out(doc)
 
@@ -440,6 +442,7 @@ async def approve_document(
         task.completed_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(doc)
+    await record_operation(db, user, "approve", related_doc_id=str(doc.id), detail=doc.title)
     return _doc_out(doc)
 
 
@@ -470,6 +473,7 @@ async def reject_document(
         task.completed_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(doc)
+    await record_operation(db, user, "reject", related_doc_id=str(doc.id), detail=doc.title)
     return _doc_out(doc)
 
 
@@ -552,6 +556,7 @@ async def delete_document(
     # 7) 删文档本身
     await db.delete(doc)
     await db.commit()
+    await record_operation(db, user, "delete", related_doc_id=str(doc.id), detail=doc.title)
 
 
 _TYPE_MAP = {

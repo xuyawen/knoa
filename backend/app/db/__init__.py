@@ -262,3 +262,28 @@ class DocumentTask(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OperationLog(Base):
+    """操作日志（业务统计根数据源；best-effort 写入，绝不阻塞主流程）。"""
+    __tablename__ = "operation_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    action: Mapped[str] = mapped_column(String(20), index=True)  # login/upload/approve/reject/delete/ask
+    related_doc_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    detail: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class Announcement(Base):
+    """系统公告（通知中心 / 系统设置管理）。"""
+    __tablename__ = "announcement"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title: Mapped[str] = mapped_column(String(200))
+    content: Mapped[str] = mapped_column(Text)
+    level: Mapped[str] = mapped_column(String(20), default="info", server_default="info")  # info|warn|critical
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

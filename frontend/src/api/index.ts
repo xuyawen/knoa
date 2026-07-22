@@ -12,6 +12,13 @@ import type {
   AIReview,
   ChatAttachment,
   GraphData,
+  DashboardMetrics,
+  TrendResponse,
+  DocCategory,
+  OperationsResponse,
+  Announcement,
+  AnnouncementCreate,
+  AnnouncementUpdate,
 } from '@/types/api'
 import { authHeaders, TokenExpiredError } from './http'
 
@@ -358,5 +365,85 @@ export async function* streamAsk(
   } finally {
     if (opts?.signal) opts.signal.removeEventListener('abort', onExternalAbort)
     clearTimeout(timer)
+  }
+}
+
+/* ===== Phase 1 业务统计 ===== */
+
+/** Dashboard 核心指标 + 日环比（真实数据源：operation_log / document）。 */
+export async function getDashboardMetrics(): Promise<DashboardMetrics> {
+  const resp = await fetch('/api/analytics/dashboard', { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 问答趋势（按时间桶聚合，range: today | week | month）。 */
+export async function getTrend(range: 'today' | 'week' | 'month' = 'week'): Promise<TrendResponse> {
+  const resp = await fetch(`/api/analytics/trend?range=${range}`, { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 文档分类占比（饼图数据源）。 */
+export async function getDocCategory(): Promise<DocCategory[]> {
+  const resp = await fetch('/api/analytics/doc-category', { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 操作日志分页列表（仅 admin）。 */
+export async function getOperations(page = 1, size = 20): Promise<OperationsResponse> {
+  const resp = await fetch(`/api/operations?page=${page}&size=${size}`, { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 公告列表（所有登录用户可见）。 */
+export async function getAnnouncements(): Promise<Announcement[]> {
+  const resp = await fetch('/api/announcements', { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 新建公告（仅 admin）。 */
+export async function createAnnouncement(payload: AnnouncementCreate): Promise<Announcement> {
+  const resp = await fetch('/api/announcements', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+/** 更新公告（仅 admin）。 */
+export async function updateAnnouncement(
+  id: string,
+  payload: AnnouncementUpdate,
+): Promise<Announcement> {
+  const resp = await fetch(`/api/announcements/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+/** 删除公告（仅 admin）。 */
+export async function deleteAnnouncement(id: string): Promise<void> {
+  const resp = await fetch(`/api/announcements/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
   }
 }

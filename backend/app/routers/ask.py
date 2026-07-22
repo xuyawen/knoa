@@ -21,6 +21,7 @@ from app.db import User
 from app.database import AsyncSessionLocal
 from app.deps import get_embedder, get_llm, get_redis, get_es
 from app.models.chat import AskRequest
+from app.models.operation_log import record_operation
 
 router = APIRouter()
 logger = logging.getLogger("knoa.ask")
@@ -77,6 +78,9 @@ async def ask(
         # 导致会话/消息未提交就被回滚，表现为「刚问的对话从历史里凭空消失」）。
         gen_db = AsyncSessionLocal()
         try:
+            # 埋点：每条问答（无论中途断开）都记一条 operation_log，
+            # 作为 Dashboard「AI 问答 / 用户搜索」与趋势图真实数据源。
+            await record_operation(gen_db, user, "ask", detail=req.question[:200])
             es = get_es()
             if es.enabled and req.knowledge_base and await es.index_exists(req.knowledge_base):
                 retriever = ESRetriever(embedder, es, settings.RRF_K)

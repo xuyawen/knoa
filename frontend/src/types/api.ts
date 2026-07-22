@@ -240,3 +240,77 @@ export type SSEEvent =
   | { event: 'done'; data: { messageId: string; citations: number[]; sessionId: string } }
   | { event: 'error'; data: { message: string } }
   | { event: 'message'; data: unknown }
+
+/* ===== Phase 1 业务统计（真实数据源，替代前端硬编码） ===== */
+export interface DashboardMetrics {
+  totalDocs: number
+  todayNewDocs: number
+  aiAnswers: number
+  userSearches: number
+  activeUsers: number
+  deltas: {
+    totalDocs: number
+    todayNewDocs: number
+    aiAnswers: number
+    userSearches: number
+    activeUsers: number
+  }
+}
+
+export interface TrendPoint {
+  date: string
+  aiAnswers: number
+  searches: number
+}
+
+export interface TrendResponse {
+  range: 'today' | 'week' | 'month'
+  labels: string[]
+  points: TrendPoint[]
+}
+
+export interface DocCategory {
+  category: string
+  count: number
+}
+
+export interface OperationLogItem {
+  id: string
+  userId: string | null
+  displayName: string | null
+  action: string
+  actionLabel: string
+  relatedDocId: string | null
+  detail: string | null
+  createdAt: string
+}
+
+export interface OperationsResponse {
+  items: OperationLogItem[]
+  total: number
+  page: number
+  size: number
+}
+
+export interface Announcement {
+  id: string
+  title: string
+  content: string
+  level: 'info' | 'warning' | 'success' | 'error'
+  pinned: boolean
+  createdAt: string
+}
+
+export interface AnnouncementCreate {
+  title: string
+  content: string
+  level?: 'info' | 'warning' | 'success' | 'error'
+  pinned?: boolean
+}
+
+export interface AnnouncementUpdate {
+  title?: string
+  content?: string
+  level?: 'info' | 'warning' | 'success' | 'error'
+  pinned?: boolean
+}
