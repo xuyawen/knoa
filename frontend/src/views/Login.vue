@@ -56,11 +56,14 @@ async function handleLogin() {
         <div class="platform platform-top" />
 
         <div class="cube-scene">
-          <div class="cube">
-            <div class="face face-top" />
-            <div class="face face-front" />
-            <div class="face face-right" />
-          </div>
+          <svg class="cube-svg" width="195" height="195" viewBox="0 0 195 195" fill="none">
+            <g transform="translate(32.5, 32.5)">
+              <path fill="#014DB2" d="M65 0L130 32.5L130 97.5L65 130L0 97.5L0 32.5L65 0Z" />
+              <path fill="#3B82F6" d="M65 0L130 32.5L65 65L0 32.5L65 0Z" />
+              <path fill="#1E40AF" d="M65 32.6667L130 65.3333L130 130L65 97.3333L65 32.6667Z" />
+              <path fill="#60A5FA" d="M0 32.6667L65 65.3333L65 130L0 97.3333L0 32.6667Z" />
+            </g>
+          </svg>
         </div>
 
         <div class="icon-circle ic-chart"><Icon name="chart" :size="22" /></div>
@@ -75,7 +78,7 @@ async function handleLogin() {
       <div class="login-card">
         <div class="card-header">
           <h2 class="card-title">欢迎登录</h2>
-          <p class="card-subtitle">企业智能知识库系统 · 账号登录</p>
+          <p class="card-subtitle">企业智能知识库系统</p>
         </div>
 
         <form @submit.prevent="handleLogin" class="login-form">
@@ -127,7 +130,7 @@ async function handleLogin() {
         </div>
       </div>
 
-      <p class="footer-note">2026 企业智能知识库系统 · 内部系统 仅供授权人员使用</p>
+      <p class="footer-note">企业智能知识库系统 · 内部系统 仅供授权人员使用</p>
     </div>
   </div>
 </template>
@@ -246,41 +249,12 @@ async function handleLogin() {
   top: 143px;
   width: 195px;
   height: 195px;
-  perspective: 600px;
 }
 
-.cube {
+.cube-svg {
+  display: block;
   width: 100%;
   height: 100%;
-  position: relative;
-  transform-style: preserve-3d;
-  transform: rotateX(-18deg) rotateY(-26deg);
-}
-
-.face {
-  position: absolute;
-  width: 130px;
-  height: 130px;
-  left: 50%;
-  top: 50%;
-  margin-left: -65px;
-  margin-top: -65px;
-  border-radius: 8px;
-}
-
-.face-top {
-  background: linear-gradient(145deg, #60a5fa, #3b82f6);
-  transform: rotateX(90deg) translateZ(65px);
-}
-
-.face-front {
-  background: #014db2;
-  transform: translateZ(65px);
-}
-
-.face-right {
-  background: #1e40af;
-  transform: rotateY(90deg) translateZ(65px);
 }
 
 .icon-circle {
