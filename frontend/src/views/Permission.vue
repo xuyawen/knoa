@@ -3,6 +3,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { getUserList, createUser, updateUser, deleteUser } from '@/api/auth'
@@ -131,12 +132,18 @@ async function save() {
 }
 
 /* ---------- 删除 ---------- */
-async function onDelete(u: UserOut) {
+const deleteTarget = ref<UserOut | null>(null)
+function onDelete(u: UserOut) {
   if (u.id === auth.user?.id) {
     toast.warning('不能删除当前登录账号')
     return
   }
-  if (!confirm(`确认删除用户「${u.username}」？该操作不可恢复。`)) return
+  deleteTarget.value = u
+}
+async function confirmDelete() {
+  const u = deleteTarget.value
+  deleteTarget.value = null
+  if (!u) return
   try {
     await deleteUser(u.id)
     toast.success(`已删除：${u.username}`)
@@ -325,6 +332,17 @@ const roleMatrix = [
         </button>
       </template>
     </AppModal>
+
+    <ConfirmDialog
+      :show="!!deleteTarget"
+      title="删除用户"
+      :message="deleteTarget ? `确认删除用户「${deleteTarget.username}」？该操作不可恢复。` : ''"
+      confirm-text="删除"
+      danger
+      @close="deleteTarget = null"
+      @confirm="confirmDelete"
+    />
+
   </div>
 </template>
 
@@ -374,7 +392,7 @@ const roleMatrix = [
   font-size: 12px; color: var(--text-secondary); background: var(--bg-surface); cursor: pointer; transition: all var(--dur-fast);
 }
 .role-tab:hover { border-color: var(--brand); }
-.role-tab.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.role-tab.active { background: var(--brand); color: var(--text-on-brand); border-color: var(--brand); }
 .icon-btn:disabled { opacity: 0.5; cursor: default; }
 .spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -393,7 +411,7 @@ const roleMatrix = [
 .u-avatar {
   width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--brand); color: #fff; font-size: 12px; font-weight: 600;
+  background: var(--brand); color: var(--text-on-brand); font-size: 12px; font-weight: 600;
 }
 .u-uname { font-weight: 500; color: var(--text-primary); }
 .u-dname { color: var(--text-secondary); }
@@ -402,13 +420,13 @@ const roleMatrix = [
   display: inline-flex; padding: 2px 10px; border-radius: var(--radius-pill);
   font-size: 12px; font-weight: 500;
 }
-.role-admin { background: #FEE2E2; color: #991B1B; }
-.role-editor { background: #DBEAFE; color: #1E40AF; }
+.role-admin { background: var(--danger-soft); color: var(--danger); }
+.role-editor { background: var(--accent-blue-soft); color: var(--accent-blue); }
 .role-viewer { background: var(--bg-subtle); color: var(--text-secondary); }
 
 .status-badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 500; }
-.status-badge.success { background: #D1FAE5; color: #065F46; }
-.status-badge.danger { background: #FEE2E2; color: #991B1B; }
+.status-badge.success { background: var(--success-soft); color: var(--success); }
+.status-badge.danger { background: var(--danger-soft); color: var(--danger); }
 
 .row-actions { display: flex; align-items: center; gap: 4px; }
 .action-btn {
@@ -428,7 +446,7 @@ const roleMatrix = [
   font-size: 13px; color: var(--text-secondary); cursor: pointer; padding: 0 8px; font-family: inherit;
 }
 .pg:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
-.pg.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.pg.active { background: var(--brand); color: var(--text-on-brand); border-color: var(--brand); }
 .pg:disabled { opacity: 0.4; cursor: default; }
 
 /* ---- 矩阵 ---- */
@@ -461,7 +479,7 @@ const roleMatrix = [
   font-size: 12px; color: var(--text-secondary); background: var(--bg-surface); cursor: pointer; transition: all var(--dur-fast);
 }
 .seg-btn:hover { border-color: var(--brand); }
-.seg-btn.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.seg-btn.active { background: var(--brand); color: var(--text-on-brand); border-color: var(--brand); }
 .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .switch input { display: none; }
 .switch-track {
