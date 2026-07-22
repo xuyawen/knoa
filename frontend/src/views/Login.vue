@@ -140,7 +140,7 @@ async function handleLogin() {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: #FFFFFF;          /* 右侧白为主，左侧覆盖 */
+  background: var(--bg-surface);          /* 右侧白为主，左侧覆盖 */
 }
 
 /* ========== 顶部栏：仅 logo + 系统名（与 AppLayout 顶栏同款样式，无菜单）========== */
@@ -185,20 +185,20 @@ async function handleLogin() {
   flex-direction: column;
   justify-content: center;
   padding: 0 64px;
-  background: #F1F5F9;          /* 浅灰底 */
-  border-right: 2px solid #E2E8F0;  /* 红线位置的分界线 */
+  background: var(--bg-subtle);          /* 浅灰底 */
+  border-right: 2px solid var(--border);  /* 红线位置的分界线 */
 }
 .brand-title {
   font-size: 30px;
   font-weight: 800;
-  color: #1E293B;           /* 深色粗体 — 截图实色 */
+  color: var(--text-primary);           /* 深色粗体 — 截图实色 */
   letter-spacing: -0.01em;
   line-height: 1.25;
   margin: 0 0 14px 0;
 }
 .brand-desc {
   font-size: 14px;
-  color: #64748B;           /* 中灰 */
+  color: var(--text-secondary);           /* 中灰 */
   line-height: 1.75;
   max-width: 400px;
   margin: 0 0 52px 0;
@@ -222,13 +222,13 @@ async function handleLogin() {
   left: 58px;
   bottom: 35px;
   height: 46px;
-  background: #93C5FD;       /* 淡蓝 */
+  background: color-mix(in srgb, var(--brand) 40%, transparent);       /* 淡蓝 */
 }
 .dv2 {
   right: 100px;
   bottom: 80px;
   height: 58px;
-  background: #CBD5E1;       /* 浅灰 */
+  background: var(--border-strong);       /* 浅灰 */
 }
 
 /* 浮动图标 badge（浅色圆角方块 — 白/极浅底+柔和阴影）*/
@@ -240,9 +240,9 @@ async function handleLogin() {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: #FFFFFF;
-  color: #64748B;
-  box-shadow: 0 4px 18px rgba(148, 163, 184, 0.25);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  box-shadow: 0 4px 18px var(--brand-ring);
   animation: fy 3.2s ease-in-out infinite;
 }
 .fb-pie {
@@ -289,10 +289,10 @@ async function handleLogin() {
   position: absolute;
   left: 50%;
   transform: translateX(-50%) rotateX(65deg);
-  border: 1.5px solid rgba(147, 197, 253, 0.35);
+  border: 1.5px solid color-mix(in srgb, var(--brand) 35%, transparent);
   border-radius: 14px;
-  background: linear-gradient(180deg, rgba(219, 234, 254, 0.55) 0%, rgba(191, 219, 254, 0.3) 100%);
-  box-shadow: 0 6px 24px rgba(59, 130, 246, 0.08);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand-soft) 75%, transparent) 0%, color-mix(in srgb, var(--brand-soft) 45%, transparent) 100%);
+  box-shadow: 0 6px 24px var(--brand-ring);
 }
 /* 四层从下到上，逐层缩小并上移 */
 .gl4 { width: 200px; height: 24px; bottom: 0; }
@@ -322,15 +322,15 @@ async function handleLogin() {
   backface-visibility: hidden;
 }
 .ctop {
-  background: linear-gradient(145deg, #60A5FA, #3B82F6);
+  background: linear-gradient(145deg, var(--brand-hover), var(--brand));
   transform: translateZ(32px);
 }
 .cfront {
-  background: linear-gradient(180deg, #2563EB, #1D4ED8);
+  background: linear-gradient(180deg, var(--brand-hover), var(--brand-active));
   transform: rotateX(90deg) translateZ(32px);
 }
 .cright {
-  background: linear-gradient(180deg, #1E40AF, #1E3A8A);
+  background: linear-gradient(180deg, var(--brand-active), var(--brand-active));
   transform: rotateY(90deg) translateZ(32px);
 }
 
@@ -341,7 +341,7 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   padding: 48px;
-  background: #FFFFFF;          /* 白底 */
+  background: var(--bg-surface);          /* 白底 */
 }
 
 /* 登录卡片 — 浅色白底 */
@@ -349,21 +349,21 @@ async function handleLogin() {
   width: 380px;
   padding: 44px 38px 36px;
   border-radius: 16px;
-  background: #FFFFFF;         /* 白底！不是暗底 */
-  border: 1px solid #E2E8F0;
-  box-shadow: 0 4px 24px rgba(148, 163, 184, 0.12);
+  background: var(--bg-surface);         /* 白底！不是暗底 */
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 24px var(--shadow-float);
 }
 .card-title {
   text-align: center;
   font-size: 21px;
   font-weight: 700;
-  color: #1E293B;             /* 深色标题 */
+  color: var(--text-primary);             /* 深色标题 */
   margin: 0 0 6px 0;
 }
 .card-sub {
   text-align: center;
   font-size: 13px;
-  color: #94A3B8;             /* 灰色副标题 */
+  color: var(--text-tertiary);             /* 灰色副标题 */
   margin: 0 0 30px 0;
 }
 
@@ -388,7 +388,7 @@ async function handleLogin() {
 .ficon {
   position: absolute;
   left: 13px;
-  color: #94A3B8;
+  color: var(--text-tertiary);
   pointer-events: none;
   z-index: 1;
 }
@@ -397,21 +397,21 @@ async function handleLogin() {
   height: 44px;
   padding: 0 14px 0 40px;
   font-size: 13.5px;
-  color: #1E293B;
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  color: var(--text-primary);
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   outline: none;
   transition: all 0.2s ease;
   box-sizing: border-box;
 }
 .finp::placeholder {
-  color: #94A3B8;
+  color: var(--text-tertiary);
 }
 .finp:focus {
-  border-color: #3B82F6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
-  background: #FFFFFF;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+  background: var(--bg-surface);
 }
 
 .eye-btn {
@@ -425,12 +425,12 @@ async function handleLogin() {
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: #94A3B8;
+  color: var(--text-tertiary);
   cursor: pointer;
 }
 .eye-btn:hover {
-  background: #F1F5F9;
-  color: #64748B;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
 }
 
 /* 记住密码 + 忘记密码 */
@@ -445,22 +445,22 @@ async function handleLogin() {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: #64748B;
+  color: var(--text-secondary);
   cursor: pointer;
 }
 .cbl input[type='checkbox'] {
-  accent-color: #3B82F6;
+  accent-color: var(--brand);
   width: 15px;
   height: 15px;
 }
 .flink {
   font-size: 13px;
-  color: #3B82F6;
+  color: var(--brand);
   text-decoration: none;
 }
 .flink:hover {
   text-decoration: underline;
-  color: #2563EB;
+  color: var(--brand-hover);
 }
 
 /* 登录按钮 */
@@ -469,8 +469,8 @@ async function handleLogin() {
   height: 46px;
   font-size: 15px;
   font-weight: 600;
-  color: #fff;
-  background: linear-gradient(135deg, #3B82F6, #2563EB);
+  color: var(--text-on-brand);
+  background: linear-gradient(135deg, var(--brand), var(--brand-hover));
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -478,8 +478,8 @@ async function handleLogin() {
   margin-top: 4px;
 }
 .btn-login:hover {
-  background: linear-gradient(135deg, #2563EB, #1D4ED8);
-  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.3);
+  background: linear-gradient(135deg, var(--brand-hover), var(--brand-active));
+  box-shadow: 0 4px 16px var(--brand-ring);
   transform: translateY(-1px);
 }
 .btn-login:active {
@@ -496,16 +496,16 @@ async function handleLogin() {
   text-align: center;
   margin-top: 22px;
   font-size: 13px;
-  color: #94A3B8;
+  color: var(--text-tertiary);
 }
 .rlink {
-  color: #3B82F6;
+  color: var(--brand);
   font-weight: 500;
   text-decoration: none;
   margin-left: 4px;
 }
 .rlink:hover {
   text-decoration: underline;
-  color: #2563EB;
+  color: var(--brand-hover);
 }
 </style>
