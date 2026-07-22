@@ -134,7 +134,7 @@ function onLogout() {
 }
 function goAccountSettings() {
   closeUserMenu()
-  router.push({ path: '/profile', query: { tab: 'system' } })
+  router.push({ path: '/profile', query: { tab: 'info' } })
 }
 
 const user = computed(() => auth.user)
