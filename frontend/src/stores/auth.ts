@@ -15,6 +15,8 @@ export interface CurrentUser {
   role: 'admin' | 'editor' | 'viewer'
   isActive: boolean
   createdAt: string | null
+  preferredModel: string | null
+  ttsEnabled: boolean
 }
 
 export const useAuthStore = defineStore('auth', () => {
@@ -47,6 +49,8 @@ export const useAuthStore = defineStore('auth', () => {
       role: (u.role as CurrentUser['role']) || 'viewer',
       isActive: u.isActive,
       createdAt: u.createdAt,
+      preferredModel: u.preferredModel ?? null,
+      ttsEnabled: u.ttsEnabled ?? false,
     }
   }
 

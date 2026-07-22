@@ -98,6 +98,7 @@ async def ask(
                 kb_id=req.knowledge_base,
                 session_id=req.session_id,
                 files=[f.model_dump(by_alias=False) for f in req.files] or None,
+                model=user.preferred_model,
             ):
                 # 客户端断开（用户点了「停止」）→ 优雅退出，不再继续烧 LLM 算力
                 if await request.is_disconnected():

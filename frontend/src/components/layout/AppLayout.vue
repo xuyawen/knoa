@@ -1,14 +1,61 @@
 <script setup lang="ts">
 // 布局壳：顶部水平导航栏（logo+主导航+用户）+ 左侧页面子菜单 + 右侧主内容。
 // 按 6 张目标 UI 截图 1:1 还原。
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { getAnnouncements, markAnnouncementRead } from '@/api'
+import type { Announcement } from '@/types/api'
 import Icon from '@/components/ui/Icon.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
+
+/* ---------- 通知中心（P8）---------- */
+const announcements = ref<Announcement[]>([])
+const notifyOpen = ref(false)
+const notifyLoading = ref(false)
+
+const unreadCount = computed(() => announcements.value.filter((a) => !a.read).length)
+
+async function loadAnnouncements() {
+  notifyLoading.value = true
+  try {
+    announcements.value = await getAnnouncements()
+  } catch {
+    announcements.value = []
+  } finally {
+    notifyLoading.value = false
+  }
+}
+
+function toggleNotify() {
+  notifyOpen.value = !notifyOpen.value
+  if (notifyOpen.value && !announcements.value.length) loadAnnouncements()
+}
+
+async function markRead(a: Announcement) {
+  if (a.read) return
+  // 乐观更新，避免等待
+  a.read = true
+  try {
+    await markAnnouncementRead(a.id)
+  } catch {
+    a.read = false
+  }
+}
+
+function closeNotify() {
+  notifyOpen.value = false
+}
+
+function goAnnouncements() {
+  closeNotify()
+  router.push('/dashboard/announcements')
+}
+
+onMounted(loadAnnouncements)
 
 /* ---------- 顶部主导航 ---------- */
 const topNavItems = [
@@ -90,7 +137,7 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
 </script>
 
 <template>
-  <div class="layout" @click.self="closeUserMenu">
+  <div class="layout" @click.self="closeUserMenu(); closeNotify()">
     <!-- ====== 顶部水平导航栏 ====== -->
     <header class="topbar">
       <!-- 左：品牌 -->
@@ -113,10 +160,40 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
       <!-- 右：操作区 -->
       <div class="topbar-right">
         <!-- 通知铃铛 + badge -->
-        <button class="icon-btn notify-btn" title="通知">
-          <Icon name="bell" :size="18" />
-          <span class="notify-badge">1</span>
-        </button>
+        <div class="notify-wrap">
+          <button class="icon-btn notify-btn" title="通知" @click.stop="toggleNotify">
+            <Icon name="bell" :size="18" />
+            <span v-if="unreadCount" class="notify-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+          </button>
+
+          <!-- 通知下拉 -->
+          <div v-if="notifyOpen" class="notify-dropdown" @click.stop>
+            <div class="notify-head">
+              <span>通知</span>
+              <button class="notify-link" @click="goAnnouncements">查看全部</button>
+            </div>
+            <div class="notify-body">
+              <div v-if="notifyLoading" class="notify-loading">
+                <Icon name="loader" :size="14" class="spin" /> 加载中…
+              </div>
+              <div v-else-if="!announcements.length" class="notify-empty">暂无通知</div>
+              <button
+                v-for="a in announcements"
+                :key="a.id"
+                class="notify-item"
+                :class="{ unread: !a.read }"
+                @click="markRead(a)"
+              >
+                <span class="ni-dot" :class="`lvl-${a.level}`" />
+                <span class="ni-text">
+                  <span class="ni-title">{{ a.title }}</span>
+                  <span class="ni-content">{{ a.content }}</span>
+                </span>
+                <Icon v-if="!a.read" name="check" :size="14" class="ni-mark" />
+              </button>
+            </div>
+          </div>
+        </div>
 
         <!-- 全局搜索 -->
         <div class="topbar-search">
@@ -134,7 +211,7 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
             <a class="dd-item" href="#" @click.prevent="router.push('/profile')">
               <Icon name="user" :size="16" />个人中心
             </a>
-            <a class="dd-item" href="#" @click.prevent="router.push('/permission')">
+            <a class="dd-item" href="#" @click.prevent="router.push('/settings')">
               <Icon name="settings" :size="16" />账号设置
             </a>
             <div class="dd-divider" />
@@ -259,6 +336,7 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
 }
 
 /* 通知铃铛 */
+.notify-wrap { position: relative; }
 .notify-btn {
   position: relative;
 }
@@ -280,6 +358,88 @@ const userInitial = computed(() => user.value?.name?.[0] ?? '管')
   line-height: 1;
   border: 2px solid var(--bg-surface);
 }
+
+/* 通知下拉 */
+.notify-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 340px;
+  max-height: 420px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  animation: fade-up 0.15s ease both;
+  overflow: hidden;
+}
+.notify-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+}
+.notify-link {
+  border: none;
+  background: transparent;
+  color: var(--brand);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.notify-body { overflow-y: auto; padding: 6px; }
+.notify-loading, .notify-empty {
+  padding: 28px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+.notify-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--dur-fast);
+}
+.notify-item:hover { background: var(--bg-hover); }
+.notify-item.unread { background: var(--brand-soft); }
+.ni-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+  background: var(--text-tertiary);
+}
+.ni-dot.lvl-info { background: var(--brand); }
+.ni-dot.lvl-warning { background: #f59e0b; }
+.ni-dot.lvl-error { background: var(--danger); }
+.ni-dot.lvl-success { background: var(--success); }
+.ni-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.ni-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.ni-content {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ni-mark { color: var(--brand); flex-shrink: 0; margin-top: 3px; }
 
 /* 顶部全局搜索 */
 .topbar-search {

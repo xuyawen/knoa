@@ -38,6 +38,8 @@ from app.routers import (
     sources,
     tasks,
     trending,
+    settings as settings_router,
+    tts as tts_router,
 )
 
 
@@ -180,6 +182,8 @@ app.include_router(sessions.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
 app.include_router(metrics.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
+app.include_router(settings_router.router, prefix="/api")
+app.include_router(tts_router.router, prefix="/api")
 app.include_router(graph.router, prefix="/api")
 app.include_router(departments.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")

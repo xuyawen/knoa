@@ -34,6 +34,8 @@ def _to_out(u: User) -> UserOut:
         role=u.role,
         is_active=u.is_active,
         created_at=u.created_at,
+        preferred_model=u.preferred_model,
+        tts_enabled=u.tts_enabled,
     )
 
 

@@ -18,6 +18,8 @@ class UserOut(CamelModel):
     role: str                                   # admin | editor | viewer
     is_active: bool = True
     created_at: datetime | None = None
+    preferred_model: str | None = None          # P8：偏好问答模型（透传进 ask 管线）
+    tts_enabled: bool = False                   # P8：是否启用语音播报
 
 
 class TokenOut(CamelModel):

@@ -98,6 +98,14 @@ class Settings(BaseSettings):
     COOKIE_NAME: str = "knoa_token"
     COOKIE_SECURE: bool = True      # 仅 HTTPS 传输；本地 http 开发可设为 false
     COOKIE_SAMESITE: str = "lax"
+    # 腾讯云 TTS（语音播报；httpx 直连 + 手写 TC3 签名，不引第三方 SDK）
+    # 留空则 /api/tts 优雅降级返回 503，前端朗读按钮自动隐藏
+    TENCENT_TTS_SECRET_ID: str = ""
+    TENCENT_TTS_SECRET_KEY: str = ""
+    TENCENT_TTS_REGION: str = "ap-guangzhou"
+    TTS_VOICE_TYPE: int = 1004       # 1002 成熟男声 | 1004 温润女声 | 1050 新闻女声
+    TTS_CODEC: str = "mp3"           # mp3 便于长文本分块拼接（帧级可追加）
+    TTS_SAMPLE_RATE: int = 16000
     LOG_LEVEL: str = "INFO"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

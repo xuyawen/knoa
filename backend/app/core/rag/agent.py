@@ -50,6 +50,7 @@ from app.config import settings
 from app.core.llm.base import ToolCallResult
 from app.core.memory import MemoryStore
 from app.core.rag.retriever import HybridRetriever
+from app.core.metrics import record_ask_trace
 from app.core.rag.web_search import WebSearcher
 from app.core.store.redis_store import RedisStore
 from app.database import AsyncSessionLocal
@@ -294,6 +295,7 @@ class AgenticRAGAgent:
         self._memories: list[str] = []  # 本轮召回的该用户长期记忆
         self._graph_chunks: list[dict] = []  # 本轮图检索召回的相关 chunk
         self._summary_text: str = ""  # 本轮会话的滚动摘要文本（注入 system）
+        self._model_override: str | None = None  # 用户偏好模型（settings.preferred_model）
 
     async def _classify_intent(self, question: str) -> "str | None":
         """LLM 意图分类（greeting/web_search/simple/complex）。
@@ -340,8 +342,18 @@ class AgenticRAGAgent:
         kb_id: str | None = None,
         session_id: str | None = None,
         files: "list[dict] | None" = None,
+        model: str | None = None,
     ) -> AsyncIterator[dict]:
-        """主入口：返回 SSE 兼容的事件流。"""
+        """主入口：返回 SSE 兼容的事件流。
+
+        model: 用户偏好模型（settings.preferred_model）透传，覆盖实例默认；
+        为空则用 config.LLM_MODEL。意图分类/滚动摘要等内部短调用仍走默认模型。
+        """
+        self._model_override = model
+        t0 = time.perf_counter()
+        intent = "simple"
+        retrieved = 0
+        graph_used = False
         try:
             # ---- 会话 & 持久化 ----
             session = await self._get_or_create_session(session_id, question)
@@ -494,12 +506,35 @@ class AgenticRAGAgent:
             except Exception:
                 pass
 
+            # ── 问答链路追踪：耗时 + 召回块数 + 是否触发图谱 + 意图 + 模型 ──
+            intent = st.intent
+            retrieved = len(st.all_sources)
+            graph_used = st.use_multihop
+            record_ask_trace(
+                latency=time.perf_counter() - t0,
+                retrieved=retrieved,
+                graph_used=graph_used,
+                intent=intent,
+                model=self._model_override or settings.LLM_MODEL,
+                tokens_est=max(0, len(final_answer_text) // 2),
+                is_error=False,
+            )
+
             yield {
                 "event": "done",
                 "data": {"messageId": str(assistant_msg.id), "citations": citations, "sessionId": str(session.id)},
             }
 
         except Exception as e:
+            record_ask_trace(
+                latency=time.perf_counter() - t0,
+                retrieved=retrieved,
+                graph_used=graph_used,
+                intent=intent,
+                model=self._model_override or settings.LLM_MODEL,
+                tokens_est=0,
+                is_error=True,
+            )
             yield {"event": "error", "data": {"message": str(e)}}
 
     # ------------------------------------------------------------------
@@ -731,7 +766,7 @@ class AgenticRAGAgent:
                 ),
             })
         full_answer = ""
-        async for delta in self.llm.stream_chat(final_messages):
+        async for delta in self.llm.stream_chat(final_messages, model=self._model_override):
             full_answer += delta
             yield {"event": "delta", "data": {"content": delta}}
         st.final_answer_text = full_answer
@@ -756,7 +791,7 @@ class AgenticRAGAgent:
                 *list(st.messages)[1:],  # 跳过 system，保留 history + user(含图)
             ]
             try:
-                st.final_answer_text = await self.llm.chat(quick_msgs)
+                st.final_answer_text = await self.llm.chat(quick_msgs, model=self._model_override)
             except Exception:
                 st.final_answer_text = "好的，收到！"
             yield {"event": "delta", "data": {"content": st.final_answer_text}}
@@ -785,7 +820,7 @@ class AgenticRAGAgent:
             {"role": "user", "content": user_content},
         ]
         full_answer = ""
-        async for delta in self.llm.stream_chat(quick_messages):
+        async for delta in self.llm.stream_chat(quick_messages, model=self._model_override):
             full_answer += delta
             yield {"event": "delta", "data": {"content": delta}}
         st.final_answer_text = full_answer

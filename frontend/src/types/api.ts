@@ -232,6 +232,8 @@ export interface UserOut {
   role: string         // admin | editor | viewer
   isActive: boolean
   createdAt: string | null
+  preferredModel?: string | null    // P8：偏好问答模型
+  ttsEnabled?: boolean              // P8：是否启用语音播报
 }
 
 export interface TokenOut {
@@ -326,6 +328,7 @@ export interface Announcement {
   level: 'info' | 'warning' | 'success' | 'error'
   pinned: boolean
   createdAt: string
+  read?: boolean
 }
 
 export interface AnnouncementCreate {
@@ -340,6 +343,23 @@ export interface AnnouncementUpdate {
   content?: string
   level?: 'info' | 'warning' | 'success' | 'error'
   pinned?: boolean
+}
+
+/** 系统设置（个人偏好）。P8 新增。 */
+export interface Settings {
+  preferredModel: string | null   // 偏好问答模型；null=使用系统默认
+  ttsEnabled: boolean             // 是否启用语音播报
+}
+
+export interface SettingsUpdate {
+  preferredModel?: string | null
+  ttsEnabled?: boolean
+}
+
+/** 语音合成结果：base64 音频 + MIME 类型，前端拼 data URI 播放。P8 新增。 */
+export interface TtsResult {
+  audio: string
+  contentType: string
 }
 
 /** 部门树节点（递归 children）。P5 部门筛选使用。 */

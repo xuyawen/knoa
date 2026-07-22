@@ -34,11 +34,16 @@ class OpenAICompatProvider:
         messages: list[dict[str, Any]],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        model: str | None = None,
     ) -> AsyncIterator[str]:
-        """兼容多提供商流式输出，安全地提取 content + reasoning_content"""
+        """兼容多提供商流式输出，安全地提取 content + reasoning_content。
+
+        model 覆盖参数：用户偏好模型（settings.preferred_model）透传时生效，
+        为空则回落实例默认模型（config.LLM_MODEL）。
+        """
         try:
             stream = await self.client.chat.completions.create(
-                model=self.model,
+                model=model or self.model,
                 messages=messages,
                 temperature=temperature or self.default_temperature,
                 max_tokens=max_tokens or self.max_tokens,
@@ -71,11 +76,14 @@ class OpenAICompatProvider:
                 yield content
 
     async def chat(
-        self, messages: list[dict[str, Any]], temperature: float | None = None
+        self,
+        messages: list[dict[str, Any]],
+        temperature: float | None = None,
+        model: str | None = None,
     ) -> str:
         """非流式调用"""
         response = await self.client.chat.completions.create(
-            model=self.model,
+            model=model or self.model,
             messages=messages,
             temperature=temperature or self.default_temperature,
             max_tokens=self.max_tokens,

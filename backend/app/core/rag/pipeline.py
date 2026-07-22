@@ -61,6 +61,7 @@ class RAGPipeline:
         kb_id: str | None = None,
         session_id: str | None = None,
         files: "list[dict] | None" = None,
+        model: str | None = None,
     ) -> AsyncIterator[dict]:
         """流式回答 — 事件格式与前端 SSE 消费端兼容。
 
@@ -70,6 +71,10 @@ class RAGPipeline:
           delta      — 流式回答文本片段
           done       — 完成（含 messageId / citations / sessionId）
           error      — 错误信息
+
+        model: 用户偏好模型（settings.preferred_model）透传；为空用默认。
         """
-        async for event in self._agent.stream_answer(question, kb_id, session_id, files=files):
+        async for event in self._agent.stream_answer(
+            question, kb_id, session_id, files=files, model=model
+        ):
             yield event

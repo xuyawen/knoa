@@ -15,6 +15,7 @@ import Chat from '@/views/Chat.vue'
 import Graph from '@/views/Graph.vue'
 import Permission from '@/views/Permission.vue'
 import Profile from '@/views/Profile.vue'
+import Settings from '@/views/Settings.vue'
 import NotFound from '@/views/NotFound.vue'
 
 // 子菜单分区 -> 路由段 + 默认 section
@@ -61,6 +62,7 @@ const routes: RouteRecordRaw[] = [
       // ===== 其它一级页 =====
       { path: 'permission', name: 'permission', component: Permission, meta: { title: '权限管理', icon: 'shield' } },
       { path: 'profile', name: 'profile', component: Profile, meta: { title: '个人中心', icon: 'user' } },
+      { path: 'settings', name: 'settings', component: Settings, meta: { title: '系统设置', icon: 'settings' } },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFound },

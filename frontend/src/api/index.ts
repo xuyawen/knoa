@@ -22,6 +22,9 @@ import type {
   Announcement,
   AnnouncementCreate,
   AnnouncementUpdate,
+  Settings,
+  SettingsUpdate,
+  TtsResult,
   DocStats,
   DepartmentNode,
   DocumentTaskOut,
@@ -529,6 +532,53 @@ export async function deleteAnnouncement(id: string): Promise<void> {
     const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
     throw new Error(err.detail || `HTTP ${resp.status}`)
   }
+}
+
+/** 标记某公告为已读（幂等 upsert）。P8 通知中心使用。 */
+export async function markAnnouncementRead(id: string): Promise<void> {
+  const resp = await fetch(`/api/announcements/${id}/read`, {
+    method: 'POST',
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+}
+
+/** 读取个人系统设置（preferredModel / ttsEnabled）。P8 新增。 */
+export async function getSettings(): Promise<Settings> {
+  const resp = await fetch('/api/settings', { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 更新个人系统设置。P8 新增。 */
+export async function updateSettings(payload: SettingsUpdate): Promise<Settings> {
+  const resp = await fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+/** 文本转语音：返回 base64 音频 + contentType。前端拼 data URI 播放。P8 新增。 */
+export async function ttsSpeak(text: string): Promise<TtsResult> {
+  const resp = await fetch('/api/tts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ text }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
 }
 
 /** 部门树（嵌套）。P5 部门筛选使用。 */

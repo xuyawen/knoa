@@ -140,6 +140,10 @@ class User(Base):
     # 全局角色：admin(管用户+全部库) | editor(建库/传文档) | viewer(仅问答)
     role: Mapped[str] = mapped_column(String(20), default="viewer", server_default="viewer")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # 系统设置：用户偏好的问答模型（透传给 ask→pipeline→agent→llm）；为空走默认
+    preferred_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 语音播报开关：前端朗读按钮是否可用
+    tts_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     @staticmethod
@@ -287,3 +291,12 @@ class Announcement(Base):
     level: Mapped[str] = mapped_column(String(20), default="info", server_default="info")  # info|warn|critical
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class UserAnnouncementRead(Base):
+    """公告已读记录（通知中心）。复合主键 (user_id, announcement_id) 天然去重。"""
+    __tablename__ = "user_announcement_read"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), primary_key=True)
+    announcement_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("announcement.id"), primary_key=True)
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

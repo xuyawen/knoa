@@ -5,6 +5,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
 import { useToastStore } from '@/stores/toast'
+import { useAuthStore } from '@/stores/auth'
 import {
   getSessions,
   createSession,
@@ -13,6 +14,7 @@ import {
   streamAsk,
   submitFeedback,
   deleteFeedback,
+  ttsSpeak,
 } from '@/api'
 import type {
   ChatSession,
@@ -25,6 +27,24 @@ import type {
 
 const toast = useToastStore()
 const router = useRouter()
+const auth = useAuthStore()
+
+// 语音播报（P8）：朗读某条 AI 回答
+const playingId = ref<string | null>(null)
+let audioEl: HTMLAudioElement | null = null
+async function speak(m: ChatMessage) {
+  if (!m.content || playingId.value) return
+  playingId.value = m.id
+  try {
+    const { audio, contentType } = await ttsSpeak(m.content)
+    audioEl = new Audio(`data:${contentType};base64,${audio}`)
+    audioEl.onended = () => { playingId.value = null; audioEl = null }
+    await audioEl.play()
+  } catch (e) {
+    playingId.value = null
+    toast.error(e instanceof Error ? e.message : '语音播报失败')
+  }
+}
 
 const props = defineProps<{ section?: string }>()
 const section = computed(() => props.section ?? 'new')
@@ -418,6 +438,15 @@ watch(messages, scrollToBottom, { deep: false })
               <!-- 反馈 + 错误 -->
               <div v-if="errorMsg && !m.content" class="answer-error">{{ errorMsg }}</div>
               <div v-if="m.messageId && m.content" class="feedback-row">
+                <button
+                  v-if="auth.user?.ttsEnabled"
+                  class="fb-btn"
+                  :class="{ on: playingId === m.id }"
+                  @click="speak(m)"
+                  :title="playingId === m.id ? '播报中…' : '朗读回答'"
+                >
+                  <Icon :name="playingId === m.id ? 'loader' : 'volume'" :size="14" :class="{ spin: playingId === m.id }" />
+                </button>
                 <button class="fb-btn" :class="{ on: m.feedback === 'up' }" @click="onFeedback(m, 'up')" title="有用">
                   <Icon name="check" :size="14" />
                 </button>
