@@ -274,6 +274,12 @@ export interface DocCategory {
   count: number
 }
 
+export interface DocStats {
+  total: number
+  byCategory: DocCategory[]
+  byStatus: { status: string; count: number }[]
+}
+
 export interface OperationLogItem {
   id: string
   userId: string | null

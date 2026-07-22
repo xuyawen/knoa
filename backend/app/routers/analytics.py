@@ -84,16 +84,16 @@ async def dashboard(
 
 @router.get("/analytics/trend")
 async def trend(
-    range: str = Query("week", pattern="^(today|week|month)$"),
+    period: str = Query("week", alias="range", pattern="^(today|week|month)$"),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """按时间桶聚合问答次数（真实数据源：OperationLog.action='ask'）。"""
     now = datetime.now(timezone.utc)
-    if range == "today":
+    if period == "today":
         buckets, step, fmt = 24, timedelta(hours=1), "%H:00"
         start = now - timedelta(hours=23)
-    elif range == "month":
+    elif period == "month":
         buckets, step, fmt = 30, timedelta(days=1), "%m-%d"
         start = now - timedelta(days=29)
     else:  # week
@@ -115,7 +115,7 @@ async def trend(
             )
         ) or 0
         points.append({"date": label, "aiAnswers": cnt, "searches": cnt})
-    return {"range": range, "labels": labels, "points": points}
+    return {"range": period, "labels": labels, "points": points}
 
 
 @router.get("/analytics/doc-category")
@@ -130,3 +130,27 @@ async def doc_category(
         .order_by(func.count().desc())
     )).all()
     return [{"category": (r[0] or "未分类"), "count": r[1]} for r in rows]
+
+
+@router.get("/analytics/doc-stats")
+async def doc_stats(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """文档统计：按 category / status 聚合（文档统计分区真实数据源）。"""
+    by_cat = (await db.execute(
+        select(Document.category, func.count())
+        .group_by(Document.category)
+        .order_by(func.count().desc())
+    )).all()
+    by_status = (await db.execute(
+        select(Document.status, func.count())
+        .group_by(Document.status)
+        .order_by(func.count().desc())
+    )).all()
+    total = await db.scalar(select(func.count()).select_from(Document)) or 0
+    return {
+        "total": total,
+        "byCategory": [{"category": (r[0] or "未分类"), "count": r[1]} for r in by_cat],
+        "byStatus": [{"status": (r[0] or "未知"), "count": r[1]} for r in by_status],
+    }

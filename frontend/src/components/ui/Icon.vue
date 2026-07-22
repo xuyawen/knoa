@@ -14,7 +14,7 @@ import {
   Flame, Clock, History, List, Globe, UsersRound, CircleDot, Link2, PanelLeftClose,
   Maximize2, Paperclip, Send, Copy, ArrowDownToLine, AppWindow, Star, Tag, Calendar, Sparkles,
   Info, Heart,
-  ArrowUpRight, ArrowDownRight,
+  ArrowUpRight, ArrowDownRight, Pin, UserPlus,
 } from 'lucide-vue-next'
 
 const props = defineProps<{ name: string; size?: number | string }>()
@@ -35,6 +35,7 @@ const ICONS: Record<string, Component> = {
   listview: List, star: Star, tag: Tag, calendar: Calendar, sparkles: Sparkles,
   info: Info, heart: Heart, warning: AlertTriangle,
   'arrow-up-right': ArrowUpRight, 'arrow-down-right': ArrowDownRight,
+  pin: Pin, 'user-plus': UserPlus,
 }
 
 const comp = computed(() => ICONS[props.name] ?? AlertTriangle)

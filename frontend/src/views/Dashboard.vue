@@ -1,72 +1,67 @@
 <script setup lang="ts">
 // 首页大盘 — 参考 640(2).png 原型：5 指标卡（带涨跌）+ 趋势折线图 + 分类饼图 + 操作记录
-// 数据来源：knowledge store（真实）+ 模拟趋势/操作记录（后端未接入）
-import { computed, onMounted, ref } from 'vue'
+// P2 真实化：指标/趋势/饼图/操作记录/公告/文档统计/用户统计 全部来自后端接口，0 硬编码随机。
+import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import Icon from '@/components/ui/Icon.vue'
-import ComingSoon from '@/components/ui/ComingSoon.vue'
+import {
+  getDashboardMetrics, getTrend, getDocCategory, getOperations, getAnnouncements, getUsers, getDocStats,
+} from '@/api'
+import type {
+  DashboardMetrics, TrendResponse, DocCategory, DocStats,
+  OperationsResponse, OperationLogItem, Announcement, UserOut,
+} from '@/types/api'
 
 const kb = useKnowledgeStore()
 const { bases, health, trending } = storeToRefs(kb)
-
 const props = defineProps<{ section?: string }>()
 const section = computed(() => props.section ?? 'overview')
 
-onMounted(() => { if (!kb.loaded) kb.load() })
-
-// ── 真实指标 ──
+// 真实指标（知识库文档数合计，用于文档统计分区兜底）
 const totalDocs = computed(() => bases.value.reduce((s, b) => s + b.documentCount, 0))
-const pendingDocs = computed(() => bases.value.reduce((s, b) => s + b.pendingCount, 0))
 
-// ── 5 项指标卡（参考原型 #2）──
-const statCards = computed(() => [
-  {
-    icon: 'doc', color: '#3b82f6', bg: 'rgba(59,130,246,0.10)',
-    label: '文档总数', value: totalDocs.value.toLocaleString(),
-    delta: '+320', up: true,
-  },
-  {
-    icon: 'plus', color: '#06b6d4', bg: 'rgba(6,182,212,0.10)',
-    label: '今日新增文档', value: String(pendingDocs.value || Math.floor(Math.random() * 20) + 1),
-    delta: '+15', up: true,
-  },
-  {
-    icon: 'sparkles', color: '#8b5cf6', bg: 'rgba(139,92,246,0.10)',
-    label: 'AI 问答次数', value: '2,345',
-    delta: '+234', up: true,
-  },
-  {
-    icon: 'search', color: '#3b82f6', bg: 'rgba(59,130,246,0.10)',
-    label: '用户搜索次数', value: '8,765',
-    delta: '+567', up: true,
-  },
-  {
-    icon: 'users', color: '#8b5cf6', bg: 'rgba(139,92,246,0.10)',
-    label: '活跃用户数', value: '1,234',
-    delta: '+123', up: true,
-  },
-])
+// ── 指标卡：真实 Dashboard 指标 ──
+const metrics = ref<DashboardMetrics | null>(null)
+async function loadMetrics() {
+  metrics.value = await getDashboardMetrics()
+}
+const statCards = computed(() => {
+  const m = metrics.value
+  if (!m) return []
+  const d = m.deltas
+  return [
+    { icon: 'doc', color: '#3b82f6', bg: 'rgba(59,130,246,0.10)', label: '文档总数', value: m.totalDocs.toLocaleString(), delta: pct(d.totalDocs), up: d.totalDocs >= 0 },
+    { icon: 'plus', color: '#06b6d4', bg: 'rgba(6,182,212,0.10)', label: '今日新增文档', value: String(m.todayNewDocs), delta: pct(d.todayNewDocs), up: d.todayNewDocs >= 0 },
+    { icon: 'sparkles', color: '#8b5cf6', bg: 'rgba(139,92,246,0.10)', label: 'AI 问答次数', value: m.aiAnswers.toLocaleString(), delta: pct(d.aiAnswers), up: d.aiAnswers >= 0 },
+    { icon: 'search', color: '#3b82f6', bg: 'rgba(59,130,246,0.10)', label: '用户搜索次数', value: m.userSearches.toLocaleString(), delta: pct(d.userSearches), up: d.userSearches >= 0 },
+    { icon: 'users', color: '#8b5cf6', bg: 'rgba(139,92,246,0.10)', label: '活跃用户数', value: String(m.activeUsers), delta: pct(d.activeUsers), up: d.activeUsers >= 0 },
+  ]
+})
+function pct(v: number): string {
+  const s = v > 0 ? '+' : ''
+  return `${s}${v.toFixed(1)}%`
+}
 
-// ── 饼图：文档分类占比 ──
+// ── 饼图：文档分类占比（真实，来自 getDocCategory）──
 const CIRC = 2 * Math.PI * 46
-const pieTotal = computed(() => totalDocs.value)
+const categories = ref<DocCategory[]>([])
+async function loadCategories() { categories.value = await getDocCategory() }
+const pieTotal = computed(() => categories.value.reduce((s, c) => s + c.count, 0) || 0)
 const pieData = computed(() => {
   const total = pieTotal.value || 1
   let acc = 0
-  const palette = [1, 2, 3, 4, 5]
-  return bases.value.map((b, i) => {
-    const v = b.documentCount
-    const frac = v / total
+  return categories.value.map((c, i) => {
+    const frac = c.count / total
     const len = frac * CIRC
     const dash = `${len.toFixed(1)} ${(CIRC - len).toFixed(1)}`
     const offset = (-acc * CIRC).toFixed(1)
     acc += frac
-    return { label: b.name, value: v, pct: (frac * 100).toFixed(1), seg: palette[i % 5], dash, offset }
+    return { label: c.category, value: c.count, pct: (frac * 100).toFixed(1), seg: (i % 5) + 1, dash, offset }
   })
 })
 
-// ── 热门搜索榜（真实）──
+// ── 热门搜索榜（真实，来自 knowledge store / getTrending）──
 const topTrending = computed(() => trending.value.slice(0, 8))
 
 // ── 健康概览行（真实）──
@@ -79,30 +74,20 @@ const healthRows = computed(() =>
   })),
 )
 
-// ── 趋势折线图数据（模拟，后端待接入）──
+// ── 趋势折线图（真实，来自 getTrend；overview 与 访问分析 共用）──
 type TrendRange = 'today' | 'week' | 'month'
 const trendRange = ref<TrendRange>('today')
-// 模拟 24 小时 / 7 天 / 30 天的数据点
-function genTrendPoints(n: number, base: number, variance: number) {
-  const pts: number[] = []
-  let v = base
-  for (let i = 0; i < n; i++) {
-    v += (Math.random() - 0.35) * variance
-    v = Math.max(base * 0.15, v)
-    pts.push(Math.round(v))
-  }
-  return pts
-}
-const trendMap = computed<Record<TrendRange, { points: number[]; labels: string[]; max: number }>>(() => ({
-  today:   { points: genTrendPoints(24, 80, 60), labels: Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2,'0')}:00`), max: 1800 },
-  week:    { points: genTrendPoints(7, 400, 200), labels: ['周一','周二','周三','周四','周五','周六','周日'], max: 1200 },
-  month:   { points: genTrendPoints(30, 350, 180), labels: Array.from({ length: 30 }, (_, i) => `${i + 1}日`), max: 1000 },
-}))
-const activeTrend = computed(() => trendMap.value[trendRange.value])
+const trendData = ref<TrendResponse | null>(null)
+async function loadTrend(range: TrendRange) { trendData.value = await getTrend(range) }
+watch(trendRange, (r) => { void loadTrend(r) })
+const activeTrend = computed(() => {
+  const t = trendData.value
+  if (!t) return { points: [] as number[], labels: [] as string[], max: 1 }
+  const pts = t.points.map((p) => p.aiAnswers)
+  return { points: pts, labels: t.labels, max: Math.max(1, ...pts) }
+})
 const chartH = 220
 const chartW = 520
-
-// SVG 折线路径
 function buildPath(points: number[], max: number): string {
   if (!points.length) return ''
   const stepX = chartW / (points.length - 1 || 1)
@@ -115,14 +100,11 @@ function buildPath(points: number[], max: number): string {
   }).join(' ')
 }
 const linePath = computed(() => buildPath(activeTrend.value.points, activeTrend.value.max))
-// 渐变区域路径（闭合）
 const areaPath = computed(() => {
   const p = linePath.value
   if (!p) return ''
-  const lastX = chartW
-  return `${p} L ${lastX.toFixed(1)} ${chartH} L 0 ${chartH} Z`
+  return `${p} L ${chartW.toFixed(1)} ${chartH} L 0 ${chartH} Z`
 })
-// 数据点坐标
 const dotCoords = computed(() =>
   activeTrend.value.points.map((v, i) => {
     const stepX = chartW / (activeTrend.value.points.length - 1 || 1)
@@ -131,19 +113,87 @@ const dotCoords = computed(() =>
   }),
 )
 
-// ── 操作记录（模拟）──
-const activityLog = ref([
-  { time: '2024-05-20 14:30:25', user: '张三', type: '上传文档', content: '上传了文档《产品使用手册.pdf》', file: '产品使用手册.pdf' },
-  { time: '2024-05-20 14:25:10', user: '李四', type: '更新文档', content: '更新了文档《企业安全管理制度.docx》', file: '企业安全管理制度.docx' },
-  { time: '2024-05-20 14:20:45', user: '王五', type: '删除文档', content: '删除了文档《旧版合同模板.docx》', file: '旧版合同模板.docx' },
-  { time: '2024-05-20 14:15:30', user: '赵六', type: '用户登录', content: '用户登录系统', file: '' },
-  { time: '2024-05-20 14:10:18', user: '孙七', type: 'AI 问答', content: '通过 AI 问答获取了答案', file: '' },
-])
-
-const ACT_ICONS: Record<string, string> = {
-  '上传文档': 'upload', '更新文件': 'edit', '删除文档': 'trash',
-  '更新文档': 'edit', '用户登录': 'user-circle', 'AI 问答': 'sparkles',
+// ── 操作记录（真实，来自 getOperations 分页）──
+const opsData = ref<OperationsResponse | null>(null)
+const opsPage = ref(1)
+async function loadOps(page = 1) {
+  opsPage.value = page
+  opsData.value = await getOperations(page, 20)
 }
+const activityLog = computed<Array<{ time: string; user: string; type: string; content: string; file: string; action: string }>>(() =>
+  (opsData.value?.items ?? []).map((o: OperationLogItem) => ({
+    time: fmtTime(o.createdAt),
+    user: o.displayName || (o.userId ? `用户${o.userId.slice(0, 8)}` : '未知用户'),
+    type: o.actionLabel,
+    content: o.detail || defaultContent(o.action),
+    file: o.relatedDocId ? `…${o.relatedDocId.slice(-8)}` : '',
+    action: o.action,
+  })),
+)
+function fmtTime(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+function defaultContent(action: string): string {
+  return ({ login: '登录系统', upload: '上传了文档', approve: '审核通过文档', reject: '审核驳回文档', delete: '删除了文档', ask: '发起了一次 AI 问答', download: '下载了文档' } as Record<string, string>)[action] ?? '执行了操作'
+}
+const ACT_ICONS: Record<string, string> = {
+  login: 'user-circle', upload: 'upload', approve: 'check', reject: 'close',
+  delete: 'trash', ask: 'sparkles', download: 'download',
+}
+
+// ── 文档统计分区（真实，来自 getDocCategory + doc-stats）──
+const docStats = ref<DocStats | null>(null)
+async function loadDocStats() { docStats.value = await getDocStats() }
+const docStatsTotal = computed(() => docStats.value?.total ?? 0)
+function byStatusCount(status: string): number {
+  return docStats.value?.byStatus?.find((s) => s.status === status)?.count ?? 0
+}
+
+// ── 系统公告（真实，来自 getAnnouncements）──
+const announcements = ref<Announcement[]>([])
+async function loadAnnouncements() { announcements.value = await getAnnouncements() }
+
+// ── 用户统计分区（真实，来自 dashboard.activeUsers + /api/auth/users）──
+const totalUsers = ref<number | null>(null)
+const newUsers30 = ref<number | null>(null)
+async function loadUsers() {
+  // 活跃用户已在 metrics 中；总用户/近30天新增需 admin 接口，失败则降级只显示活跃数
+  try {
+    const users: UserOut[] = await getUsers()
+    totalUsers.value = users.length
+    const cutoff = Date.now() - 30 * 24 * 3600 * 1000
+    newUsers30.value = users.filter((u) => {
+      const t = u.createdAt ? new Date(u.createdAt).getTime() : NaN
+      return !isNaN(t) && t >= cutoff
+    }).length
+  } catch {
+    totalUsers.value = null
+    newUsers30.value = null
+  }
+}
+
+// ── 分区按需加载 ──
+function loadSection(s: string) {
+  if (s === 'overview') {
+    void loadMetrics(); void loadCategories(); void loadTrend(trendRange.value); void loadOps(1)
+  } else if (s === 'docs') {
+    void loadDocStats()
+  } else if (s === 'analytics') {
+    void loadTrend(trendRange.value)
+  } else if (s === 'announcements') {
+    void loadAnnouncements()
+  } else if (s === 'users') {
+    void loadMetrics(); void loadUsers()
+  }
+}
+watch(section, (s) => loadSection(s), { immediate: true })
+
+onMounted(() => {
+  if (!kb.loaded) kb.load()
+})
 </script>
 
 <template>
@@ -189,21 +239,16 @@ const ACT_ICONS: Record<string, string> = {
                   <stop offset="100%" stop-color="var(--brand)" stop-opacity="0.01" />
                 </linearGradient>
               </defs>
-              <!-- Y轴网格线 -->
               <g class="grid-lines">
                 <line v-for="n in 5" :key="n" :x1="0" :y1="(n-1)*(chartH/4)" :x2="chartW" :y2="(n-1)*(chartH/4)" stroke="var(--border)" stroke-dasharray="4,4" />
               </g>
-              <!-- 面积 -->
               <path :d="areaPath" fill="url(#areaGrad)" />
-              <!-- 折线 -->
               <path :d="linePath" fill="none" stroke="var(--brand)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
-              <!-- 数据点 -->
               <g v-for="(d, i) in dotCoords" :key="i">
                 <circle :cx="d.cx" :cy="d.cy" r="3.5" fill="var(--bg-elevated, var(--bg-surface))" stroke="var(--brand)" stroke-width="1.8" />
                 <title>{{ activeTrend.labels[i] }} · {{ d.val }}</title>
               </g>
             </svg>
-            <!-- X轴标签 -->
             <div class="x-axis">
               <span v-for="(lbl, i) in activeTrend.labels" :key="i" class="x-lbl">{{ lbl }}</span>
             </div>
@@ -235,6 +280,7 @@ const ACT_ICONS: Record<string, string> = {
                 <span class="legend-val">{{ p.value.toLocaleString() }}</span>
                 <span class="legend-pct">{{ p.pct }}%</span>
               </div>
+              <div v-if="!pieData.length" class="empty-hint">暂无文档</div>
             </div>
           </div>
         </div>
@@ -244,28 +290,29 @@ const ACT_ICONS: Record<string, string> = {
       <div class="ops-section card">
         <div class="panel-head">
           <span class="panel-title">近期操作记录</span>
-          <a href="#" class="view-more" @click.prevent>查看更多</a>
+          <a href="#" class="view-more" @click.prevent="loadOps(opsPage + 1)">查看更多</a>
         </div>
         <table class="ops-table">
           <thead>
             <tr><th>操作时间</th><th>操作用户</th><th>操作类型</th><th>操作内容</th><th>相关文档</th></tr>
           </thead>
           <tbody>
-            <tr v-for="row in activityLog" :key="row.time + row.user">
+            <tr v-for="row in activityLog" :key="row.time + row.user + row.action">
               <td class="col-time">{{ row.time }}</td>
               <td>{{ row.user }}</td>
               <td>
                 <span class="act-tag">
-                  <Icon :name="ACT_ICONS[row.type] || 'file'" :size="12" />
+                  <Icon :name="ACT_ICONS[row.action] || 'file'" :size="12" />
                   {{ row.type }}
                 </span>
               </td>
               <td class="col-content">{{ row.content }}</td>
               <td>
-                <a v-if="row.file" href="#" class="doc-link" @click.prevent>{{ row.file }}</a>
+                <span v-if="row.file" class="doc-link">{{ row.file }}</span>
                 <span v-else class="na">—</span>
               </td>
             </tr>
+            <tr v-if="!activityLog.length"><td colspan="5" class="empty-hint">暂无操作记录</td></tr>
           </tbody>
         </table>
       </div>
@@ -275,11 +322,45 @@ const ACT_ICONS: Record<string, string> = {
     <template v-else-if="section === 'docs'">
       <h2 class="page-title">文档统计</h2>
       <div class="stats-row">
-        <div class="stat-card card"><div class="sc-icon" style="background:rgba(59,130,246,.1);color:#3b82f6"><Icon name="doc" :size="22"/></div><div class="sc-body"><div class="sc-label">文档总数</div><div class="sc-value">{{ totalDocs.toLocaleString() }}</div></div></div>
-        <div class="stat-card card"><div class="sc-icon" style="background:rgba(34,197,94,.1);color:#22c55e"><Icon name="check" :size="22"/></div><div class="sc-body"><div class="sc-label">已审核</div><div class="sc-value">{{ (totalDocs-pendingDocs).toLocaleString() }}</div></div></div>
-        <div class="stat-card card"><div class="sc-icon" style="background:rgba(245,158,11,.1);color:#f59e0b"><Icon name="alert" :size="22"/></div><div class="sc-body"><div class="sc-label">待复核</div><div class="sc-value">{{ pendingDocs }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:rgba(59,130,246,.1);color:#3b82f6"><Icon name="doc" :size="22"/></div><div class="sc-body"><div class="sc-label">文档总数</div><div class="sc-value">{{ (docStats?.total ?? totalDocs).toLocaleString() }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:rgba(34,197,94,.1);color:#22c55e"><Icon name="check" :size="22"/></div><div class="sc-body"><div class="sc-label">已审核</div><div class="sc-value">{{ (byStatusCount('已审核')).toLocaleString() }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:rgba(245,158,11,.1);color:#f59e0b"><Icon name="alert" :size="22"/></div><div class="sc-body"><div class="sc-label">待复核</div><div class="sc-value">{{ byStatusCount('待复核') }}</div></div></div>
         <div class="stat-card card"><div class="sc-icon" style="background:rgba(139,92,246,.1);color:#8b5cf6"><Icon name="folder" :size="22"/></div><div class="sc-body"><div class="sc-label">知识库数</div><div class="sc-value">{{ bases.length }}</div></div></div>
       </div>
+
+      <div class="charts-row">
+        <!-- 按状态分布 -->
+        <div class="ops-section card">
+          <div class="panel-head"><span class="panel-title">按状态分布</span></div>
+          <table class="ops-table">
+            <thead><tr><th>状态</th><th>文档数</th><th>占比</th></tr></thead>
+            <tbody>
+              <tr v-for="row in docStats?.byStatus ?? []" :key="row.status">
+                <td class="col-name">{{ row.status }}</td>
+                <td>{{ row.count }}</td>
+                <td>{{ docStatsTotal ? ((row.count / docStatsTotal) * 100).toFixed(1) + '%' : '—' }}</td>
+              </tr>
+              <tr v-if="!docStats?.byStatus?.length"><td colspan="3" class="empty-hint">暂无数据</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <!-- 按分类分布 -->
+        <div class="ops-section card">
+          <div class="panel-head"><span class="panel-title">按分类分布</span></div>
+          <table class="ops-table">
+            <thead><tr><th>分类</th><th>文档数</th><th>占比</th></tr></thead>
+            <tbody>
+              <tr v-for="row in docStats?.byCategory ?? []" :key="row.category">
+                <td class="col-name">{{ row.category }}</td>
+                <td>{{ row.count }}</td>
+                <td>{{ docStatsTotal ? ((row.count / docStatsTotal) * 100).toFixed(1) + '%' : '—' }}</td>
+              </tr>
+              <tr v-if="!docStats?.byCategory?.length"><td colspan="3" class="empty-hint">暂无数据</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="ops-section card">
         <div class="panel-head"><span class="panel-title">各知识库文档分布</span></div>
         <table class="ops-table">
@@ -311,18 +392,88 @@ const ACT_ICONS: Record<string, string> = {
       </div>
     </template>
 
-    <!-- ====== 占位分区 ====== -->
+    <!-- ====== 访问分析（真实：复用趋势图 + 访问量明细表）====== -->
     <template v-else-if="section === 'analytics'">
       <h2 class="page-title">访问分析</h2>
-      <ComingSoon icon="chart" title="访问分析" desc="访问趋势、会话量、平均停留时长等分析指标的后端采集接口尚未接入。" />
+      <div class="chart-panel card">
+        <div class="panel-head">
+          <span class="panel-title">访问趋势</span>
+          <Icon name="info" :size="13" class="phint" />
+        </div>
+        <div class="trend-tabs">
+          <button v-for="r in [{k:'today',l:'今日'},{k:'week',l:'近7日'},{k:'month',l:'近30日'}]"
+            :key="r.k" class="ttab"
+            :class="{ active: trendRange === r.k }"
+            @click="trendRange = r.k as TrendRange">{{ r.l }}</button>
+        </div>
+        <div class="chart-wrap">
+          <svg :viewBox="`0 0 ${chartW} ${chartH}`" class="trend-svg" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="areaGrad2" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="var(--brand)" stop-opacity="0.18" />
+                <stop offset="100%" stop-color="var(--brand)" stop-opacity="0.01" />
+              </linearGradient>
+            </defs>
+            <g class="grid-lines">
+              <line v-for="n in 5" :key="n" :x1="0" :y1="(n-1)*(chartH/4)" :x2="chartW" :y2="(n-1)*(chartH/4)" stroke="var(--border)" stroke-dasharray="4,4" />
+            </g>
+            <path :d="areaPath" fill="url(#areaGrad2)" />
+            <path :d="linePath" fill="none" stroke="var(--brand)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+            <g v-for="(d, i) in dotCoords" :key="i">
+              <circle :cx="d.cx" :cy="d.cy" r="3.5" fill="var(--bg-elevated, var(--bg-surface))" stroke="var(--brand)" stroke-width="1.8" />
+              <title>{{ activeTrend.labels[i] }} · {{ d.val }}</title>
+            </g>
+          </svg>
+          <div class="x-axis">
+            <span v-for="(lbl, i) in activeTrend.labels" :key="i" class="x-lbl">{{ lbl }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="ops-section card">
+        <div class="panel-head"><span class="panel-title">访问量明细</span></div>
+        <table class="ops-table">
+          <thead><tr><th>时间</th><th>问答次数</th><th>搜索次数</th></tr></thead>
+          <tbody>
+            <tr v-for="(p, i) in (trendData?.points ?? [])" :key="i">
+              <td class="col-time">{{ trendData?.labels[i] }}</td>
+              <td>{{ p.aiAnswers }}</td>
+              <td>{{ p.searches }}</td>
+            </tr>
+            <tr v-if="!(trendData?.points?.length)"><td colspan="3" class="empty-hint">暂无数据</td></tr>
+          </tbody>
+        </table>
+      </div>
     </template>
+
+    <!-- ====== 用户统计（真实：活跃用户 + 总用户 + 近30天新增）====== -->
     <template v-else-if="section === 'users'">
       <h2 class="page-title">用户统计</h2>
-      <ComingSoon icon="users" title="用户统计" desc="用户活跃度、角色分布、新增趋势等统计的后端接口尚未接入。" />
+      <div class="stats-row">
+        <div class="stat-card card"><div class="sc-icon" style="background:rgba(139,92,246,.1);color:#8b5cf6"><Icon name="users" :size="22"/></div><div class="sc-body"><div class="sc-label">活跃用户数（今日）</div><div class="sc-value">{{ metrics?.activeUsers ?? '—' }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:rgba(59,130,246,.1);color:#3b82f6"><Icon name="user-plus" :size="22"/></div><div class="sc-body"><div class="sc-label">总用户数</div><div class="sc-value">{{ totalUsers ?? '—' }}</div></div></div>
+        <div class="stat-card card"><div class="sc-icon" style="background:rgba(34,197,94,.1);color:#22c55e"><Icon name="sparkles" :size="22"/></div><div class="sc-body"><div class="sc-label">近30天新增</div><div class="sc-value">{{ newUsers30 ?? '—' }}</div></div></div>
+      </div>
+      <div class="ops-section card">
+        <div class="panel-head"><span class="panel-title">说明</span></div>
+        <p class="note-text">活跃用户数来自当日有操作（登录 / 问答 / 文档管理）的去重用户；总用户数与近30天新增来自用户列表（需管理员权限，无权限时仅显示活跃用户数）。</p>
+      </div>
     </template>
+
+    <!-- ====== 系统公告（真实：getAnnouncements 列表）====== -->
     <template v-else>
       <h2 class="page-title">系统公告</h2>
-      <ComingSoon icon="bell" title="系统公告" desc="系统公告的发布与推送后端接口尚未接入。" note="公告中心页面骨架已就绪，接入后此处展示公告列表。" />
+      <div v-if="announcements.length" class="ann-list">
+        <div v-for="a in announcements" :key="a.id" class="ann-card card" :class="'lv-' + a.level">
+          <div class="ann-head">
+            <Icon :name="a.pinned ? 'pin' : 'bell'" :size="15" class="ann-ic" />
+            <span class="ann-title">{{ a.title }}</span>
+            <span v-if="a.pinned" class="ann-pin">置顶</span>
+            <span class="ann-time">{{ fmtTime(a.createdAt) }}</span>
+          </div>
+          <div class="ann-content">{{ a.content }}</div>
+        </div>
+      </div>
+      <div v-else class="empty-hint">暂无系统公告</div>
     </template>
   </div>
 </template>
@@ -351,6 +502,7 @@ const ACT_ICONS: Record<string, string> = {
   display: inline-flex; align-items: center; gap: 2px;
   font-size: 12.5px; color: var(--text-tertiary);
 }
+/* 绿涨红跌（中文习惯，遵循开发计划约定） */
 .sc-delta.up { color: var(--success); }
 
 /* ---- 图表行 ---- */
@@ -423,8 +575,7 @@ const ACT_ICONS: Record<string, string> = {
   border-radius:var(--radius-pill); font-size:12px; font-weight:500;
   background:var(--brand-soft); color:var(--brand);
 }
-.doc-link { color:var(--brand); text-decoration:none; font-size:12.5px; }
-.doc-link:hover { text-decoration:underline; }
+.doc-link { color:var(--brand); font-size:12.5px; }
 .na { color:var(--text-tertiary); }
 
 /* ---- 热门搜索榜 ---- */
@@ -447,6 +598,19 @@ const ACT_ICONS: Record<string, string> = {
   background:var(--brand-soft); padding:2px 9px; border-radius:var(--radius-pill);
 }
 
+/* ---- 公告卡片 ---- */
+.ann-list { display:flex; flex-direction:column; gap:12px; }
+.ann-card { padding:16px 18px; border-left:3px solid var(--brand); }
+.ann-card.lv-warning { border-left-color:var(--warning); }
+.ann-card.lv-success { border-left-color:var(--success); }
+.ann-card.lv-error { border-left-color:var(--danger); }
+.ann-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.ann-ic { color:var(--brand); }
+.ann-title { font-size:14.5px; font-weight:700; color:var(--text-primary); }
+.ann-pin { font-size:11px; padding:1px 7px; border-radius:var(--radius-pill); background:var(--brand-soft); color:var(--brand); }
+.ann-time { margin-left:auto; font-size:12px; color:var(--text-tertiary); }
+.ann-content { font-size:13px; color:var(--text-secondary); line-height:1.6; white-space:pre-wrap; }
+
 /* ---- 通用 ---- */
 .page-title { font-size:18px; font-weight:700; color:var(--text-primary); margin:0 0 16px; }
 .col-name { font-weight:600; }
@@ -457,6 +621,7 @@ const ACT_ICONS: Record<string, string> = {
 .score-pill.ok{color:var(--success);background:var(--success-soft)}
 .score-pill.bad{color:var(--danger);background:var(--danger-soft)}
 .empty-hint { padding:24px; text-align:center; color:var(--text-tertiary); font-size:13px; }
+.note-text { font-size:13px; color:var(--text-secondary); line-height:1.7; margin:0; }
 
 @media (max-width:1024px){
   .stats-row{grid-template-columns:repeat(3,1fr)}

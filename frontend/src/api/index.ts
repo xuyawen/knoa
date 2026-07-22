@@ -19,6 +19,8 @@ import type {
   Announcement,
   AnnouncementCreate,
   AnnouncementUpdate,
+  DocStats,
+  UserOut,
 } from '@/types/api'
 import { authHeaders, TokenExpiredError } from './http'
 
@@ -388,6 +390,23 @@ export async function getTrend(range: 'today' | 'week' | 'month' = 'week'): Prom
 export async function getDocCategory(): Promise<DocCategory[]> {
   const resp = await fetch('/api/analytics/doc-category', { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 文档统计：按 category / status 聚合（文档统计分区）。 */
+export async function getDocStats(): Promise<DocStats> {
+  const resp = await fetch('/api/analytics/doc-stats', { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 用户列表（admin）。用于用户统计分区的总用户数 / 近30天新增。 */
+export async function getUsers(): Promise<UserOut[]> {
+  const resp = await fetch('/api/auth/users', { headers: authHeaders() })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
   return resp.json()
 }
 
