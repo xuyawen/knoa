@@ -245,7 +245,7 @@ onMounted(() => {
           <div class="sc-body">
             <div class="sc-label">{{ card.label }}</div>
             <div class="sc-value">{{ card.value }}</div>
-            <div class="sc-delta" :class="{ up: card.up }">
+            <div class="sc-delta" :class="{ up: card.up, down: !card.up }">
               较昨日 {{ card.delta }}
               <Icon :name="card.up ? 'arrow-up-right' : 'arrow-down-right'" :size="12" />
             </div>
@@ -536,6 +536,7 @@ onMounted(() => {
 }
 /* 绿涨红跌（中文习惯，遵循开发计划约定） */
 .sc-delta.up { color: var(--success); }
+.sc-delta.down { color: var(--danger); }
 
 /* ---- 图表行 ---- */
 .charts-row { display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; }

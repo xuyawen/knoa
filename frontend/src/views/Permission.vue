@@ -411,14 +411,12 @@ const roleMatrix = [
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---- 用户表 ---- */
-.u-name { display: flex; align-items: center; gap: 8px; }
 .u-avatar {
   width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--brand); color: var(--text-on-brand); font-size: 12px; font-weight: 600;
 }
 .u-uname { font-weight: 500; color: var(--text-primary); }
-.u-dname { color: var(--text-secondary); }
 
 .role-badge {
   display: inline-flex; padding: 2px 10px; border-radius: var(--radius-pill);
@@ -438,19 +436,6 @@ const roleMatrix = [
   border-radius: var(--radius-sm); color: var(--text-secondary); background: transparent; cursor: pointer; transition: all var(--dur-fast);
 }
 .action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-
-/* ---- 分页 ---- */
-.pagination-bar { display: flex; align-items: center; gap: 16px; padding: 12px 4px 2px; font-size: 13px; color: var(--text-secondary); }
-.page-info { white-space: nowrap; }
-.page-numbers { display: flex; align-items: center; gap: 4px; }
-.pg {
-  min-width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent;
-  font-size: 13px; color: var(--text-secondary); cursor: pointer; padding: 0 8px; font-family: inherit;
-}
-.pg:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
-.pg.active { background: var(--brand); color: var(--text-on-brand); border-color: var(--brand); }
-.pg:disabled { opacity: 0.4; cursor: default; }
 
 /* ---- 矩阵 ---- */
 .perm-matrix { padding: 18px 20px; }

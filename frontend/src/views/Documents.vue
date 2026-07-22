@@ -1019,6 +1019,7 @@ async function confirmBatchDelete() {
   background: var(--accent-blue-soft);
   color: var(--accent-blue);
 }
+.scope-tag.scope-private { background: var(--bg-subtle); color: var(--text-tertiary); }
 
 /* 兼容旧 .status-badge */
 .status-badge {
@@ -1088,7 +1089,6 @@ async function confirmBatchDelete() {
   display: flex;
   gap: 2px;
   margin-top: 2px;
-  opacity: 0.85;
 }
 .grid-empty {
   grid-column: 1 / -1;
@@ -1096,49 +1096,6 @@ async function confirmBatchDelete() {
   color: var(--text-tertiary);
   padding: 40px 0;
 }
-
-/* ---- 分页 ---- */
-.pagination-bar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 16px;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.page-info { white-space: nowrap; }
-.page-size-select {
-  height: 30px;
-  padding: 0 8px;
-  font-size: 12px;
-  border-color: var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-}
-.page-numbers { display: flex; align-items: center; gap: 4px; }
-.pg {
-  min-width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  font-size: 13px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 0 8px;
-  font-family: inherit;
-}
-.pg:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
-.pg.active { background: var(--brand); color: var(--text-on-brand); border-color: var(--brand); }
-.pg:disabled { opacity: 0.4; cursor: default; }
 
 /* ---- 弹窗内容 ---- */
 .modal-hint { color: var(--text-tertiary); text-align: center; padding: 20px 0; }
