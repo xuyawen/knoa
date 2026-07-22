@@ -1,0 +1,37 @@
+#!/bin/sh
+# pre-push hook: 在 push 之前跑前端类型检查 + 构建，拦截类型错误，
+# 避免坏代码推上 GitHub 导致 CI 红。
+# 仅当本次 push 包含 frontend/ 改动时才跑 build；纯后端 push 直接放行。
+#
+# 重要：本机 Windows 上不要在这个 hook 里跑后端 `uv run` 命令，
+# 会触发 Defender 实时保护锁死 .venv。前端构建用 npm，安全。
+
+# Git 通过 stdin 按行传入待推送的 ref：
+#   <local_ref> <local_sha> <remote_ref> <remote_sha>
+read -r local_ref local_sha remote_ref remote_sha
+
+# 删除分支 / 空推送（remote_sha 全 0）直接放行
+if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+  exit 0
+fi
+
+# 本次 push 相对远端的改动文件清单
+changed=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null)
+
+# 没有 frontend/ 改动则跳过 build，省时间
+case "$changed" in
+  *frontend/*) ;;
+  *) echo "[pre-push] 无前端改动，跳过 build。"; exit 0 ;;
+esac
+
+echo "[pre-push] 检测到前端改动，运行 build（vue-tsc 类型检查 + vite build）..."
+root=$(git rev-parse --show-toplevel)
+cd "$root/frontend" || exit 1
+
+npm run build || {
+  echo "[pre-push] 前端 build 失败，已阻止 push。请修复类型错误后再 push。"
+  exit 1
+}
+
+echo "[pre-push] 前端 build 通过，继续 push。"
+exit 0
