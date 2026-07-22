@@ -62,9 +62,9 @@ onMounted(loadAnnouncements)
 /* ---------- 顶部主导航 ---------- */
 const topNavItems = [
   { to: '/dashboard', label: '首页大盘' },
+  { to: '/chat', label: 'AI智能问答' },
   { to: '/documents', label: '文档管理' },
   { to: '/search', label: '智能搜索' },
-  { to: '/chat', label: 'AI智能问答' },
   { to: '/graph', label: '知识图谱' },
   { to: '/permission', label: '系统管理' },
 ]
