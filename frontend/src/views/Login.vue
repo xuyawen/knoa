@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// 登录页 — 按 640.png 截图 1:1 还原。
-// 浅色全局背景 | 左侧：深色标题 + 副标题 + 玻璃层叠3D插画(透明平台+蓝方块+浅色浮动图标)
-// 右侧：浅色居中登录卡片（白底、无顶部导航栏）
+// 登录页 — 按 18_2.svg / login-page-spec.md 1:1 还原。
+// 左面板：浅灰底 + Logo + 品牌文案 + 装饰插画（立方体/平台/环绕图标）
+// 右面板：白色底 + 居中登录卡片（账号/密码/记住我/SSO）
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -12,8 +12,7 @@ const auth = useAuthStore()
 const router = useRouter()
 const toast = useToastStore()
 
-const form = ref({ username: '', password: '', remember: false })
-const showPwd = ref(false)
+const form = ref({ username: '', password: '', remember: true })
 const loading = ref(false)
 
 async function handleLogin() {
@@ -21,7 +20,6 @@ async function handleLogin() {
   loading.value = true
   try {
     await auth.login(form.value.username, form.value.password)
-    // 成功后跳回原目标页（守卫带上的 redirect）或默认大盘
     const redirect = (router.currentRoute.value.query.redirect as string) || '/dashboard'
     router.push(redirect)
   } catch (e) {
@@ -34,478 +32,532 @@ async function handleLogin() {
 
 <template>
   <div class="login-page">
-    <!-- ====== 顶部栏：仅 logo + 系统名（无菜单）====== -->
-    <header class="login-topbar">
-      <div class="login-topbar-brand">
-        <img src="/favicon.svg" alt="Knoa" class="login-topbar-logo" />
-        <span class="login-topbar-title">企业智能知识库系统</span>
+    <!-- ====== 左面板 ====== -->
+    <div class="left-panel">
+      <div class="brand-header">
+        <div class="logo-box">K</div>
+        <span class="logo-text">企业智能知识库系统</span>
       </div>
-    </header>
 
-    <!-- ====== 主体行：左侧品牌区 + 右侧卡片 ====== -->
-    <div class="login-body">
-    <!-- ====== 左侧品牌区 ====== -->
-    <div class="login-brand">
-      <h1 class="brand-title">企业智能知识库系统</h1>
-      <p class="brand-desc">
-        构建企业知识中枢，赋能智能决策与高效协作<br />
-        让知识管理更简单，知识价值最大化
-      </p>
+      <div class="brand-text">
+        <h1 class="brand-title">企业智能知识库系统</h1>
+        <p class="brand-desc">
+          构建企业知识中枢，赋能智能决策与高效协作<br />
+          让知识管理更简单，知识价值最大化
+        </p>
+      </div>
 
-      <!-- 3D 等距玻璃层叠插画 -->
-      <div class="illus-area">
-        <!-- 装饰竖线 -->
-        <span class="deco-vline dv1"></span>
-        <span class="deco-vline dv2"></span>
+      <div class="spacer" />
 
-        <!-- 浮动图标（浅色圆角方块） -->
-        <div class="float-badge fb-pie"><Icon name="chart" :size="18" /></div>
-        <div class="float-badge fb-doc"><Icon name="doc" :size="16" /></div>
-        <div class="float-badge fb-search"><Icon name="search" :size="18" /></div>
-        <div class="float-badge fb-gear"><Icon name="settings" :size="16" /></div>
+      <!-- 装饰插画：712×480 -->
+      <div class="illustration">
+        <div class="platform platform-bottom" />
+        <div class="platform platform-middle" />
+        <div class="platform platform-top" />
 
-        <!-- 玻璃层叠平台 + 中心蓝色立方体 -->
-        <div class="stack-scene">
-          <!-- 从下到上四层玻璃平台（逐层缩小+上移） -->
-          <div class="glass-layer gl4"></div>
-          <div class="glass-layer gl3"></div>
-          <div class="glass-layer gl2"></div>
-          <div class="glass-layer gl1"></div>
-          <!-- 中心蓝色立方体 -->
-          <div class="cube-wrap">
-            <div class="cube3d">
-              <div class="cface ctop"></div>
-              <div class="cface cfront"></div>
-              <div class="cface cright"></div>
-            </div>
+        <div class="cube-scene">
+          <div class="cube">
+            <div class="face face-top" />
+            <div class="face face-front" />
+            <div class="face face-right" />
           </div>
         </div>
+
+        <div class="icon-circle ic-chart"><Icon name="chart" :size="22" /></div>
+        <div class="icon-circle ic-search"><Icon name="search" :size="22" /></div>
+        <div class="icon-circle ic-doc"><Icon name="doc" :size="22" /></div>
+        <div class="icon-circle ic-settings"><Icon name="settings" :size="22" /></div>
       </div>
     </div>
 
-    <!-- ====== 右侧登录卡片（浅色）====== -->
-    <div class="login-right">
+    <!-- ====== 右面板 ====== -->
+    <div class="right-panel">
       <div class="login-card">
-        <h2 class="card-title">登录系统</h2>
-        <p class="card-sub">欢迎登录企业智能知识库系统</p>
+        <div class="card-header">
+          <h2 class="card-title">欢迎登录</h2>
+          <p class="card-subtitle">企业智能知识库系统 · 账号登录</p>
+        </div>
 
-        <form @submit.prevent="handleLogin" class="lform">
-          <!-- 账号 -->
-          <div class="fld">
-            <div class="ibox">
-              <Icon name="user" :size="16" class="ficon" />
-              <input v-model="form.username" type="text" placeholder="请输入账号" autocomplete="username" class="finp" />
-            </div>
+        <form @submit.prevent="handleLogin" class="login-form">
+          <div class="field">
+            <label class="field-label">账号</label>
+            <input
+              v-model="form.username"
+              type="text"
+              class="field-input"
+              placeholder="请输入手机号 / 邮箱"
+              autocomplete="username"
+            />
           </div>
 
-          <!-- 密码 -->
-          <div class="fld">
-            <div class="ibox">
-              <Icon name="lock" :size="16" class="ficon" />
-              <input v-model="form.password" :type="showPwd ? 'text' : 'password'" placeholder="请输入密码" autocomplete="current-password" class="finp" />
-              <button v-if="form.password" type="button" class="eye-btn" @click="showPwd = !showPwd">
-                <Icon name="close" :size="12" />
-              </button>
-            </div>
+          <div class="field">
+            <label class="field-label">密码</label>
+            <input
+              v-model="form.password"
+              type="password"
+              class="field-input"
+              placeholder="请输入密码"
+              autocomplete="current-password"
+            />
           </div>
 
-          <!-- 记住密码 + 忘记密码 -->
-          <div class="fopts">
-            <label class="cbl">
-              <input type="checkbox" v-model="form.remember" />
-              <span>记住密码</span>
+          <div class="options-row">
+            <label class="remember">
+              <input type="checkbox" v-model="form.remember" class="checkbox-input" />
+              <span class="checkbox-check"><Icon name="check" :size="10" /></span>
+              <span class="remember-text">记住我</span>
             </label>
-            <a href="#" class="flink">忘记密码？</a>
+            <a href="#" class="forgot-link">忘记密码？</a>
           </div>
 
-          <!-- 登录按钮 -->
           <button type="submit" class="btn-login" :disabled="loading">
-            {{ loading ? '登录中...' : '登录' }}
+            {{ loading ? '登录中...' : '登 录' }}
           </button>
         </form>
 
-        <!-- 注册 -->
-        <div class="cbottom">
-          <span>还没有账号？</span><a href="#" class="rlink">立即注册</a>
+        <div class="divider">
+          <span class="line" />
+          <span class="divider-text">其他登录方式</span>
+          <span class="line" />
+        </div>
+
+        <div class="sso-row">
+          <button type="button" class="sso-btn">企业微信</button>
+          <button type="button" class="sso-btn">钉钉</button>
         </div>
       </div>
-    </div>
+
+      <p class="footer-note">2026 企业智能知识库系统 · 内部系统 仅供授权人员使用</p>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* ========== 页面容器 ========== */
 .login-page {
   display: flex;
-  flex-direction: column;
+  width: 100%;
   min-height: 100vh;
-  background: var(--bg-surface);          /* 右侧白为主，左侧覆盖 */
+  background: #fff;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-/* ========== 顶部栏：仅 logo + 系统名（与 AppLayout 顶栏同款样式，无菜单）========== */
-.login-topbar {
-  height: 58px;
-  flex-shrink: 0;
+.left-panel {
+  flex: 0 0 55%;
   display: flex;
-  align-items: center;
-  padding: 0 24px;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  padding: 40px;
+  background: #f2f4f7;
+  position: relative;
+  min-width: 760px;
+  min-height: 760px;
 }
-.login-topbar-brand {
+
+.brand-header {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.login-topbar-logo {
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-}
-.login-topbar-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-}
 
-/* ========== 主体行：左侧品牌区 + 右侧卡片 ========== */
-.login-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-/* ========== 左侧品牌区（浅灰底 + 右竖线分界，占 5 份）========== */
-.login-brand {
-  flex: 5;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0 64px;
-  background: var(--bg-subtle);          /* 浅灰底 */
-  border-right: 2px solid var(--border);  /* 红线位置的分界线 */
-}
-.brand-title {
-  font-size: 30px;
-  font-weight: 800;
-  color: var(--text-primary);           /* 深色粗体 — 截图实色 */
-  letter-spacing: -0.01em;
-  line-height: 1.25;
-  margin: 0 0 14px 0;
-}
-.brand-desc {
-  font-size: 14px;
-  color: var(--text-secondary);           /* 中灰 */
-  line-height: 1.75;
-  max-width: 400px;
-  margin: 0 0 52px 0;
-}
-
-/* ---------- 3D 玻璃层叠插画 ---------- */
-.illus-area {
-  position: relative;
-  width: 340px;
-  height: 300px;
-}
-
-/* 装饰竖线（淡蓝/灰色细条）*/
-.deco-vline {
-  position: absolute;
-  width: 4px;
-  border-radius: 2px;
-  opacity: 0.22;
-}
-.dv1 {
-  left: 58px;
-  bottom: 35px;
-  height: 46px;
-  background: color-mix(in srgb, var(--brand) 40%, transparent);       /* 淡蓝 */
-}
-.dv2 {
-  right: 100px;
-  bottom: 80px;
-  height: 58px;
-  background: var(--border-strong);       /* 浅灰 */
-}
-
-/* 浮动图标 badge（浅色圆角方块 — 白/极浅底+柔和阴影）*/
-.float-badge {
-  position: absolute;
+.logo-box {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #014db2;
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  box-shadow: 0 4px 18px var(--brand-ring);
-  animation: fy 3.2s ease-in-out infinite;
-}
-.fb-pie {
-  top: 10px;
-  left: 18px;
-  animation-delay: 0s;
-}
-.fb-search {
-  top: 55px;
-  right: 15px;
-  animation-delay: 0.8s;
-  width: 40px;
-  height: 40px;
-}
-.fb-doc {
-  bottom: 105px;
-  left: 32px;
-  animation-delay: 1.6s;
-  width: 38px;
-  height: 38px;
-}
-.fb-gear {
-  bottom: 60px;
-  right: 26px;
-  animation-delay: 2.3s;
-  width: 36px;
-  height: 36px;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
 }
 
-@keyframes fy {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
+.logo-text {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #0a1628;
 }
 
-/* ---------- 玻璃层叠平台 ---------- */
-.stack-scene {
+.brand-text {
+  margin-top: 24px;
+}
+
+.brand-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 40px;
+  font-weight: 700;
+  color: #0a1628;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.brand-desc {
+  margin-top: 12px;
+  font-size: 14px;
+  font-weight: 400;
+  color: #6b7280;
+  line-height: 1.75;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.illustration {
   position: absolute;
-  bottom: 20px;
+  left: 40px;
+  bottom: 40px;
+  width: 712px;
+  height: 480px;
+}
+
+.platform {
+  position: absolute;
   left: 50%;
   transform: translateX(-50%);
+  border-radius: 999px;
+}
+
+.platform-bottom {
+  top: 406px;
+  width: 540px;
+  height: 36px;
+  background: linear-gradient(180deg, #e4eaf3, #dce3ee);
+}
+
+.platform-middle {
+  top: 376px;
+  width: 420px;
+  height: 28px;
+  background: linear-gradient(180deg, #edf1f7, #e5ebf2);
+}
+
+.platform-top {
+  top: 350px;
+  width: 300px;
+  height: 22px;
+  background: linear-gradient(180deg, #fbfcfe, #f4f7fb);
+}
+
+.cube-scene {
+  position: absolute;
+  left: 259px;
+  top: 143px;
+  width: 195px;
+  height: 195px;
   perspective: 600px;
 }
-.glass-layer {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%) rotateX(65deg);
-  border: 1.5px solid color-mix(in srgb, var(--brand) 35%, transparent);
-  border-radius: 14px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--brand-soft) 75%, transparent) 0%, color-mix(in srgb, var(--brand-soft) 45%, transparent) 100%);
-  box-shadow: 0 6px 24px var(--brand-ring);
-}
-/* 四层从下到上，逐层缩小并上移 */
-.gl4 { width: 200px; height: 24px; bottom: 0; }
-.gl3 { width: 176px; height: 22px; bottom: 22px; }
-.gl2 { width: 152px; height: 20px; bottom: 42px; }
-.gl1 { width: 128px; height: 18px; bottom: 60px; }
 
-/* 中心蓝色立方体 */
-.cube-wrap {
-  position: absolute;
-  bottom: 68px;
-  left: 50%;
-  transform: translateX(-50%) translateY(-12px);
-}
-.cube3d {
+.cube {
+  width: 100%;
+  height: 100%;
   position: relative;
-  width: 64px;
-  height: 64px;
   transform-style: preserve-3d;
   transform: rotateX(-18deg) rotateY(-26deg);
 }
-.cface {
+
+.face {
   position: absolute;
-  width: 100%;
-  height: 100%;
-  border-radius: 9px;
-  backface-visibility: hidden;
-}
-.ctop {
-  background: linear-gradient(145deg, var(--brand-hover), var(--brand));
-  transform: translateZ(32px);
-}
-.cfront {
-  background: linear-gradient(180deg, var(--brand-hover), var(--brand-active));
-  transform: rotateX(90deg) translateZ(32px);
-}
-.cright {
-  background: linear-gradient(180deg, var(--brand-active), var(--brand-active));
-  transform: rotateY(90deg) translateZ(32px);
+  width: 130px;
+  height: 130px;
+  left: 50%;
+  top: 50%;
+  margin-left: -65px;
+  margin-top: -65px;
+  border-radius: 8px;
 }
 
-/* ========== 右侧登录区（白底，占 4 份）========== */
-.login-right {
-  flex: 4;
+.face-top {
+  background: linear-gradient(145deg, #60a5fa, #3b82f6);
+  transform: rotateX(90deg) translateZ(65px);
+}
+
+.face-front {
+  background: #014db2;
+  transform: translateZ(65px);
+}
+
+.face-right {
+  background: #1e40af;
+  transform: rotateY(90deg) translateZ(65px);
+}
+
+.icon-circle {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #e5e7eb;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 48px;
-  background: var(--bg-surface);          /* 白底 */
+  color: #6b7280;
+  box-shadow: 0 4px 16px rgba(10, 23, 40, 0.06);
+  animation: fy 3.2s ease-in-out infinite;
 }
 
-/* 登录卡片 — 浅色白底 */
-.login-card {
-  width: 380px;
-  padding: 44px 38px 36px;
-  border-radius: 16px;
-  background: var(--bg-surface);         /* 白底！不是暗底 */
-  border: 1px solid var(--border);
-  box-shadow: 0 4px 24px var(--shadow-float);
-}
-.card-title {
-  text-align: center;
-  font-size: 21px;
-  font-weight: 700;
-  color: var(--text-primary);             /* 深色标题 */
-  margin: 0 0 6px 0;
-}
-.card-sub {
-  text-align: center;
-  font-size: 13px;
-  color: var(--text-tertiary);             /* 灰色副标题 */
-  margin: 0 0 30px 0;
+.ic-chart {
+  left: 190px;
+  top: 90px;
+  animation-delay: 0s;
 }
 
-/* 表单 */
-.lform {
+.ic-search {
+  left: 470px;
+  top: 90px;
+  animation-delay: 0.8s;
+}
+
+.ic-doc {
+  left: 150px;
+  top: 230px;
+  animation-delay: 1.6s;
+}
+
+.ic-settings {
+  left: 510px;
+  top: 230px;
+  animation-delay: 2.3s;
+}
+
+@keyframes fy {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.right-panel {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-}
-.fld {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-/* 输入框 — 浅色风格（白底+细边框+左图标）*/
-.ibox {
-  position: relative;
-  display: flex;
   align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #fff;
+  min-width: 420px;
+  min-height: 760px;
+  padding: 40px;
 }
-.ficon {
-  position: absolute;
-  left: 13px;
-  color: var(--text-tertiary);
-  pointer-events: none;
-  z-index: 1;
+
+.login-card {
+  width: 420px;
+  padding: 40px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid #eaeaea;
+  box-shadow: 0 12px 32px rgba(10, 23, 40, 0.08);
 }
-.finp {
+
+.card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.card-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  color: #0a1628;
+  margin: 0;
+}
+
+.card-subtitle {
+  font-size: 14px;
+  font-weight: 400;
+  color: #6b7280;
+  margin: 0;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #0a1628;
+}
+
+.field-input {
   width: 100%;
   height: 44px;
-  padding: 0 14px 0 40px;
-  font-size: 13.5px;
-  color: var(--text-primary);
-  background: var(--bg-surface-2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 400;
+  color: #0a1628;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
   outline: none;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
   box-sizing: border-box;
 }
-.finp::placeholder {
-  color: var(--text-tertiary);
-}
-.finp:focus {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-ring);
-  background: var(--bg-surface);
+
+.field-input::placeholder {
+  color: #9ca3af;
 }
 
-.eye-btn {
-  position: absolute;
-  right: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-}
-.eye-btn:hover {
-  background: var(--bg-subtle);
-  color: var(--text-secondary);
+.field-input:focus {
+  border-color: #014db2;
+  box-shadow: 0 0 0 3px rgba(1, 77, 178, 0.12);
 }
 
-/* 记住密码 + 忘记密码 */
-.fopts {
+.options-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 2px;
 }
-.cbl {
+
+.remember {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-secondary);
+  gap: 8px;
   cursor: pointer;
-}
-.cbl input[type='checkbox'] {
-  accent-color: var(--brand);
-  width: 15px;
-  height: 15px;
-}
-.flink {
-  font-size: 13px;
-  color: var(--brand);
-  text-decoration: none;
-}
-.flink:hover {
-  text-decoration: underline;
-  color: var(--brand-hover);
+  user-select: none;
 }
 
-/* 登录按钮 */
+.checkbox-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.checkbox-check {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: #014db2;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  border: 1px solid #014db2;
+}
+
+.checkbox-input:not(:checked) + .checkbox-check {
+  background: #fff;
+  border-color: #e5e7eb;
+  color: transparent;
+}
+
+.remember-text {
+  font-size: 13px;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.forgot-link {
+  font-size: 13px;
+  font-weight: 500;
+  color: #014db2;
+  text-decoration: none;
+}
+
+.forgot-link:hover {
+  text-decoration: underline;
+}
+
 .btn-login {
   width: 100%;
-  height: 46px;
+  height: 48px;
+  border-radius: 8px;
+  border: none;
+  background: #014db2;
+  color: #fff;
+  font-family: 'Outfit', sans-serif;
   font-size: 15px;
   font-weight: 600;
-  color: var(--text-on-brand);
-  background: linear-gradient(135deg, var(--brand), var(--brand-hover));
-  border: none;
-  border-radius: 10px;
+  letter-spacing: 2px;
   cursor: pointer;
-  transition: all 0.2s ease;
-  margin-top: 4px;
-}
-.btn-login:hover {
-  background: linear-gradient(135deg, var(--brand-hover), var(--brand-active));
-  box-shadow: 0 4px 16px var(--brand-ring);
-  transform: translateY(-1px);
-}
-.btn-login:active {
-  transform: translateY(0);
-}
-.btn-login:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
+  transition: background 0.2s ease;
 }
 
-/* 底部注册 */
-.cbottom {
-  text-align: center;
-  margin-top: 22px;
-  font-size: 13px;
-  color: var(--text-tertiary);
+.btn-login:hover {
+  background: #0d5fd1;
 }
-.rlink {
-  color: var(--brand);
+
+.btn-login:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.line {
+  flex: 1;
+  height: 1px;
+  background: #eaeaea;
+}
+
+.divider-text {
+  font-size: 12px;
+  font-weight: 400;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.sso-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.sso-btn {
+  flex: 1;
+  height: 44px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #0a1628;
+  font-size: 14px;
   font-weight: 500;
-  text-decoration: none;
-  margin-left: 4px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
 }
-.rlink:hover {
-  text-decoration: underline;
-  color: var(--brand-hover);
+
+.sso-btn:hover {
+  border-color: #014db2;
+  background: #f8fafd;
+}
+
+.footer-note {
+  font-size: 12px;
+  font-weight: 400;
+  color: #9ca3af;
+  text-align: center;
+  margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .left-panel {
+    display: none;
+  }
+  .right-panel {
+    min-width: auto;
+    width: 100%;
+  }
 }
 </style>
