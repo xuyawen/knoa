@@ -132,8 +132,8 @@ function gotoQuery(text: string) {
 
 <template>
   <div class="search-page">
-    <!-- 搜索框 -->
-    <div class="search-bar-row card">
+    <!-- 搜索栏（搜索框 + 筛选 + 搜索按钮合为一体） -->
+    <div class="search-bar card">
       <div class="search-input-wrap">
         <Icon name="search" :size="17" class="sb-icon" />
         <input
@@ -147,6 +147,12 @@ function gotoQuery(text: string) {
           <Icon name="close" :size="13" />
         </button>
       </div>
+      <div class="filter-inline">
+        <CustomSelect v-model="filterType" :options="typeOpts" placeholder="文件类型" width="110px" />
+        <CustomSelect v-model="filterScope" :options="scopeOpts" placeholder="权限范围" width="120px" />
+        <CustomSelect v-model="filterStatus" :options="statusOpts" placeholder="文档状态" width="110px" />
+        <button class="btn-link muted" @click="resetFilters">清空</button>
+      </div>
       <button
         class="btn btn-primary"
         :disabled="!query.trim() || loading"
@@ -154,15 +160,6 @@ function gotoQuery(text: string) {
       >
         {{ loading ? '检索中…' : '搜索' }}
       </button>
-    </div>
-
-    <!-- 筛选条（默认展示在搜索框下方） -->
-    <div class="filter-bar card">
-      <CustomSelect v-model="filterType" :options="typeOpts" placeholder="文件类型" width="110px" />
-      <CustomSelect v-model="filterScope" :options="scopeOpts" placeholder="权限范围" width="120px" />
-      <CustomSelect v-model="filterStatus" :options="statusOpts" placeholder="文档状态" width="110px" />
-      <button class="btn-link muted" @click="resetFilters">清空</button>
-      <button class="btn btn-primary btn-sm" @click="runSearch(results?.page ?? 1)">应用筛选</button>
     </div>
 
     <!-- 结果区 -->
@@ -230,12 +227,12 @@ function gotoQuery(text: string) {
   min-height: 0;
 }
 
-/* 搜索栏 */
-.search-bar-row {
+/* 搜索栏（搜索框 + 筛选 + 按钮合为一体） */
+.search-bar {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 14px;
+  padding: 12px 16px;
 }
 .search-input-wrap {
   flex: 1;
@@ -279,13 +276,11 @@ function gotoQuery(text: string) {
 }
 .sb-clear:hover { background: var(--bg-hover); }
 
-/* 筛选条（默认展示在搜索框下方） */
-.filter-bar {
+/* 筛选条件（内联在搜索栏中） */
+.filter-inline {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
-  padding: 10px 14px;
 }
 
 /* 结果区 */
