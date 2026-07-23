@@ -41,9 +41,17 @@ const statusOpts = [
   { label: '待复核', value: '待复核' },
   { label: '已拒绝', value: '已拒绝' },
 ]
+const timeOpts = [
+  { label: '不限时间', value: '' },
+  { label: '近7天', value: '7d' },
+  { label: '近30天', value: '30d' },
+  { label: '近3个月', value: '90d' },
+  { label: '近半年', value: '180d' },
+]
 const filterType = ref('')
 const filterScope = ref('')
 const filterStatus = ref('已审核')
+const filterTime = ref('')
 
 onMounted(() => {
   const q = (route.query.q as string) || ''
@@ -67,6 +75,7 @@ async function runSearch(page = 1) {
       type: filterType.value,
       scope: filterScope.value,
       status: filterStatus.value,
+      time: filterTime.value,
     })
     saveHistory(text)
   } catch (e: any) {
@@ -86,6 +95,7 @@ function resetFilters() {
   filterType.value = ''
   filterScope.value = ''
   filterStatus.value = '已审核'
+  filterTime.value = ''
 }
 
 // ── 关键词高亮 ──
@@ -132,34 +142,37 @@ function gotoQuery(text: string) {
 
 <template>
   <div class="search-page">
-    <!-- 搜索栏（搜索框 + 筛选 + 搜索按钮合为一体） -->
+    <!-- 搜索栏（搜索框+按钮一行，筛选条件下一行） -->
     <div class="search-bar card">
-      <div class="search-input-wrap">
-        <Icon name="search" :size="17" class="sb-icon" />
-        <input
-          v-model="query"
-          type="text"
-          placeholder="企业数据安全管理规范"
-          class="sb-input"
-          @keydown.enter="runSearch()"
-        />
-        <button v-if="query" class="sb-clear" @click="clearSearch">
-          <Icon name="close" :size="13" />
+      <div class="search-input-row">
+        <div class="search-input-wrap">
+          <Icon name="search" :size="17" class="sb-icon" />
+          <input
+            v-model="query"
+            type="text"
+            placeholder="企业数据安全管理规范"
+            class="sb-input"
+            @keydown.enter="runSearch()"
+          />
+          <button v-if="query" class="sb-clear" @click="clearSearch">
+            <Icon name="close" :size="13" />
+          </button>
+        </div>
+        <button
+          class="btn btn-primary"
+          :disabled="loading"
+          @click="runSearch()"
+        >
+          {{ loading ? '检索中…' : '搜索' }}
         </button>
       </div>
-      <div class="filter-inline">
+      <div class="filter-row">
         <CustomSelect v-model="filterType" :options="typeOpts" placeholder="文件类型" width="110px" />
         <CustomSelect v-model="filterScope" :options="scopeOpts" placeholder="权限范围" width="120px" />
         <CustomSelect v-model="filterStatus" :options="statusOpts" placeholder="文档状态" width="110px" />
+        <CustomSelect v-model="filterTime" :options="timeOpts" placeholder="更新时间" width="110px" />
         <button class="btn-link muted" @click="resetFilters">清空</button>
       </div>
-      <button
-        class="btn btn-primary"
-        :disabled="!query.trim() || loading"
-        @click="runSearch()"
-      >
-        {{ loading ? '检索中…' : '搜索' }}
-      </button>
     </div>
 
     <!-- 结果区 -->
@@ -227,12 +240,17 @@ function gotoQuery(text: string) {
   min-height: 0;
 }
 
-/* 搜索栏（搜索框 + 筛选 + 按钮合为一体） */
+/* 搜索栏（搜索框+按钮一行，筛选下一行） */
 .search-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+.search-input-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
 }
 .search-input-wrap {
   flex: 1;
@@ -276,11 +294,12 @@ function gotoQuery(text: string) {
 }
 .sb-clear:hover { background: var(--bg-hover); }
 
-/* 筛选条件（内联在搜索栏中） */
-.filter-inline {
+/* 筛选条件行（搜索框下方） */
+.filter-row {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 /* 结果区 */
