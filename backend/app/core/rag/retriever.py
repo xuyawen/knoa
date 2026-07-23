@@ -144,6 +144,7 @@ class HybridRetriever:
             if cid not in chunk_map:
                 chunk_map[cid] = {
                     "content": chunk["content"],
+                    "document_id": str(chunk["document_id"]),
                     "kb_id": chunk["kb_id"],
                     "kb_name": kb_names.get(chunk["kb_id"], chunk["kb_id"]),
                     "doc_title": doc_titles.get(str(chunk["document_id"]), "未知文档"),
