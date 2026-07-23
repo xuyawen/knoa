@@ -217,12 +217,6 @@ const sidebarCollapsed = ref(false)
           </div>
         </div>
 
-        <!-- 全局搜索 -->
-        <div class="topbar-search">
-          <Icon name="search" :size="14" class="topbar-search-icon" />
-          <input type="text" placeholder="全局搜索..." class="topbar-search-input" />
-        </div>
-
         <!-- 用户头像 + 下拉 -->
         <div class="user-trigger" @click.stop="toggleUserMenu">
           <span class="avatar">{{ userInitial }}</span>
@@ -473,38 +467,6 @@ const sidebarCollapsed = ref(false)
   overflow: hidden;
 }
 .ni-mark { color: var(--brand); flex-shrink: 0; margin-top: 3px; }
-
-/* 顶部全局搜索 */
-.topbar-search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  width: 200px;
-  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
-}
-.topbar-search:focus-within {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-ring);
-}
-.topbar-search-icon {
-  color: var(--text-tertiary);
-  flex-shrink: 0;
-}
-.topbar-search-input {
-  border: none;
-  outline: none;
-  background: transparent;
-  font-size: 13px;
-  color: var(--text-primary);
-  width: 100%;
-}
-.topbar-search-input::placeholder {
-  color: var(--text-placeholder);
-}
 
 /* 用户触发器 */
 .user-trigger {
