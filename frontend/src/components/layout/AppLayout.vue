@@ -245,36 +245,36 @@ const sidebarCollapsed = ref(false)
     <div class="body-row">
       <!-- 左侧子菜单 -->
       <aside v-if="currentSubItems.length" class="sub-sidebar" :class="{ collapsed: sidebarCollapsed }">
-        <template v-if="!sidebarCollapsed">
-          <div class="sub-sidebar-header">{{ (route.meta.title as string) || '' }}</div>
-          <div class="sub-nav">
-            <router-link
-              v-for="item in currentSubItems"
-              :key="item.label"
-              :to="item.to"
-              class="sub-item"
-              :class="{ active: isSubActive(item) }"
-            >
-              <Icon v-if="item.icon" :name="item.icon" :size="16" />
-              <span>{{ item.label }}</span>
-            </router-link>
-          </div>
-          <div class="sub-footer">
-            <button class="sub-collapse" @click="sidebarCollapsed = true">
-              <Icon name="collapse" :size="14" /> 收起菜单
-            </button>
-          </div>
-        </template>
-        <template v-else>
-          <div class="collapsed-spacer" />
-          <button class="sub-expand-btn" title="展开菜单" @click="sidebarCollapsed = false">
-            <Icon name="chevron-right" :size="16" />
+        <div class="sub-sidebar-header">{{ (route.meta.title as string) || '' }}</div>
+        <div class="sub-nav">
+          <router-link
+            v-for="item in currentSubItems"
+            :key="item.label"
+            :to="item.to"
+            class="sub-item"
+            :class="{ active: isSubActive(item) }"
+          >
+            <Icon v-if="item.icon" :name="item.icon" :size="16" />
+            <span>{{ item.label }}</span>
+          </router-link>
+        </div>
+        <div class="sub-footer">
+          <button class="sub-collapse" @click="sidebarCollapsed = true">
+            <Icon name="collapse" :size="14" /> 收起菜单
           </button>
-        </template>
+        </div>
       </aside>
 
       <!-- 主内容区 -->
       <main class="main-content">
+        <button
+          v-if="sidebarCollapsed && currentSubItems.length"
+          class="edge-expand-btn"
+          title="展开菜单"
+          @click="sidebarCollapsed = false"
+        >
+          <Icon name="panel-left-open" :size="16" />
+        </button>
         <router-view />
       </main>
     </div>
@@ -564,9 +564,9 @@ const sidebarCollapsed = ref(false)
   overflow: hidden;
 }
 .sub-sidebar.collapsed {
-  width: 44px;
-  min-width: 44px;
-  border-right: 1px solid var(--border);
+  width: 0;
+  min-width: 0;
+  border-right: none;
 }
 .sub-sidebar-header {
   padding: 18px 18px 12px;
@@ -636,36 +636,37 @@ const sidebarCollapsed = ref(false)
   color: var(--text-secondary);
 }
 
-/* 收起状态：窄栏 + 展开按钮 */
-.collapsed-spacer {
-  flex: 1;
-  min-height: 0;
-}
-.sub-expand-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin: 6px auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
-}
-.sub-expand-btn:hover {
-  background: var(--bg-hover);
-  color: var(--brand);
-  border-color: var(--brand);
-}
-
 /* 主内容区 */
 .main-content {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
   padding: 24px 28px;
+  position: relative;
+}
+/* 收起时：内容区左边缘的展开按钮（竖条） */
+.edge-expand-btn {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 48px;
+  border: none;
+  border-right: 1px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg-surface);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  z-index: 10;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.edge-expand-btn:hover {
+  background: var(--brand-soft);
+  color: var(--brand);
+  width: 24px;
 }
 </style>
