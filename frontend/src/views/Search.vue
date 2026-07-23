@@ -182,7 +182,7 @@ function scopeLabel(scope: string): string {
             </button>
           </div>
           <button
-            class="btn btn-primary sb-btn"
+            class="btn btn-primary"
             :disabled="!query.trim() || loading"
             @click="runSearch()"
           >
@@ -349,7 +349,7 @@ function scopeLabel(scope: string): string {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 10px 14px;
 }
 .search-input-wrap {
   flex: 1;
@@ -359,14 +359,14 @@ function scopeLabel(scope: string): string {
 }
 .sb-icon {
   position: absolute;
-  left: 14px;
+  left: 12px;
   color: var(--text-tertiary);
   pointer-events: none;
 }
 .sb-input {
   width: 100%;
-  height: 42px;
-  padding: 0 38px 0 40px;
+  height: 36px;
+  padding: 0 34px 0 38px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   font-size: 14px;
@@ -383,8 +383,8 @@ function scopeLabel(scope: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   color: var(--text-tertiary);
   cursor: pointer;
@@ -392,7 +392,6 @@ function scopeLabel(scope: string): string {
   border: none;
 }
 .sb-clear:hover { background: var(--bg-hover); }
-.sb-btn { height: 42px; padding: 0 28px; font-size: 14px; }
 
 /* 结果区 */
 .result-area {
@@ -412,11 +411,6 @@ function scopeLabel(scope: string): string {
 }
 .filter-row {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-}
-.btn-sm {
-  height: 32px;
-  padding: 0 14px;
-  font-size: 12.5px;
 }
 .result-meta {
   font-size: 13px; color: var(--text-secondary);
