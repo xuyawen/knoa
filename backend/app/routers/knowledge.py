@@ -25,6 +25,7 @@ from app.core.storage import get_object_store
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.core.security import (
+    get_accessible_kb_ids,
     get_current_user,
     LEVEL_ORDER,
     require_kb_access,
