@@ -273,7 +273,7 @@ const sidebarCollapsed = ref(false)
           title="展开菜单"
           @click="sidebarCollapsed = false"
         >
-          <Icon name="chevrons-right" :size="14" />
+          <Icon name="chevrons-right" :size="20" />
         </button>
         <router-view />
       </main>
@@ -670,6 +670,7 @@ const sidebarCollapsed = ref(false)
   cursor: pointer;
   z-index: 10;
   transition: all var(--dur-fast) var(--ease-out);
+  overflow: visible;
 }
 .edge-expand-btn:hover {
   background: var(--brand-soft);
