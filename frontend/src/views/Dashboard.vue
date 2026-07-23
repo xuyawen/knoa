@@ -1080,12 +1080,43 @@ onMounted(() => {
 .ann-action:hover { background:var(--bg-hover); color:var(--text-primary); }
 .ann-action.danger:hover { background:var(--danger-soft); color:var(--danger); }
 .ann-content { font-size:13px; color:var(--text-secondary); line-height:1.6; white-space:pre-wrap; }
-.ann-form { display:flex; flex-direction:column; gap:14px; }
-.ann-form .form-row { display:flex; align-items:center; gap:12px; }
+.ann-form { display:flex; flex-direction:column; gap:18px; }
+.ann-form .form-row { display:flex; align-items:center; gap:14px; }
 .ann-form .form-row.align-start { align-items:flex-start; }
-.ann-form .form-label { width:50px; flex-shrink:0; font-size:13px; color:var(--text-secondary); }
-.ann-form .form-input { flex:1; }
-.ann-textarea { min-height:120px; padding:10px 12px; resize:vertical; line-height:1.6; }
+.ann-form .form-label { width:56px; flex-shrink:0; font-size:13px; font-weight:500; color:var(--text-secondary); text-align:right; }
+.ann-form .form-input {
+  flex:1; min-width:0; height:var(--btn-h-md); padding:0 12px;
+  background:var(--bg-surface); border:1px solid var(--border);
+  border-radius:var(--radius-md); color:var(--text-primary); font-size:14px;
+  transition:border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.ann-form .form-input::placeholder { color:var(--text-placeholder); }
+.ann-form .form-input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px var(--brand-ring); }
+.ann-textarea { min-height:140px; height:auto; padding:10px 12px; resize:vertical; line-height:1.6; }
+.ann-form .seg { display:inline-flex; align-items:center; background:var(--bg-subtle); border:1px solid var(--border); border-radius:var(--radius-md); padding:3px; }
+.ann-form .seg-btn {
+  height:30px; padding:0 14px; border:none; border-radius:var(--radius-sm);
+  background:transparent; color:var(--text-secondary); font-size:13px;
+  cursor:pointer; transition:all var(--dur-fast);
+}
+.ann-form .seg-btn:hover { color:var(--text-primary); }
+.ann-form .seg-btn.active { background:var(--brand); color:var(--text-on-brand); font-weight:600; box-shadow:var(--shadow-sm); }
+.ann-form .switch { display:inline-flex; align-items:center; gap:10px; cursor:pointer; user-select:none; }
+.ann-form .switch input { position:absolute; opacity:0; width:0; height:0; }
+.ann-form .switch-track {
+  position:relative; width:40px; height:22px; background:var(--bg-subtle);
+  border:1px solid var(--border); border-radius:var(--radius-pill);
+  transition:background var(--dur-fast), border-color var(--dur-fast);
+}
+.ann-form .switch-knob {
+  position:absolute; top:2px; left:2px; width:16px; height:16px;
+  background:var(--text-secondary); border-radius:50%;
+  transition:transform var(--dur-fast), background var(--dur-fast);
+}
+.ann-form .switch input:checked + .switch-track { background:var(--brand); border-color:var(--brand); }
+.ann-form .switch input:checked + .switch-track .switch-knob { transform:translateX(18px); background:#fff; }
+.ann-form .switch-text { font-size:13px; color:var(--text-secondary); }
+.ann-form .switch input:checked ~ .switch-text { color:var(--brand); font-weight:500; }
 
 /* ---- 通用 ---- */
 .score-pill {
