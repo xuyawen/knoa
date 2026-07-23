@@ -102,8 +102,9 @@ async function runSearch() {
   const ac = new AbortController()
   askAbort.value = ac
   try {
-    // 纯搜索场景：不挂 sessionId，走全局检索；事件结构与 Chat 完全一致
-    for await (const ev of streamAsk(text, null, null, undefined, { signal: ac.signal })) {
+    // 纯搜索场景：不挂 sessionId，走全局检索；事件结构与 Chat 完全一致。
+    // 传 mode='search' 让后端埋点区分「搜索」与「问答」，Dashboard 才能分别统计。
+    for await (const ev of streamAsk(text, null, null, undefined, { signal: ac.signal, mode: 'search' })) {
       if (ev.event === 'thinking') {
         thinking.value = [...thinking.value, ev.data as ThinkingStep]
       } else if (ev.event === 'sources') {

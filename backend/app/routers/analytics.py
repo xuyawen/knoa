@@ -25,10 +25,18 @@ def _yesterday_range() -> "tuple[datetime, datetime]":
     return start, end
 
 
-async def _count(db: AsyncSession, model, col, start: datetime, end: datetime) -> int:
-    return await db.scalar(
-        select(func.count()).select_from(model).where(col >= start, col < end)
-    ) or 0
+async def _count(
+    db: AsyncSession,
+    model,
+    col,
+    start: datetime,
+    end: datetime,
+    action: str | None = None,
+) -> int:
+    stmt = select(func.count()).select_from(model).where(col >= start, col < end)
+    if action is not None:
+        stmt = stmt.where(OperationLog.action == action)
+    return await db.scalar(stmt) or 0
 
 
 async def _distinct_users(db: AsyncSession, start: datetime, end: datetime | None = None) -> int:
@@ -50,14 +58,14 @@ async def dashboard(
 
     total_docs = await db.scalar(select(func.count()).select_from(Document)) or 0
     today_new = await _count(db, Document, Document.created_at, t_start, t_end)
-    # 当前系统只有一个问答入口 /api/ask（Search 页也走它），
-    # 故「AI 问答」与「用户搜索」同源，均取自 OperationLog action='ask'。
-    ai_answers = await _count(db, OperationLog, OperationLog.created_at, t_start, t_end)
-    user_searches = ai_answers
+    # 问答（对话页）与搜索（智能搜索页）是两条独立埋点，分别统计
+    ai_answers = await _count(db, OperationLog, OperationLog.created_at, t_start, t_end, action="ask")
+    user_searches = await _count(db, OperationLog, OperationLog.created_at, t_start, t_end, action="search")
     active_users = await _distinct_users(db, t_start)
 
     y_new = await _count(db, Document, Document.created_at, y_start, y_end)
-    y_ai = await _count(db, OperationLog, OperationLog.created_at, y_start, y_end)
+    y_ai = await _count(db, OperationLog, OperationLog.created_at, y_start, y_end, action="ask")
+    y_search = await _count(db, OperationLog, OperationLog.created_at, y_start, y_end, action="search")
     y_active = await _distinct_users(db, y_start, y_end)
 
     def pct(cur: int, prev: int) -> float:
@@ -76,7 +84,7 @@ async def dashboard(
             "totalDocs": 0.0,
             "todayNewDocs": pct(today_new, y_new),
             "aiAnswers": pct(ai_answers, y_ai),
-            "userSearches": pct(user_searches, y_ai),
+            "userSearches": pct(user_searches, y_search),
             "activeUsers": pct(active_users, y_active),
         },
     }
@@ -107,14 +115,21 @@ async def trend(
         b_end = b_start + step
         label = b_start.astimezone().strftime(fmt)
         labels.append(label)
-        cnt = await db.scalar(
+        ask_cnt = await db.scalar(
             select(func.count()).select_from(OperationLog).where(
                 OperationLog.action == "ask",
                 OperationLog.created_at >= b_start,
                 OperationLog.created_at < b_end,
             )
         ) or 0
-        points.append({"date": label, "aiAnswers": cnt, "searches": cnt})
+        search_cnt = await db.scalar(
+            select(func.count()).select_from(OperationLog).where(
+                OperationLog.action == "search",
+                OperationLog.created_at >= b_start,
+                OperationLog.created_at < b_end,
+            )
+        ) or 0
+        points.append({"date": label, "aiAnswers": ask_cnt, "searches": search_cnt})
     return {"range": period, "labels": labels, "points": points}
 
 

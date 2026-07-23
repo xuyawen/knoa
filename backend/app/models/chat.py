@@ -28,6 +28,9 @@ class AskRequest(CamelModel):
     knowledge_base: str | None = None
     session_id: str | None = None
     files: list[ChatFile] = Field(default_factory=list)
+    # 入口来源：chat=对话页问答，search=智能搜索页（搜索即问答）。
+    # 用于 OperationLog 区分埋点，Dashboard 才能分别统计「问答次数」与「搜索次数」。
+    mode: str = "chat"
 
     @model_validator(mode="after")
     def _check_non_empty(self) -> "AskRequest":

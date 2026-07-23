@@ -77,7 +77,14 @@ async def ask(
         try:
             # 埋点：每条问答（无论中途断开）都记一条 operation_log，
             # 作为 Dashboard「AI 问答 / 用户搜索」与趋势图真实数据源。
-            await record_operation(gen_db, user, "ask", detail=req.question[:200])
+            # 搜索页复用本接口时传 mode='search'，埋点动作相应区分，
+            # 使「问答次数」与「搜索次数」成为两条独立真实数据。
+            await record_operation(
+                gen_db,
+                user,
+                "search" if req.mode == "search" else "ask",
+                detail=req.question[:200],
+            )
             es = get_es()
             if es.enabled and req.knowledge_base and await es.index_exists(req.knowledge_base):
                 retriever = ESRetriever(embedder, es, settings.RRF_K)

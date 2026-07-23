@@ -363,7 +363,7 @@ export async function* streamAsk(
   knowledgeBase?: string | null,
   sessionId?: string | null,
   files?: ChatAttachment[],
-  opts?: { timeoutMs?: number; signal?: AbortSignal },
+  opts?: { timeoutMs?: number; signal?: AbortSignal; mode?: string },
 ): AsyncGenerator<SSEEvent> {
   // 客户端超时保护：Agentic RAG 多步决策链可能需要多次 LLM 调用（每轮 15~40s），
   // 90s 对复杂问题不够用，拉到 180s 给足余量
@@ -382,7 +382,7 @@ export async function* streamAsk(
     const resp = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ question, knowledgeBase, sessionId, files: files ?? [] }),
+      body: JSON.stringify({ question, knowledgeBase, sessionId, files: files ?? [], mode: opts?.mode ?? 'chat' }),
       signal: ac.signal,
     })
 

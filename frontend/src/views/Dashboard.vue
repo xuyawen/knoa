@@ -92,10 +92,18 @@ watch(trendRange, (r) => { void loadTrend(r) })
 const activeTrend = computed(() => {
   const t = trendData.value
   if (!t) return { points: [] as number[], labels: [] as string[], max: 1, labelStep: 1 }
-  const pts = t.points.map((p) => p.aiAnswers)
+  // 访问趋势 = 问答 + 搜索 的总访问量
+  const pts = t.points.map((p) => p.aiAnswers + p.searches)
   const labelStep = t.labels.length > 12 ? Math.ceil(t.labels.length / 8) : 1
   return { points: pts, labels: t.labels, max: Math.max(1, ...pts), labelStep }
 })
+// 明细表每列独立最大值，用于迷你条形图按比例缩放
+const visitMaxAi = computed(() =>
+  Math.max(1, ...(trendData.value?.points ?? []).map((p) => p.aiAnswers)),
+)
+const visitMaxSearch = computed(() =>
+  Math.max(1, ...(trendData.value?.points ?? []).map((p) => p.searches)),
+)
 const chartH = 220
 const chartW = 520
 function buildPath(points: number[], max: number): string {
@@ -489,8 +497,18 @@ onMounted(() => {
         <DataTable :columns="visitColumns" :rows="trendData?.points ?? []">
           <template #cell="{ row, col, index }">
             <template v-if="col.key === 'label'">{{ trendData?.labels[index] }}</template>
-            <template v-else-if="col.key === 'aiAnswers'">{{ row.aiAnswers }}</template>
-            <template v-else-if="col.key === 'searches'">{{ row.searches }}</template>
+            <template v-else-if="col.key === 'aiAnswers'">
+              <div class="vcell">
+                <div class="vbar vbar-ask" :style="{ width: (row.aiAnswers / visitMaxAi) * 100 + '%' }"></div>
+                <span class="vnum">{{ row.aiAnswers }}</span>
+              </div>
+            </template>
+            <template v-else-if="col.key === 'searches'">
+              <div class="vcell">
+                <div class="vbar vbar-search" :style="{ width: (row.searches / visitMaxSearch) * 100 + '%' }"></div>
+                <span class="vnum">{{ row.searches }}</span>
+              </div>
+            </template>
           </template>
           <template #empty>暂无数据</template>
         </DataTable>
@@ -618,6 +636,14 @@ onMounted(() => {
 
 /* ---- 操作记录 ---- */
 .ops-section { padding: 22px 24px; overflow: hidden; }
+
+/* 访问量明细：迷你条形 + 数值 */
+.vcell { display: flex; align-items: center; gap: 8px; min-width: 90px; }
+.vbar { height: 8px; border-radius: 4px; flex-shrink: 0; transition: width var(--dur-fast) var(--ease-out); }
+.vbar-ask { background: linear-gradient(90deg, color-mix(in srgb, var(--brand) 55%, transparent), var(--brand)); }
+.vbar-search { background: linear-gradient(90deg, color-mix(in srgb, var(--accent-blue) 55%, transparent), var(--accent-blue)); }
+.vnum { font-size: 13px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
 .act-tag {
   display:inline-flex; align-items:center; gap:4px; padding:2px 9px;
   border-radius:var(--radius-pill); font-size:12px; font-weight:500;

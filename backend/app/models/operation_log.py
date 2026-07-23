@@ -16,6 +16,7 @@ ACTION_LABELS = {
     "reject": "审核驳回",
     "delete": "删除文档",
     "ask": "AI 问答",
+    "search": "智能搜索",
     "download": "下载",
 }
 
