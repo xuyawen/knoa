@@ -93,6 +93,18 @@ class Settings(BaseSettings):
     MINIO_BUCKET: str = "knoa"
     MINIO_REGION: str = "us-east-1"
     MINIO_USE_SSL: bool = False
+    # 阿里云 OSS（前端直传 + 服务端 PostObject 签名，零 SDK）。
+    # 服务端用 AccessKeySecret 算签名给前端，前端直接 POST 到 OSS，后端只存可访问 URL。
+    # bucket 建议设为公共读（public-read），这样后端摄入回抓字节、大模型读取图片附件都能直接访问；
+    # 若为私有桶则需对读取方下发签名 URL（本实现暂按公共读设计）。
+    OSS_ENABLED: bool = False           # 显式 True 才启用 OSS 直传（否则前端回退 base64 旧流程）
+    OSS_BUCKET: str = ""
+    OSS_ENDPOINT: str = ""              # 形如 oss-cn-hangzhou.aliyuncs.com（不含 https://）
+    OSS_REGION: str = ""                # 形如 cn-hangzhou
+    OSS_ACCESS_KEY_ID: str = ""
+    OSS_ACCESS_KEY_SECRET: str = ""
+    OSS_UPLOAD_PREFIX: str = "uploads"  # 对象 key 前缀（区分文档/对话：uploads/docs、uploads/chat）
+    OSS_MAX_SIZE: int = 100 * 1024 * 1024  # 单文件上限 100MB
     # App
     APP_ENV: str = "development"
     CORS_ORIGINS: str = "http://localhost:5173"

@@ -40,7 +40,9 @@ class SourceItemOut(CamelModel):
     id: int
     chunk_id: str
     kb: str
+    kb_id: str | None = None   # KB UUID（前端点查看详情用）
     title: str
+    doc_id: str | None = None  # 文档 UUID（前端点查看详情用）
     snippet: str
     confidence: float
     source_type: str = "kb"   # 'kb' | 'web'
@@ -120,6 +122,7 @@ class DocumentUploadIn(CamelModel):
     filename: str
     content: str | None = None       # 文本路径（md/txt 直传文本，向后兼容）
     content_b64: str | None = None    # 二进制路径（docx/pdf 传 base64 原始字节）
+    file_url: str | None = None       # OSS 直传后的可访问地址（前端直传 OSS 时回传）
     tags: list[str] | None = None          # 标签（架构图1 标签体系）
     category: str | None = None             # 分类
     department_id: str | None = None        # 归属部门（架构图2/5 部门隔离）

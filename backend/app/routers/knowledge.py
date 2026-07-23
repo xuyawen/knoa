@@ -27,6 +27,7 @@ from app.database import AsyncSessionLocal
 from app.core.security import (
     get_accessible_kb_ids,
     get_current_user,
+    get_kb_permission_level,
     LEVEL_ORDER,
     require_kb_access,
     require_roles,
@@ -414,8 +415,22 @@ async def upload_document(
 
     filename = payload.filename or "untitled"
 
-    # 1) 还原原始字节：优先二进制（base64），其次文本路径（向后兼容）
-    if payload.content_b64:
+    # 1) 还原原始字节：三种来源
+    #    a) file_url：前端已直传到 OSS，后端按 URL 回抓字节（仅存 URL，不落本地存储）
+    #    b) content_b64：二进制 base64（向后兼容旧前端流程）
+    #    c) content：纯文本（md/txt 直传）
+    source_path: str | None = None
+    if payload.file_url:
+        try:
+            from app.core.oss import normalize_url
+            from app.core.rag.fetchers import fetch_url_bytes
+            source_path = normalize_url(payload.file_url)  # SSRF 校验：必须是本 OSS 桶地址
+            raw = await fetch_url_bytes(source_path, max_bytes=settings.OSS_MAX_SIZE or 100 * 1024 * 1024)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"file_url 非法：{e}")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"从 OSS 拉取文件失败：{e}")
+    elif payload.content_b64:
         try:
             raw = base64.b64decode(payload.content_b64, validate=True)
         except Exception:
@@ -423,37 +438,48 @@ async def upload_document(
     elif payload.content is not None:
         raw = payload.content.encode("utf-8")
     else:
-        raise HTTPException(status_code=422, detail="content 与 content_b64 至少提供其一")
+        raise HTTPException(status_code=422, detail="content / content_b64 / file_url 至少提供其一")
 
-    # 1b) 大小防护：解码后原始字节上限 20MB，防止超大/恶意文件撑爆内存
-    #     （PDF/DOCX 解析还会进一步放大，故在落库前拦截）
-    MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+    # 1b) 大小防护：解码后原始字节上限（OSS 直传走 OSS_MAX_SIZE，旧流程保持 20MB）
+    MAX_UPLOAD_BYTES = settings.OSS_MAX_SIZE or (20 * 1024 * 1024)
     if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="文件过大，单篇上传上限 20MB")
+        raise HTTPException(status_code=413, detail="文件过大，单篇上传上限超限")
 
-    # 2) 原始文件落对象存储（key 含 uuid 防重名；source_path 记录其位置用于溯源）
-    store = get_object_store()
-    object_key = f"uploads/{kb_id}/{uuid.uuid4().hex}_{filename}"
-    await store.put(object_key, raw)
+    # 2) 原始文件落存储：OSS 直传场景 source_path 已是可访问 URL（不重复落本地库），
+    #    旧流程才把字节写入对象存储并记 key 用于溯源/重解析。
+    store = None
+    object_key = None
+    if source_path is None:
+        store = get_object_store()
+        object_key = f"uploads/{kb_id}/{uuid.uuid4().hex}_{filename}"
+        await store.put(object_key, raw)
+        source_path = object_key
 
     # 3) 按扩展名解析：文本走原 parse_document；图片/音频/视频走多模态解析器。
-    #    解析失败则清理已存的原始文件并回 415。
+    #    解析失败则清理已存的原始文件并回 415（仅本地存储时才需清理）。
+    async def _cleanup():
+        if store is not None and object_key:
+            try:
+                await store.delete(object_key)
+            except Exception:
+                pass
+
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     text_exts = {"md", "markdown", "txt", "docx", "pdf"}
     if ext in text_exts:
         try:
             parsed = parse_document(filename, raw)
         except UnsupportedFormatError as e:
-            await store.delete(object_key)
+            await _cleanup()
             raise HTTPException(status_code=415, detail=str(e))
     elif ext in IMAGE_EXTS | AUDIO_EXTS | VIDEO_EXTS:
         try:
             parsed = await parse_multimodal(filename, raw, get_llm())
         except UnsupportedFormatError as e:
-            await store.delete(object_key)
+            await _cleanup()
             raise HTTPException(status_code=415, detail=str(e))
     else:
-        await store.delete(object_key)
+        await _cleanup()
         raise HTTPException(
             status_code=415,
             detail=f"不支持的文件格式 .{ext or '未知'}，当前支持：md / txt / docx / pdf / 图片 / 音频 / 视频",
@@ -468,7 +494,7 @@ async def upload_document(
     doc = Document(
         kb_id=kb_id,
         title=title,
-        source_path=object_key,
+        source_path=source_path,
         content_md=parsed.text,
         status="待复核",
         original_filename=filename,
@@ -528,6 +554,37 @@ def _doc_out(d: Document) -> DocumentOut:
         uploader_name=d.uploader_name,
         scope=d.scope,
         parse_status=d.parse_status,
+    )
+
+
+@router.get("/documents/{doc_id}", response_model=DocumentDetailOut)
+async def get_document_by_id(
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """按文档 id 直接取详情（操作审计/问答溯源点击预览用）。
+
+    文档 id 全局唯一，这里先查出文档得到 kb_id，再走和按 kb 查一样的
+    权限校验（admin 可见全部；其余用户须对该 kb 有 view 权限）。
+    """
+    doc = await db.scalar(select(Document).where(Document.id == doc_id))
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    level = await get_kb_permission_level(db, doc.kb_id, user)
+    if level is None or LEVEL_ORDER.get(level, 0) < LEVEL_ORDER.get("view", 0):
+        raise HTTPException(status_code=403, detail="无权访问该文档")
+    return DocumentDetailOut(
+        id=str(doc.id),
+        title=doc.title,
+        type=_doc_type(doc.source_path),
+        status=doc.status,
+        content_md=doc.content_md,
+        original_filename=doc.original_filename,
+        file_size=doc.file_size,
+        updated_at=doc.updated_at.isoformat() if doc.updated_at else "",
+        reviewed_at=doc.reviewed_at.isoformat() if doc.reviewed_at else None,
+        reviewed_by=doc.reviewed_by,
     )
 
 
@@ -787,8 +844,10 @@ _TYPE_MAP = {
 
 
 def _doc_type(source_path: str) -> str:
-    """按文件名/存储 key 的扩展名推断文档类型（覆盖 md/txt/docx/pdf）。"""
-    ext = source_path.rsplit(".", 1)[-1].lower() if "." in source_path else "txt"
+    """按文件名/存储 key 的扩展名推断文档类型（覆盖 md/txt/docx/pdf）。
+    兼容 OSS 直传后的完整 URL（先取路径末段文件名，再取扩展名）。"""
+    name = source_path.rsplit("/", 1)[-1]  # URL/key 末段文件名
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else "txt"
     return _TYPE_MAP.get(ext, "TXT")
 
 

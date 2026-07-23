@@ -28,6 +28,7 @@ from app.routers import (
     departments,
     events,
     feedback,
+    oss,
     graph,
     health,
     knowledge,
@@ -214,3 +215,4 @@ app.include_router(tasks.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
 app.include_router(operations.router, prefix="/api")
 app.include_router(announcements.router, prefix="/api")
+app.include_router(oss.router, prefix="/api")
