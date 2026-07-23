@@ -96,7 +96,6 @@ const subMenus: Record<string, SubItem[]> = {
   search: [
     { label: '智能搜索', icon: 'search', to: '/search', activeNames: ['search'] },
     { label: '搜索历史', icon: 'clock', to: '/search/history', activeNames: ['search-history'] },
-    { label: '热门搜索', icon: 'fire', to: '/search/popular', activeNames: ['search-popular'] },
   ],
   chat: [
     { label: '新建对话', icon: 'plus', to: '/chat/new', activeNames: ['chat', 'chat-new'] },

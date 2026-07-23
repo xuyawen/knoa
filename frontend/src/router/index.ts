@@ -12,7 +12,6 @@ import Dashboard from '@/views/Dashboard.vue'
 import Documents from '@/views/Documents.vue'
 import Search from '@/views/Search.vue'
 import SearchHistory from '@/views/SearchHistory.vue'
-import SearchPopular from '@/views/SearchPopular.vue'
 import Chat from '@/views/Chat.vue'
 import Graph from '@/views/Graph.vue'
 import Permission from '@/views/Permission.vue'
@@ -45,7 +44,6 @@ const routes: RouteRecordRaw[] = [
       // ===== 智能搜索（一个页面一个文件）=====
       { path: 'search', name: 'search', component: Search, meta: { title: '智能搜索', icon: 'search' } },
       { path: 'search/history', name: 'search-history', component: SearchHistory, meta: { title: '智能搜索', icon: 'clock' } },
-      { path: 'search/popular', name: 'search-popular', component: SearchPopular, meta: { title: '智能搜索', icon: 'fire' } },
 
       // ===== AI 智能问答 =====
       { path: 'chat', name: 'chat', component: Chat, props: { section: 'new' }, meta: { title: 'AI 智能问答', icon: 'chat' } },
