@@ -568,12 +568,17 @@ const sidebarCollapsed = ref(false)
   min-width: 0;
   border-right: none;
 }
+/* 内部元素锁定最小宽度=展开宽度，收缩时被 overflow:hidden 裁切而非重排挤压 */
+.sub-sidebar > * {
+  min-width: var(--sidebar-w);
+}
 .sub-sidebar-header {
   padding: 18px 18px 12px;
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   flex-shrink: 0;
+  white-space: nowrap;
 }
 .sub-nav {
   display: flex;
@@ -597,6 +602,7 @@ const sidebarCollapsed = ref(false)
   cursor: pointer;
   text-align: left;
   width: 100%;
+  white-space: nowrap;
   transition: all var(--dur-fast) var(--ease-out);
 }
 .sub-item:hover {
@@ -630,6 +636,7 @@ const sidebarCollapsed = ref(false)
   font-family: inherit;
   transition: all var(--dur-fast) var(--ease-out);
   width: 100%;
+  white-space: nowrap;
 }
 .sub-collapse:hover {
   background: var(--bg-hover);
