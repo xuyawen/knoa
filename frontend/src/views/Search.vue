@@ -190,15 +190,16 @@ function scopeLabel(scope: string): string {
           </button>
         </div>
 
+        <div class="filter-bar card">
+          <CustomSelect v-model="filterType" :options="typeOpts" placeholder="文件类型" width="110px" />
+          <CustomSelect v-model="filterScope" :options="scopeOpts" placeholder="权限范围" width="120px" />
+          <CustomSelect v-model="filterStatus" :options="statusOpts" placeholder="文档状态" width="110px" />
+          <button class="btn-link muted" @click="resetFilters">清空</button>
+          <button class="btn btn-primary btn-sm" @click="runSearch(results?.page ?? 1)">应用筛选</button>
+        </div>
+
         <div v-if="submitted" class="result-area card">
           <div class="result-toolbar">
-            <div class="filter-row">
-              <CustomSelect v-model="filterType" :options="typeOpts" placeholder="文件类型" width="110px" />
-              <CustomSelect v-model="filterScope" :options="scopeOpts" placeholder="权限范围" width="120px" />
-              <CustomSelect v-model="filterStatus" :options="statusOpts" placeholder="文档状态" width="110px" />
-              <button class="btn-link muted" @click="resetFilters">清空</button>
-              <button class="btn btn-primary btn-sm" @click="runSearch(results?.page ?? 1)">应用筛选</button>
-            </div>
             <div class="result-meta">
               找到约 <b>{{ results?.total ?? 0 }}</b> 条结果
               <span v-if="searchCost !== null">（用时 {{ searchCost.toFixed(3) }} 秒）</span>
@@ -393,6 +394,15 @@ function scopeLabel(scope: string): string {
 }
 .sb-clear:hover { background: var(--bg-hover); }
 
+/* 筛选条（默认展示在搜索框下方） */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+}
+
 /* 结果区 */
 .result-area {
   flex: 1;
@@ -402,15 +412,9 @@ function scopeLabel(scope: string): string {
   min-height: 300px;
 }
 .result-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 14px;
-}
-.filter-row {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
 .result-meta {
   font-size: 13px; color: var(--text-secondary);
