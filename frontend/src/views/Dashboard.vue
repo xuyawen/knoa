@@ -8,12 +8,11 @@ import Icon from '@/components/ui/Icon.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
 import {
-  getDashboardMetrics, getTrend, getDocCategory, getOperations, getAnnouncements, getDocStats,
+  getDashboardMetrics, getTrend, getDocCategory, getOperations, getAnnouncements, getDocStats, getUserStats,
 } from '@/api'
-import { getUserList } from '@/api/auth'
 import type {
-  DashboardMetrics, TrendResponse, DocCategory, DocStats,
-  OperationsResponse, OperationLogItem, Announcement, UserOut, Paginated,
+  DashboardMetrics, TrendResponse, DocCategory, DocStats, UserStats,
+  OperationsResponse, OperationLogItem, Announcement,
 } from '@/types/api'
 
 const kb = useKnowledgeStore()
@@ -189,6 +188,11 @@ const visitColumns = [
   { key: 'aiAnswers', title: '问答次数' },
   { key: 'searches', title: '搜索次数' },
 ]
+const userStatusColumns = [
+  { key: 'status', title: '状态' },
+  { key: 'count', title: '用户数' },
+  { key: 'ratio', title: '占比' },
+]
 
 // ── 文档统计分区（真实，来自 getDocCategory + doc-stats）──
 const docStats = ref<DocStats | null>(null)
@@ -248,24 +252,57 @@ const recentTrendMax = computed(() => Math.max(1, ...(docStats.value?.recentTren
 const announcements = ref<Announcement[]>([])
 async function loadAnnouncements() { announcements.value = (await getAnnouncements()).items }
 
-// ── 用户统计分区（真实，来自 dashboard.activeUsers + /api/auth/users）──
-const totalUsers = ref<number | null>(null)
-const newUsers30 = ref<number | null>(null)
-async function loadUsers() {
-  // 活跃用户已在 metrics 中；总用户/近30天新增需 admin 接口，失败则降级只显示活跃数
-  try {
-    const users: Paginated<UserOut> = await getUserList(1, 1000)
-    totalUsers.value = users.total
-    const cutoff = Date.now() - 30 * 24 * 3600 * 1000
-    newUsers30.value = users.items.filter((u) => {
-      const t = u.createdAt ? new Date(u.createdAt).getTime() : NaN
-      return !isNaN(t) && t >= cutoff
-    }).length
-  } catch {
-    totalUsers.value = null
-    newUsers30.value = null
-  }
+// ── 用户统计分区（真实，来自 /api/analytics/user-stats）──
+const userStats = ref<UserStats | null>(null)
+async function loadUserStats() { userStats.value = await getUserStats() }
+
+const totalUsers = computed(() => userStats.value?.totalUsers ?? null)
+const newUsers30 = computed(() => userStats.value?.newUsers30 ?? null)
+
+const ROLE_LABEL: Record<string, string> = {
+  admin: '管理员', editor: '编辑', viewer: '浏览者',
 }
+const ROLE_ICON: Record<string, string> = {
+  admin: 'shield', editor: 'edit', viewer: 'eye',
+}
+const roleTotal = computed(() => userStats.value?.byRole?.reduce((s, r) => s + r.count, 0) || 0)
+const roleBarData = computed(() => {
+  const sorted = [...(userStats.value?.byRole ?? [])].sort((a, b) => b.count - a.count)
+  const max = Math.max(1, ...sorted.map((r) => r.count))
+  return sorted.map((r, i) => ({
+    ...buildDocStatsBar(ROLE_LABEL[r.role] || r.role, r.count, (i % 5) + 1, roleTotal.value, max),
+    key: r.role,
+    icon: ROLE_ICON[r.role] || 'user',
+  }))
+})
+
+function userStatusTagClass(s: string): string {
+  return s === '启用' ? 'success' : 'danger'
+}
+const userStatusTotal = computed(() => userStats.value?.byStatus?.reduce((s, r) => s + r.count, 0) || 0)
+
+// 用户活跃趋势折线（复用文档趋势的 SVG 尺寸与绘制函数）
+const userActiveTrend = computed(() => {
+  const pts = userStats.value?.activeTrend ?? []
+  const counts = pts.map((p) => p.count)
+  return { points: counts, labels: pts.map((p) => p.date), max: Math.max(1, ...counts, 0) }
+})
+const userLinePath = computed(() => buildPath(userActiveTrend.value.points, userActiveTrend.value.max))
+const userAreaPath = computed(() => {
+  const p = userLinePath.value
+  if (!p) return ''
+  return `${p} L ${chartW.toFixed(1)} ${chartH} L 0 ${chartH} Z`
+})
+const userDotCoords = computed(() =>
+  userActiveTrend.value.points.map((v, i) => {
+    const stepX = chartW / (userActiveTrend.value.points.length - 1 || 1)
+    const padY = 20; const drawH = chartH - padY * 2
+    return { cx: (i * stepX).toFixed(1), cy: (chartH - padY - (v / userActiveTrend.value.max) * drawH).toFixed(1), val: v }
+  }),
+)
+
+// 近7天新增用户迷你柱状图
+const recentNewMax = computed(() => Math.max(1, ...(userStats.value?.recentNew ?? []).map((p) => p.count)))
 
 // ── 分区按需加载 ──
 function loadSection(s: string) {
@@ -278,7 +315,7 @@ function loadSection(s: string) {
   } else if (s === 'announcements') {
     void loadAnnouncements()
   } else if (s === 'users') {
-    void loadMetrics(); void loadUsers()
+    void loadMetrics(); void loadUserStats()
   }
 }
 watch(section, (s) => loadSection(s), { immediate: true })
@@ -592,16 +629,91 @@ onMounted(() => {
       </div>
     </template>
 
-    <!-- ====== 用户统计（真实：活跃用户 + 总用户 + 近30天新增）====== -->
+    <!-- ====== 用户统计（真实：来自 /api/analytics/user-stats）====== -->
     <template v-else-if="section === 'users'">
-      <div class="stats-row">
-        <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-violet-soft);color:var(--accent-violet)"><Icon name="users" :size="22"/></div><div class="sc-body"><div class="sc-label">活跃用户数（今日）</div><div class="sc-value">{{ metrics?.activeUsers ?? '—' }}</div></div></div>
+      <div class="stats-row three">
+        <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-violet-soft);color:var(--accent-violet)"><Icon name="users" :size="22"/></div><div class="sc-body"><div class="sc-label">活跃用户数（今日）</div><div class="sc-value">{{ userStats?.activeUsers ?? '—' }}</div></div></div>
         <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-blue-soft);color:var(--accent-blue)"><Icon name="user-plus" :size="22"/></div><div class="sc-body"><div class="sc-label">总用户数</div><div class="sc-value">{{ totalUsers ?? '—' }}</div></div></div>
         <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-green-soft);color:var(--accent-green)"><Icon name="sparkles" :size="22"/></div><div class="sc-body"><div class="sc-label">近30天新增</div><div class="sc-value">{{ newUsers30 ?? '—' }}</div></div></div>
       </div>
+
+      <div class="charts-row docs-row">
+        <!-- 按角色分布 -->
+        <div class="ops-section card">
+          <div class="panel-head"><span class="panel-title">按角色分布</span></div>
+          <div class="cat-bars slim">
+            <div v-for="b in roleBarData" :key="b.key" class="cat-bar-row">
+              <span class="cat-bar-label type-label">
+                <Icon :name="b.icon" :size="13" />
+                {{ b.label }}
+              </span>
+              <div class="cat-bar-track"><div class="cat-bar-fill" :class="'bar-seg-' + b.seg" :style="{ width: (b.width || 0) + '%' }"></div></div>
+              <span class="cat-bar-val">{{ b.value.toLocaleString() }}</span>
+              <span class="cat-bar-pct">{{ b.pct }}%</span>
+            </div>
+            <div v-if="!roleBarData.length" class="empty-hint">{{ totalUsers === null ? '无权限查看' : '暂无数据' }}</div>
+          </div>
+        </div>
+        <!-- 按状态分布 -->
+        <div class="ops-section card">
+          <div class="panel-head"><span class="panel-title">按状态分布</span></div>
+          <DataTable :columns="userStatusColumns" :rows="userStats?.byStatus ?? []">
+            <template #cell="{ row, col }">
+              <template v-if="col.key === 'status'">
+                <span class="status-tag" :class="userStatusTagClass(row.status)">{{ row.status }}</span>
+              </template>
+              <template v-else-if="col.key === 'count'">{{ row.count }}</template>
+              <template v-else-if="col.key === 'ratio'">{{ userStatusTotal ? ((row.count / userStatusTotal) * 100).toFixed(1) + '%' : '—' }}</template>
+            </template>
+            <template #empty>{{ totalUsers === null ? '无权限查看' : '暂无数据' }}</template>
+          </DataTable>
+        </div>
+      </div>
+
+      <div class="charts-row docs-row">
+        <!-- 近7天活跃用户趋势 -->
+        <div class="chart-panel card">
+          <div class="panel-head"><span class="panel-title">近7天活跃用户趋势</span></div>
+          <div class="chart-wrap">
+            <svg :viewBox="`0 0 ${chartW} ${chartH}`" class="trend-svg" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="areaGradUser" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="var(--accent-violet)" stop-opacity="0.18" />
+                  <stop offset="100%" stop-color="var(--accent-violet)" stop-opacity="0.01" />
+                </linearGradient>
+              </defs>
+              <g class="grid-lines">
+                <line v-for="n in 5" :key="n" :x1="0" :y1="(n-1)*(chartH/4)" :x2="chartW" :y2="(n-1)*(chartH/4)" stroke="var(--border)" stroke-dasharray="4,4" />
+              </g>
+              <path :d="userAreaPath" fill="url(#areaGradUser)" />
+              <path :d="userLinePath" fill="none" stroke="var(--accent-violet)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+              <g v-for="(d, i) in userDotCoords" :key="i">
+                <circle :cx="d.cx" :cy="d.cy" r="3.5" fill="var(--bg-elevated, var(--bg-surface))" stroke="var(--accent-violet)" stroke-width="1.8" />
+                <title>{{ userActiveTrend.labels[i] }} · {{ d.val }}</title>
+              </g>
+            </svg>
+            <div class="x-axis">
+              <span v-for="(lbl, i) in userActiveTrend.labels" :key="i" class="x-lbl">{{ lbl }}</span>
+            </div>
+          </div>
+        </div>
+        <!-- 近7天新增用户 -->
+        <div class="chart-panel card">
+          <div class="panel-head"><span class="panel-title">近7天新增用户</span></div>
+          <div v-if="(userStats?.recentNew ?? []).length" class="mini-bars">
+            <div v-for="p in userStats?.recentNew" :key="p.date" class="mini-bar-col">
+              <div class="mini-bar-track-v"><div class="mini-bar-fill-v" :style="{ height: (p.count / recentNewMax) * 100 + '%' }"></div></div>
+              <span class="mini-bar-val">{{ p.count }}</span>
+              <span class="mini-bar-date">{{ p.date }}</span>
+            </div>
+          </div>
+          <div v-else class="empty-hint">{{ totalUsers === null ? '无权限查看' : '暂无数据' }}</div>
+        </div>
+      </div>
+
       <div class="ops-section card">
         <div class="panel-head"><span class="panel-title">说明</span></div>
-        <p class="note-text">活跃用户数来自当日有操作（登录 / 问答 / 文档管理）的去重用户；总用户数与近30天新增来自用户列表（需管理员权限，无权限时仅显示活跃用户数）。</p>
+        <p class="note-text">活跃用户数来自当日有操作（登录 / 问答 / 文档管理）的去重用户；总用户数、角色/状态分布、近30天新增与近7天新增来自用户列表（仅管理员可见，无权限时仅显示活跃用户数与活跃趋势）。</p>
       </div>
     </template>
 
@@ -628,6 +740,7 @@ onMounted(() => {
 
 /* ---- 指标卡 ---- */
 .stats-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
+.stats-row.three { grid-template-columns: repeat(3, 1fr); }
 .stat-card {
   padding: 20px 22px;
   display: flex; align-items: center; gap: 16px;

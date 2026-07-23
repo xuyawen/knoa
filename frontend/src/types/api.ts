@@ -323,6 +323,16 @@ export interface RecentTrendPoint {
   count: number
 }
 
+export interface UserStats {
+  activeUsers: number
+  totalUsers: number | null
+  newUsers30: number | null
+  byRole: { role: string; count: number }[]
+  byStatus: { status: string; count: number }[]
+  recentNew: RecentTrendPoint[]
+  activeTrend: RecentTrendPoint[]
+}
+
 export interface DocStats {
   total: number
   byCategory: DocCategory[]

@@ -26,6 +26,7 @@ import type {
   SettingsUpdate,
   TtsResult,
   DocStats,
+  UserStats,
   DepartmentNode,
   DocumentTaskOut,
   DocumentList,
@@ -462,6 +463,13 @@ export async function getTrend(range: 'today' | 'week' | 'month' = 'week'): Prom
 /** 文档分类占比（饼图数据源）。 */
 export async function getDocCategory(): Promise<DocCategory[]> {
   const resp = await fetch('/api/analytics/doc-category', { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 用户统计：活跃/总用户/新增/角色/状态/近7天趋势（用户统计分区）。 */
+export async function getUserStats(): Promise<UserStats> {
+  const resp = await fetch('/api/analytics/user-stats', { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }

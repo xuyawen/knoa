@@ -147,6 +147,82 @@ async def doc_category(
     return [{"category": (r[0] or "未分类"), "count": r[1]} for r in rows]
 
 
+@router.get("/analytics/user-stats")
+async def user_stats(
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """用户统计：活跃数 / 总用户 / 新增 / 角色分布 / 状态分布 / 近7天趋势。
+
+    活跃用户/趋势来自 operation_log（所有登录用户可见）；
+    总用户/角色/状态/新增来自用户表（仅 admin 可见，非 admin 返回 null/空数组）。
+    """
+    now = datetime.now(timezone.utc)
+    t_start, _ = _today_range()
+
+    active_users = await _distinct_users(db, t_start)
+
+    active_trend: list[dict] = []
+    for i in range(7):
+        day_start = (now - timedelta(days=6 - i)).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        cnt = await db.scalar(
+            select(func.count(func.distinct(OperationLog.user_id)))
+            .select_from(OperationLog)
+            .where(
+                OperationLog.user_id.isnot(None),
+                OperationLog.created_at >= day_start,
+                OperationLog.created_at < day_end,
+            )
+        ) or 0
+        active_trend.append({"date": day_start.astimezone().strftime("%m-%d"), "count": cnt})
+
+    if current.role != "admin":
+        return {
+            "activeUsers": active_users,
+            "totalUsers": None,
+            "newUsers30": None,
+            "byRole": [],
+            "byStatus": [],
+            "recentNew": [],
+            "activeTrend": active_trend,
+        }
+
+    total_users = await db.scalar(select(func.count()).select_from(User)) or 0
+    cutoff = now - timedelta(days=30)
+    new_users_30 = await db.scalar(
+        select(func.count()).select_from(User).where(User.created_at >= cutoff)
+    ) or 0
+
+    by_role = (await db.execute(
+        select(User.role, func.count()).group_by(User.role).order_by(func.count().desc())
+    )).all()
+    by_status = (await db.execute(
+        select(User.is_active, func.count()).group_by(User.is_active).order_by(func.count().desc())
+    )).all()
+
+    recent_new: list[dict] = []
+    for i in range(7):
+        day_start = (now - timedelta(days=6 - i)).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        cnt = await db.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(User.created_at >= day_start, User.created_at < day_end)
+        ) or 0
+        recent_new.append({"date": day_start.astimezone().strftime("%m-%d"), "count": cnt})
+
+    return {
+        "activeUsers": active_users,
+        "totalUsers": total_users,
+        "newUsers30": new_users_30,
+        "byRole": [{"role": r[0], "count": r[1]} for r in by_role],
+        "byStatus": [{"status": ("启用" if r[0] else "停用"), "count": r[1]} for r in by_status],
+        "recentNew": recent_new,
+        "activeTrend": active_trend,
+    }
+
+
 @router.get("/analytics/doc-stats")
 async def doc_stats(
     db: AsyncSession = Depends(get_db),
