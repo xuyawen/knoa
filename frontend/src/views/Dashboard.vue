@@ -562,7 +562,7 @@ onMounted(() => {
 .sc-delta.down { color: var(--danger); }
 
 /* ---- 图表行 ---- */
-.charts-row { display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; }
+.charts-row { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; }
 .panel-head { display: flex; align-items: center; gap: 6px; margin-bottom: 16px; }
 .panel-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .phint { color: var(--text-tertiary); cursor: pointer; }
