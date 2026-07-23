@@ -674,6 +674,5 @@ const sidebarCollapsed = ref(false)
 .edge-expand-btn:hover {
   background: var(--brand-soft);
   color: var(--brand);
-  width: 30px;
 }
 </style>
