@@ -380,7 +380,6 @@ onMounted(() => {
 
     <!-- ====== docs 分区 ====== -->
     <template v-else-if="section === 'docs'">
-      <h2 class="page-title">文档统计</h2>
       <div class="stats-row">
         <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-blue-soft);color:var(--accent-blue)"><Icon name="doc" :size="22"/></div><div class="sc-body"><div class="sc-label">文档总数</div><div class="sc-value">{{ (docStats?.total ?? totalDocs).toLocaleString() }}</div></div></div>
         <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-green-soft);color:var(--accent-green)"><Icon name="check" :size="22"/></div><div class="sc-body"><div class="sc-label">已审核</div><div class="sc-value">{{ (byStatusCount('已审核')).toLocaleString() }}</div></div></div>
@@ -434,7 +433,6 @@ onMounted(() => {
 
     <!-- ====== popular 分区 ====== -->
     <template v-else-if="section === 'popular'">
-      <h2 class="page-title">热门内容</h2>
       <div class="chart-panel card">
         <div class="panel-head"><span class="panel-title">热门搜索榜</span><Icon name="fire" :size="14" class="phint"/></div>
         <div v-if="topTrending.length" class="trend-list">
@@ -450,7 +448,6 @@ onMounted(() => {
 
     <!-- ====== 访问分析（真实：复用趋势图 + 访问量明细表）====== -->
     <template v-else-if="section === 'analytics'">
-      <h2 class="page-title">访问分析</h2>
       <div class="chart-panel card">
         <div class="panel-head">
           <span class="panel-title">访问趋势</span>
@@ -502,7 +499,6 @@ onMounted(() => {
 
     <!-- ====== 用户统计（真实：活跃用户 + 总用户 + 近30天新增）====== -->
     <template v-else-if="section === 'users'">
-      <h2 class="page-title">用户统计</h2>
       <div class="stats-row">
         <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-violet-soft);color:var(--accent-violet)"><Icon name="users" :size="22"/></div><div class="sc-body"><div class="sc-label">活跃用户数（今日）</div><div class="sc-value">{{ metrics?.activeUsers ?? '—' }}</div></div></div>
         <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-blue-soft);color:var(--accent-blue)"><Icon name="user-plus" :size="22"/></div><div class="sc-body"><div class="sc-label">总用户数</div><div class="sc-value">{{ totalUsers ?? '—' }}</div></div></div>
@@ -516,7 +512,6 @@ onMounted(() => {
 
     <!-- ====== 系统公告（真实：getAnnouncements 列表）====== -->
     <template v-else>
-      <h2 class="page-title">系统公告</h2>
       <div v-if="announcements.length" class="ann-list">
         <div v-for="a in announcements" :key="a.id" class="ann-card card" :class="'lv-' + a.level">
           <div class="ann-head">
@@ -665,7 +660,6 @@ onMounted(() => {
 .ann-content { font-size:13px; color:var(--text-secondary); line-height:1.6; white-space:pre-wrap; }
 
 /* ---- 通用 ---- */
-.page-title { font-size:18px; font-weight:700; color:var(--text-primary); margin:0 0 16px; }
 .score-pill {
   display:inline-block; min-width:30px; text-align:center; padding:2px 10px;
   border-radius:var(--radius-pill); font-weight:700; font-size:12px;

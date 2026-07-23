@@ -180,14 +180,6 @@ const roleMatrix = [
 
 <template>
   <div class="page perm fade-up">
-    <header class="page-head">
-      <div class="flex items-center">
-        <h1 class="page-title">权限管理</h1>
-        <span class="sync-flag"><Icon name="shield" :size="12" />同步自后端 RBAC</span>
-      </div>
-      <p class="page-sub">基于角色的访问控制（RBAC），按用户维度下发权限</p>
-    </header>
-
     <div class="perm-body">
       <!-- 用户管理 -->
       <section class="card perm-users">
@@ -363,15 +355,6 @@ const roleMatrix = [
 .page { padding: 20px 24px; }
 .flex { display: flex; }
 .items-center { align-items: center; }
-.page-head { margin-bottom: 18px; }
-.page-title { font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0; }
-.sync-flag {
-  display: inline-flex; align-items: center; gap: 4px;
-  margin-left: 10px; padding: 2px 9px; border-radius: var(--radius-pill);
-  font-size: 11px; color: var(--brand); background: var(--brand-soft);
-}
-.page-sub { margin: 6px 0 0; font-size: 13px; color: var(--text-tertiary); }
-
 .perm-body {
   display: grid;
   grid-template-columns: 1fr 360px;

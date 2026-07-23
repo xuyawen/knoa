@@ -152,8 +152,6 @@ function clearSearch() {
 
 <template>
   <div class="search-page">
-    <h2 class="page-title">智能搜索</h2>
-
     <!-- ====== 热门搜索（真实 trending）====== -->
     <template v-if="section === 'popular'">
       <div class="card popular-card">
@@ -329,13 +327,6 @@ function clearSearch() {
   flex-direction: column;
   gap: 16px;
 }
-.page-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0;
-}
-
 /* ---- 搜索栏 ---- */
 .search-bar-row {
   display: flex;

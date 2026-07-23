@@ -416,8 +416,6 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
 
 <template>
   <div class="graph-page">
-    <h2 class="page-title">知识图谱</h2>
-
     <!-- ====== 全局图谱 ====== -->
     <template v-if="section === 'global'">
     <!-- ====== 工具栏 ====== -->
@@ -771,7 +769,6 @@ watch([gFilterType, gFilterBiz, gFilterTime], () => {
 
 <style scoped>
 .graph-page { display: flex; flex-direction: column; gap: 14px; }
-.page-title { font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0; }
 
 /* ---- 工具栏 ---- */
 .graph-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; gap: 12px; }

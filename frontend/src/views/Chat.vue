@@ -597,7 +597,6 @@ watch(messages, scrollToBottom, { deep: false })
     <!-- ====== 问答记录 ====== -->
     <template v-else-if="section === 'records'">
       <div class="secondary-page">
-        <h2 class="page-title">问答记录</h2>
         <div class="card records-card">
           <DataTable
             :columns="recordColumns"
@@ -630,7 +629,6 @@ watch(messages, scrollToBottom, { deep: false })
     <!-- ====== 模型配置 ====== -->
     <template v-else>
       <div class="secondary-page">
-        <h2 class="page-title">模型配置</h2>
         <div class="card model-card">
           <div class="model-card-header">
             <h3 class="model-card-title">问答模型</h3>

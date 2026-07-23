@@ -517,8 +517,6 @@ async function confirmBatchDelete() {
 
 <template>
   <div class="docs-page">
-    <h2 class="page-title">文档管理</h2>
-
     <!-- 分区说明横幅 -->
     <div v-if="section === 'archive'" class="scope-banner warn">
       <Icon name="archive" :size="14" />
@@ -771,13 +769,6 @@ async function confirmBatchDelete() {
   flex-direction: column;
   gap: 16px;
 }
-.page-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0;
-}
-
 /* 分区说明横幅 */
 .scope-banner {
   display: flex;
