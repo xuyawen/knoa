@@ -2,7 +2,7 @@ import asyncio
 import base64
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, or_, select
@@ -308,6 +308,7 @@ async def search_docs(
     scope: str | None = None,
     category: str | None = None,
     status: str | None = Query("已审核", description="文档状态"),
+    updated_after: str | None = Query(None, description="更新时间过滤：7d/30d/90d/180d"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -334,6 +335,12 @@ async def search_docs(
         base = base.where(Document.scope == scope)
     if category:
         base = base.where(Document.category == category)
+    if updated_after:
+        days_map = {"7d": 7, "30d": 30, "90d": 90, "180d": 180}
+        days = days_map.get(updated_after)
+        if days:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            base = base.where(Document.updated_at >= cutoff)
 
     stmt = base.order_by(Document.updated_at.desc())
     rows, total = await paginate(db, stmt, page=page, page_size=size)
