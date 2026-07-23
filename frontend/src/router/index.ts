@@ -41,7 +41,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'documents/archive', name: 'docs-archive', component: Documents, props: { section: 'archive' }, meta: { title: '文档管理', icon: 'archive' } },
 
       // ===== 智能搜索 =====
-      { path: 'search', name: 'search', component: Search, props: { section: 'history' }, meta: { title: '智能搜索', icon: 'search' } },
+      { path: 'search', name: 'search', component: Search, props: { section: 'search' }, meta: { title: '智能搜索', icon: 'search' } },
+      { path: 'search/history', name: 'search-history', component: Search, props: { section: 'history' }, meta: { title: '智能搜索', icon: 'clock' } },
       { path: 'search/popular', name: 'search-popular', component: Search, props: { section: 'popular' }, meta: { title: '智能搜索', icon: 'fire' } },
       { path: 'search/filters', name: 'search-filters', component: Search, props: { section: 'filters' }, meta: { title: '智能搜索', icon: 'filter' } },
 
