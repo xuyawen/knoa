@@ -164,27 +164,15 @@ async def doc_stats(
         .order_by(func.count().desc())
     )).all()
     # 文档类型从 source_path 扩展名推断（与 knowledge.py _doc_type 对齐）
+    type_expr = case(
+        (Document.source_path.ilike("%.pdf"), "PDF"),
+        (Document.source_path.ilike("%.docx"), "DOCX"),
+        (Document.source_path.ilike("%.md"), "MD"),
+        (Document.source_path.ilike("%.txt"), "TXT"),
+        else_="其他",
+    )
     by_type = (await db.execute(
-        select(
-            case(
-                (Document.source_path.ilike("%.pdf"), "PDF"),
-                (Document.source_path.ilike("%.docx"), "DOCX"),
-                (Document.source_path.ilike("%.md"), "MD"),
-                (Document.source_path.ilike("%.txt"), "TXT"),
-                else_="其他",
-            ),
-            func.count(),
-        )
-        .group_by(
-            case(
-                (Document.source_path.ilike("%.pdf"), "PDF"),
-                (Document.source_path.ilike("%.docx"), "DOCX"),
-                (Document.source_path.ilike("%.md"), "MD"),
-                (Document.source_path.ilike("%.txt"), "TXT"),
-                else_="其他",
-            ),
-        )
-        .order_by(func.count().desc())
+        select(type_expr, func.count()).group_by(type_expr).order_by(func.count().desc())
     )).all()
     total = await db.scalar(select(func.count()).select_from(Document)) or 0
 
