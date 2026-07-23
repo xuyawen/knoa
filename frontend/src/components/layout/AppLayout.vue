@@ -273,7 +273,7 @@ const sidebarCollapsed = ref(false)
           title="展开菜单"
           @click="sidebarCollapsed = false"
         >
-          <Icon name="chevrons-right" :size="16" />
+          <Icon name="chevrons-right" :size="20" />
         </button>
         <router-view />
       </main>
@@ -653,13 +653,13 @@ const sidebarCollapsed = ref(false)
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 48px;
+  width: 26px;
+  height: 56px;
   border: none;
   border-right: 1px solid var(--border);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
   background: var(--bg-surface);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   cursor: pointer;
   z-index: 10;
   transition: all var(--dur-fast) var(--ease-out);
@@ -667,6 +667,6 @@ const sidebarCollapsed = ref(false)
 .edge-expand-btn:hover {
   background: var(--brand-soft);
   color: var(--brand);
-  width: 24px;
+  width: 30px;
 }
 </style>
