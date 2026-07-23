@@ -1,13 +1,9 @@
 <script setup lang="ts">
-// AI 智能问答 — 按 640(5).png 截图 1:1 还原，接真实 SSE 流式问答。
-// section 由路由决定（new/history/records/model）。
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+// 智能问答 — 对话主界面，接真实 SSE 流式问答。
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
-import CustomSelect from '@/components/ui/CustomSelect.vue'
-import Pagination from '@/components/ui/Pagination.vue'
-import DataTable from '@/components/ui/DataTable.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import AppModal from '@/components/ui/AppModal.vue'
 import { useToastStore } from '@/stores/toast'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -19,6 +15,7 @@ import {
   submitFeedback,
   deleteFeedback,
   ttsSpeak,
+  getDocument,
 } from '@/api'
 import type {
   ChatSession,
@@ -28,10 +25,29 @@ import type {
   SourceItem,
   ChatAttachment,
   Paginated,
+  DocumentDetail,
 } from '@/types/api'
+import { uploadToOss } from '@/utils/oss'
+
+// 读取 ModelConfig 页持久化的模型配置（localStorage: knoa.model.*），
+// 拼成后端 AskRequest 接受的字段随每次问答下发。空值不传，走后端默认。
+function readModelConfig(): Record<string, unknown> {
+  const K = 'knoa.model'
+  const get = (k: string) => localStorage.getItem(`${K}.${k}`)
+  const cfg: Record<string, unknown> = {}
+  const name = get('name')
+  if (name) cfg.model = name
+  const temp = get('temp'); if (temp) cfg.temperature = Number(temp)
+  const topP = get('topP'); if (topP) cfg.topP = Number(topP)
+  const maxT = get('maxTokens'); if (maxT) cfg.maxTokens = Number(maxT)
+  const topK = get('topK'); if (topK) cfg.topK = Number(topK)
+  const ws = get('webSearch'); if (ws !== null) cfg.webSearch = ws === 'true'
+  const sp = get('systemPrompt'); if (sp) cfg.systemPrompt = sp
+  const cm = get('conciseMode'); if (cm !== null) cfg.conciseMode = cm === 'true'
+  return cfg
+}
 
 const toast = useToastStore()
-const router = useRouter()
 const auth = useAuthStore()
 
 // 语音播报（P8）：朗读某条 AI 回答
@@ -51,46 +67,67 @@ async function speak(m: ChatMessage) {
   }
 }
 
-const props = defineProps<{ section?: string }>()
-const section = computed(() => props.section ?? 'new')
-
-// 模型配置（本地持久化，后端暂未提供全局模型设置接口）
-const MODEL_KEY = 'knoa.chat.model'
-const modelName = ref(localStorage.getItem(MODEL_KEY + '.name') || 'agnes-2.0-flash')
-const temperature = ref(Number(localStorage.getItem(MODEL_KEY + '.temp')) || 0.3)
-const maxTokens = ref(Number(localStorage.getItem(MODEL_KEY + '.max')) || 2000)
-function saveModel() {
-  localStorage.setItem(MODEL_KEY + '.name', modelName.value)
-  localStorage.setItem(MODEL_KEY + '.temp', String(temperature.value))
-  localStorage.setItem(MODEL_KEY + '.max', String(maxTokens.value))
-  toast.success('模型配置已保存')
-}
-
 // 从「问答记录」打开某会话：载入消息并切回对话视图
-function openSession(id: string) {
-  selectSession(id)
-  router.push('/chat/new')
-}
 
 const sessionsData = ref<Paginated<ChatSession> | null>(null)
-const sessions = computed(() => sessionsData.value?.items ?? [])
-const recordColumns = [
-  { key: 'title', title: '会话', strong: true },
-  { key: 'msgCount', title: '问答数' },
-  { key: 'updatedAt', title: '最近更新', mono: true },
-  { key: 'actions', title: '' },
-]
+const sessions = ref<ChatSession[]>([])
 const sessionPage = ref(1)
-const sessionPageSize = ref(20)
+const SESSION_PAGE_SIZE = 20
+const sessionLoadingMore = ref(false)
+const allSessionsLoaded = ref(false)
+const sessionTotal = ref(0)
+
 const activeId = ref<string | null>(null)
 const deleteTargetId = ref<string | null>(null)
+const showClearConfirm = ref(false)
 const messages = ref<ChatMessage[]>([])
 const streaming = ref(false)
 const inputText = ref('')
 const errorMsg = ref('')
 const askAbort = ref<AbortController | null>(null)
 const attached = ref<ChatAttachment[]>([])
-const showThinking = ref(false)
+const expandedThinking = ref<Set<string>>(new Set())
+function toggleThinking(id: string) {
+  const next = new Set(expandedThinking.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedThinking.value = next
+}
+
+// 组件卸载时清理进行中的问答流与 TTS 音频，避免对已销毁实例继续回调/播放
+onBeforeUnmount(() => {
+  askAbort.value?.abort()
+  if (audioEl) {
+    audioEl.pause()
+    audioEl = null
+  }
+})
+
+// 文档详情弹框
+const docDetail = ref<DocumentDetail | null>(null)
+const docDetailLoading = ref(false)
+const detail = computed(() => docDetail.value!)
+async function openDocDetail(s: SourceItem) {
+  // 联网来源：有链接则新窗口打开
+  if (s.sourceType === 'web' && s.url) {
+    window.open(s.url, '_blank', 'noopener,noreferrer')
+    return
+  }
+  // 知识库来源：必须有 kbId + docId 才能查文档详情
+  if (s.sourceType !== 'kb' || !s.kbId || !s.docId) {
+    toast.warning(s.sourceType === 'kb' ? '该引用缺少文档标识，无法查看详情' : '仅知识库来源支持查看文档详情')
+    return
+  }
+  docDetailLoading.value = true
+  docDetail.value = null
+  try {
+    docDetail.value = await getDocument(s.kbId, s.docId)
+  } catch (e: any) {
+    toast.error(`加载文档失败：${e?.message || e}`)
+  } finally {
+    docDetailLoading.value = false
+  }
+}
 
 const scrollRef = ref<HTMLElement | null>(null)
 
@@ -152,6 +189,13 @@ async function copyAnswer(m: ChatMessage) {
   }
 }
 
+/** 格式化文件大小。 */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function toChatMessage(m: SessionMessage): ChatMessage {
   return {
     id: crypto.randomUUID(),
@@ -165,15 +209,38 @@ function toChatMessage(m: SessionMessage): ChatMessage {
   }
 }
 
-/* ---------- 会话 ---------- */
-async function loadSessions(page = sessionPage.value, size = sessionPageSize.value) {
+/* ---------- 会话（懒加载） ---------- */
+const convListRef = ref<HTMLElement | null>(null)
+
+async function loadSessions(append = false) {
+  if (sessionLoadingMore.value || allSessionsLoaded.value) return
+  const page = append ? sessionPage.value + 1 : 1
   try {
+    if (append) sessionLoadingMore.value = true
+    const data = await getSessions(page, SESSION_PAGE_SIZE)
+    sessionsData.value = data
+    sessionTotal.value = data.total
     sessionPage.value = page
-    sessionPageSize.value = size
-    sessionsData.value = await getSessions(page, size)
+    if (append) {
+      sessions.value.push(...data.items)
+    } else {
+      sessions.value = [...data.items]
+    }
+    // 检查是否还有更多
+    allSessionsLoaded.value = data.items.length < SESSION_PAGE_SIZE || sessions.value.length >= data.total
   } catch (e: any) {
     toast.error(`加载会话失败：${e?.message || e}`)
+  } finally {
+    sessionLoadingMore.value = false
   }
+}
+
+/** 滚动到底部自动加载 */
+function onConvScroll(e: Event) {
+  const el = e.target as HTMLElement
+  if (!el || sessionLoadingMore.value || allSessionsLoaded.value) return
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+  if (nearBottom) loadSessions(true)
 }
 
 async function selectSession(id: string) {
@@ -198,7 +265,7 @@ async function newChat() {
     activeId.value = s.id
     messages.value = []
     errorMsg.value = ''
-    await loadSessions(1)
+    await loadSessions()
   } catch (e: any) {
     toast.error(`新建会话失败：${e?.message || e}`)
   }
@@ -223,6 +290,14 @@ async function confirmDeleteSession() {
   } finally {
     deleteTargetId.value = null
   }
+}
+
+/* ---------- 清空对话 ---------- */
+function confirmClear() {
+  messages.value = []
+  inputText.value = ''
+  showClearConfirm.value = false
+  toast.success('对话已清空')
 }
 
 /* ---------- 发送（SSE） ---------- */
@@ -273,6 +348,7 @@ async function send() {
   try {
     for await (const ev of streamAsk(text, null, sid, userMsg.attachments || undefined, {
       signal: ac.signal,
+      modelConfig: readModelConfig(),
     })) {
       if (ev.event === 'thinking') {
         aiMsg.thinkingSteps = [...(aiMsg.thinkingSteps || []), ev.data as ThinkingStep]
@@ -298,7 +374,16 @@ async function send() {
   } finally {
     streaming.value = false
     askAbort.value = null
-    loadSessions() // 刷新标题 / 时间
+    // 就地同步当前会话，不整页 reload，避免覆盖懒加载列表与滚动位置
+    const cur = sessions.value.find((x) => x.id === sid)
+    if (cur) {
+      cur.title = cur.title || text
+      cur.updatedAt = new Date().toISOString()
+      cur.msgCount = (cur.msgCount ?? 0) + 1
+    } else if (sessionsData.value) {
+      const fresh = sessionsData.value.items.find((x) => x.id === sid)
+      if (fresh) sessions.value.unshift(fresh)
+    }
   }
 }
 
@@ -321,10 +406,20 @@ async function onAttach(e: Event) {
     const kind = kindOf(f)
     if (!kind) continue
     try {
-      const b64 = await readFileB64(f)
-      attached.value.push({ kind, mimeType: f.type, dataB64: b64, name: f.name })
+      // 优先 OSS 直传拿可访问地址；未启用则回退本地 base64
+      try {
+        const { url } = await uploadToOss(f, 'uploads/chat')
+        attached.value.push({ kind, mimeType: f.type, url, name: f.name })
+      } catch (ossErr: any) {
+        if (String(ossErr?.message || '').includes('OSS 未启用')) {
+          const b64 = await readFileB64(f)
+          attached.value.push({ kind, mimeType: f.type, dataB64: b64, name: f.name })
+        } else {
+          throw ossErr
+        }
+      }
     } catch {
-      toast.error(`读取文件失败：${f.name}`)
+      toast.error(`读取/上传文件失败：${f.name}`)
     }
   }
   input.value = ''
@@ -352,29 +447,24 @@ function pick(s: string) {
   inputText.value = s
 }
 
-onMounted(async () => {
-  await loadSessions()
-  // 历史会话分区：默认打开最新一条有消息的会话做只读浏览
-  if (section.value === 'history' && sessions.value.length && !activeId.value) {
-    const firstWithMsg = sessions.value.find((s) => s.msgCount > 0) || sessions.value[0]
-    selectSession(firstWithMsg.id)
-  }
+onMounted(() => {
+  void loadSessions()
 })
 watch(messages, scrollToBottom, { deep: false })
 </script>
 
 <template>
-  <div class="chat-page" v-if="section === 'new' || section === 'history'">
+  <div class="chat-page">
     <!-- ====== 左栏：会话列表 ====== -->
     <aside class="chat-sidebar">
       <div class="sidebar-head">
         <div class="sidebar-title">
           <span>对话</span>
-          <span class="sidebar-count">{{ sessions.length }}</span>
+          <span class="sidebar-count">{{ sessionTotal }}</span>
         </div>
       </div>
 
-      <div class="conv-list">
+      <div class="conv-list" ref="convListRef" @scroll="onConvScroll">
         <button
           v-for="s in sessions"
           :key="s.id"
@@ -395,39 +485,37 @@ watch(messages, scrollToBottom, { deep: false })
             <Icon name="trash" :size="14" />
           </span>
         </button>
-        <p v-if="!sessions.length" class="conv-empty">还没有对话，点击右上角开始。</p>
+        <p v-if="!sessions.length && !sessionLoadingMore" class="conv-empty">还没有对话，点击右上角开始。</p>
+        <div v-if="sessionLoadingMore" class="conv-loading-more">
+          <span class="dot-sm" /><span class="dot-sm" /><span class="dot-sm" />
+        </div>
+        <p v-if="allSessionsLoaded && sessions.length > 0" class="conv-all-done">已全部加载</p>
       </div>
-      <Pagination
-        v-if="(sessionsData?.total ?? 0) > 0"
-        v-model:page="sessionPage"
-        v-model:page-size="sessionPageSize"
-        :total="sessionsData?.total ?? 0"
-        :page-sizes="[10, 20]"
-        @update:page="loadSessions()"
-        @update:page-size="loadSessions(1)"
-      />
     </aside>
 
     <!-- ====== 中栏：对话区 ====== -->
     <main class="chat-main">
+      <div class="card chat-panel">
       <!-- 头部 -->
       <header class="chat-header">
         <div class="chat-head-left">
-          <div class="chat-eyebrow">AI 智能问答</div>
-          <h1 class="chat-question">{{ section === 'history' ? '历史会话' : (firstQuestion || '有什么可以帮你？') }}</h1>
+          <div class="chat-eyebrow">智能问答</div>
+          <h1 class="chat-question">{{ firstQuestion || '有什么可以帮你？' }}</h1>
         </div>
         <div class="chat-head-actions">
-          <button class="ghost-btn" @click="newChat">
+          <button class="btn btn-primary btn-sm" @click="newChat">
             <Icon name="plus" :size="14" />
             <span>新建对话</span>
           </button>
-          <button class="ghost-btn chat-clear" @click="messages = []">
+          <button class="ghost-btn chat-clear" @click="showClearConfirm = true">
             <Icon name="trash" :size="14" />
             <span>清空对话</span>
           </button>
         </div>
       </header>
 
+      <!-- 消息区 + 输入区（共用灰色背景） -->
+      <div class="chat-body">
       <!-- 消息区 -->
       <div class="messages-area" ref="scrollRef">
         <!-- 空状态（hero） -->
@@ -469,13 +557,13 @@ watch(messages, scrollToBottom, { deep: false })
 
             <!-- 思考过程 -->
             <div v-if="m.role !== 'user' && m.thinkingSteps?.length" class="thinking">
-              <button class="thinking-toggle" @click="showThinking = !showThinking">
-                <Icon name="brain-circuit" :size="14" />
+              <button class="thinking-toggle" @click="toggleThinking(m.id)">
+                <Icon name="sparkles" :size="14" />
                 <span>思考过程</span>
                 <span class="thinking-count">{{ m.thinkingSteps.length }}</span>
-                <Icon name="chevron-down" :size="13" class="thinking-chev" :class="{ open: showThinking }" />
+                <Icon name="chevron-down" :size="13" class="thinking-chev" :class="{ open: expandedThinking.has(m.id) }" />
               </button>
-              <ol v-if="showThinking" class="thinking-list">
+              <ol v-if="expandedThinking.has(m.id)" class="thinking-list">
                 <li v-for="t in m.thinkingSteps" :key="t.step">
                   <span class="think-step">{{ t.step }}</span>
                   <span class="think-action">{{ t.action }}</span>
@@ -493,11 +581,11 @@ watch(messages, scrollToBottom, { deep: false })
             <!-- 引用文档 -->
             <div v-if="m.role !== 'user' && m.sources?.length" class="refs">
               <div class="refs-label">
-                <Icon name="book-marked" :size="14" />
+                <Icon name="quote" :size="14" />
                 <span>引用来源（{{ m.sources.length }}）</span>
               </div>
               <div class="refs-grid">
-                <div v-for="(s, i) in m.sources" :key="s.id ?? i" class="ref-card">
+                <div v-for="(s, i) in m.sources" :key="s.id ?? i" class="ref-card" :class="{ 'ref-clickable': s.sourceType === 'kb' }" @click="openDocDetail(s)" :title="s.sourceType === 'kb' ? '点击查看文档详情' : undefined">
                   <span class="ref-icon" :class="`src-${s.sourceType || 'kb'}`">
                     <Icon :name="s.sourceType === 'web' ? 'globe' : s.sourceType === 'graph' ? 'graph' : 'doc'" :size="16" />
                   </span>
@@ -552,7 +640,7 @@ watch(messages, scrollToBottom, { deep: false })
       </div>
 
       <!-- 输入区（仅对话视图显示） -->
-      <div class="composer" v-if="section === 'new'">
+      <div class="composer">
         <div v-if="attached.length" class="attach-preview">
           <div v-for="(a, i) in attached" :key="i" class="attach-chip">
             <img v-if="a.kind === 'image'" :src="attachSrc(a)" class="attach-thumb" />
@@ -566,7 +654,7 @@ watch(messages, scrollToBottom, { deep: false })
         <textarea
           v-model="inputText"
           class="composer-input"
-          rows="1"
+          rows="4"
           placeholder="输入问题，Shift + Enter 换行，Enter 发送"
           @keydown="onKeydown"
         ></textarea>
@@ -591,87 +679,11 @@ watch(messages, scrollToBottom, { deep: false })
           </div>
         </div>
       </div>
+      </div>
+    </div>
     </main>
   </div>
 
-    <!-- ====== 问答记录 ====== -->
-    <template v-else-if="section === 'records'">
-      <div class="secondary-page">
-        <div class="card records-card">
-          <DataTable
-            :columns="recordColumns"
-            :rows="sessions"
-            row-key="id"
-          >
-            <template #cell="{ row, col }">
-              <template v-if="col.key === 'title'">{{ row.title || '（新会话）' }}</template>
-              <template v-else-if="col.key === 'msgCount'">{{ row.msgCount }}</template>
-              <template v-else-if="col.key === 'updatedAt'">{{ row.updatedAt ? row.updatedAt.slice(0, 10) : '—' }}</template>
-              <template v-else-if="col.key === 'actions'">
-                <button class="btn-link" @click="openSession(row.id)">查看对话</button>
-              </template>
-            </template>
-            <template #empty>暂无会话记录</template>
-          </DataTable>
-          <Pagination
-            v-if="(sessionsData?.total ?? 0) > 0"
-            v-model:page="sessionPage"
-            v-model:page-size="sessionPageSize"
-            :total="sessionsData?.total ?? 0"
-            :page-sizes="[10, 20, 50]"
-            @update:page="loadSessions()"
-            @update:page-size="loadSessions(1)"
-          />
-        </div>
-      </div>
-    </template>
-
-    <!-- ====== 模型配置 ====== -->
-    <template v-else>
-      <div class="secondary-page">
-        <div class="card model-card">
-          <div class="model-card-header">
-            <h3 class="model-card-title">问答模型</h3>
-            <p class="model-card-desc">当前后端统一使用 agnes 推理模型；以下配置为本地偏好，便于后续接入多模型路由。</p>
-          </div>
-          <div class="model-form">
-            <div class="model-form-row">
-              <label class="model-form-label">模型</label>
-              <div class="model-form-control">
-                <CustomSelect v-model="modelName" :options="[
-                  { value: 'agnes-2.0-flash', label: 'agnes-2.0-flash（快）' },
-                  { value: 'agnes-2.0-pro', label: 'agnes-2.0-pro（强）' },
-                  { value: 'gpt-4o', label: 'gpt-4o' },
-                ]" />
-              </div>
-            </div>
-            <div class="model-form-row">
-              <label class="model-form-label">温度（创造性）</label>
-              <div class="model-form-control">
-                <div class="model-slider">
-                  <input type="range" min="0" max="1" step="0.1" v-model.number="temperature" class="model-range" />
-                  <span class="model-range-val">{{ temperature.toFixed(1) }}</span>
-                </div>
-                <p class="model-hint">数值越低回答越稳定，越高越随机</p>
-              </div>
-            </div>
-            <div class="model-form-row">
-              <label class="model-form-label">最大生成长度</label>
-              <div class="model-form-control">
-                <CustomSelect v-model.number="maxTokens" :options="[
-                  { value: 1000, label: '1000' },
-                  { value: 2000, label: '2000' },
-                  { value: 4000, label: '4000' },
-                ]" />
-              </div>
-            </div>
-          </div>
-          <div class="model-actions">
-            <button class="btn btn-primary" @click="saveModel">保存配置</button>
-          </div>
-        </div>
-      </div>
-    </template>
 
   <ConfirmDialog
     :show="!!deleteTargetId"
@@ -682,6 +694,61 @@ watch(messages, scrollToBottom, { deep: false })
     @close="deleteTargetId = null"
     @confirm="confirmDeleteSession"
   />
+
+  <ConfirmDialog
+    :show="showClearConfirm"
+    title="清空对话"
+    message="确认清空当前对话的所有消息？此操作不可撤销。"
+    confirm-text="清空"
+    danger
+    @close="showClearConfirm = false"
+    @confirm="confirmClear"
+  />
+
+  <!-- 文档详情弹框 -->
+  <AppModal
+    :show="!!docDetail"
+    :title="docDetail?.title || '文档详情'"
+    wide
+    @close="docDetail = null"
+  >
+    <template v-if="docDetailLoading" #default>
+      <div class="doc-detail-loading">
+        <span class="dot" /><span class="dot" /><span class="dot" />
+      </div>
+    </template>
+    <template v-else-if="docDetail" #default>
+      <div class="doc-detail">
+        <div class="doc-meta-grid">
+          <div class="doc-meta-item">
+            <span class="doc-meta-label">类型</span>
+            <span class="doc-meta-value">{{ detail.type || '—' }}</span>
+          </div>
+          <div class="doc-meta-item">
+            <span class="doc-meta-label">状态</span>
+            <span class="doc-meta-value" :class="'status-' + (detail.status || '')">{{ detail.status || '—' }}</span>
+          </div>
+          <div class="doc-meta-item">
+            <span class="doc-meta-label">更新时间</span>
+            <span class="doc-meta-value mono">{{ detail.updatedAt?.slice(0, 16) || '—' }}</span>
+          </div>
+        </div>
+        <div v-if="detail.originalFilename" class="doc-file-info">
+          <Icon name="file-text" :size="14" />
+          <span>{{ detail.originalFilename }}</span>
+          <span v-if="detail.fileSize" class="doc-file-size">({{ formatSize(detail.fileSize) }})</span>
+        </div>
+        <div v-if="detail.reviewedAt" class="doc-review-info">
+          审核于 {{ detail.reviewedAt.slice(0, 16) }}
+          <span v-if="detail.reviewedBy"> · {{ detail.reviewedBy }}</span>
+        </div>
+        <div class="doc-content">
+          <div class="doc-content-label">文档内容</div>
+          <pre class="doc-content-body">{{ detail.contentMd }}</pre>
+        </div>
+      </div>
+    </template>
+  </AppModal>
 </template>
 
 <style scoped>
@@ -811,20 +878,56 @@ watch(messages, scrollToBottom, { deep: false })
   color: var(--text-tertiary);
   text-align: center;
 }
+.conv-loading-more {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px 0 6px;
+}
+.dot-sm {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--text-tertiary);
+  animation: blink 1.3s infinite ease-in-out;
+}
+.conv-loading-more .dot-sm:nth-child(2) { animation-delay: 0.18s; }
+.conv-loading-more .dot-sm:nth-child(3) { animation-delay: 0.36s; }
+.conv-all-done {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
 
 /* ============ 对话主区 ============ */
 .chat-main {
+  margin-left: 10px;
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 20px;
+}
+.chat-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 26px 14px;
-  border-bottom: 1px solid var(--border);
+  padding-bottom: 18px;
+  margin-bottom: 4px;
 }
 .chat-head-actions {
   display: flex;
@@ -841,11 +944,11 @@ watch(messages, scrollToBottom, { deep: false })
   margin-bottom: 4px;
 }
 .chat-question {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -855,7 +958,7 @@ watch(messages, scrollToBottom, { deep: false })
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 13px;
+  padding: 8px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-surface);
@@ -869,47 +972,47 @@ watch(messages, scrollToBottom, { deep: false })
 .messages-area {
   flex: 1;
   overflow-y: auto;
-  padding: 26px 26px 10px;
+  padding: 15px 10px 15px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 24px;
 }
 
 /* 空状态 hero */
 .empty-hero {
   margin: auto;
   text-align: center;
-  max-width: 460px;
+  max-width: 500px;
   display: flex;
   flex-direction: column;
   align-items: center;
   animation: fade-up 0.4s var(--ease-out) both;
 }
 .empty-orb {
-  width: 64px;
-  height: 64px;
-  border-radius: 22px;
+  width: 68px;
+  height: 68px;
+  border-radius: 24px;
   background: linear-gradient(135deg, var(--brand) 0%, var(--brand-hover) 100%);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 18px;
-  box-shadow: 0 10px 26px var(--brand-ring);
+  margin-bottom: 22px;
+  box-shadow: 0 12px 32px var(--brand-ring);
 }
-.empty-title { font-size: 19px; font-weight: 700; color: var(--text-primary); margin: 0 0 8px; letter-spacing: -0.01em; }
-.empty-sub { font-size: 13.5px; line-height: 1.65; color: var(--text-secondary); margin: 0 0 22px; }
+.empty-title { font-size: 20px; font-weight: 700; color: var(--text-primary); margin: 0 0 10px; letter-spacing: -0.02em; }
+.empty-sub { font-size: 14px; line-height: 1.7; color: var(--text-secondary); margin: 0 0 28px; }
 .empty-suggest {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
 }
 .empty-card {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 13px 15px;
+  gap: 10px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-surface);
@@ -1120,7 +1223,7 @@ watch(messages, scrollToBottom, { deep: false })
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 26px 10px;
+  padding: 8px 15px 8px;
   flex-wrap: wrap;
 }
 .suggest-label { font-size: 12.5px; font-weight: 600; color: var(--text-tertiary); white-space: nowrap; }
@@ -1141,8 +1244,8 @@ watch(messages, scrollToBottom, { deep: false })
 
 /* ============ 输入区（composer） ============ */
 .composer {
-  margin: 0 22px 20px;
-  padding: 12px 14px 12px;
+  margin: 5px 10px 10px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-surface);
@@ -1179,6 +1282,7 @@ watch(messages, scrollToBottom, { deep: false })
   font-size: 14px;
   line-height: 1.6;
   color: var(--text-primary);
+  min-height: 90px;
   font-family: inherit;
   max-height: 180px;
   padding: 2px 2px;
@@ -1240,109 +1344,6 @@ watch(messages, scrollToBottom, { deep: false })
 }
 .stop-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
-/* ============ 模型配置 ============ */
-.model-card {
-  max-width: 720px;
-  padding: 24px;
-}
-.model-card-header {
-  margin-bottom: 24px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--border);
-}
-.model-card-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0 0 6px;
-}
-.model-card-desc {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  margin: 0;
-}
-.model-form {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.model-form-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-.model-form-label {
-  width: 120px;
-  flex-shrink: 0;
-  padding-top: 7px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  text-align: right;
-}
-.model-form-control {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.model-slider {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.model-range {
-  flex: 1;
-  min-width: 0;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--border);
-  outline: none;
-  -webkit-appearance: none;
-  appearance: none;
-}
-.model-range::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--brand);
-  border: 2px solid var(--bg-surface);
-  box-shadow: 0 1px 4px rgba(1, 77, 178, 0.35);
-  cursor: pointer;
-}
-.model-range::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--brand);
-  border: 2px solid var(--bg-surface);
-  box-shadow: 0 1px 4px rgba(1, 77, 178, 0.35);
-  cursor: pointer;
-}
-.model-range-val {
-  min-width: 32px;
-  text-align: right;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--brand);
-}
-.model-hint {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-tertiary);
-}
-.model-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 24px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
-}
-.model-actions .btn { min-width: 96px; }
-
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
@@ -1356,4 +1357,106 @@ watch(messages, scrollToBottom, { deep: false })
   .empty-suggest { grid-template-columns: 1fr; }
   .chat-question { max-width: 50vw; }
 }
+
+/* ============ 文档详情弹框 ============ */
+.ref-clickable {
+  cursor: pointer;
+}
+.ref-clickable:hover {
+  border-color: var(--brand);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-float);
+}
+
+.doc-detail-loading {
+  display: flex;
+  gap: 6px;
+  padding: 40px 0;
+  justify-content: center;
+}
+.doc-detail-loading .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-tertiary);
+  animation: blink 1.3s infinite ease-in-out;
+}
+.doc-detail-loading .dot:nth-child(2) { animation-delay: 0.18s; }
+.doc-detail-loading .dot:nth-child(3) { animation-delay: 0.36s; }
+
+.doc-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.doc-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 20px;
+}
+.doc-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.doc-meta-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.doc-meta-value {
+  font-size: 13.5px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.mono { font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', Consolas, monospace); }
+.doc-meta-value.status-已审核 { color: var(--success); }
+.doc-meta-value.status-待复核 { color: var(--warning); }
+.doc-meta-value.status-已拒绝 { color: var(--danger); }
+
+.doc-file-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.doc-file-size {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.doc-review-info {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+.doc-content {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.doc-content-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.doc-content-body {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
 </style>

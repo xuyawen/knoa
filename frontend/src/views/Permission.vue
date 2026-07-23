@@ -352,7 +352,6 @@ const roleMatrix = [
 </template>
 
 <style scoped>
-.page { padding: 20px 24px; }
 .flex { display: flex; }
 .items-center { align-items: center; }
 .perm-body {
@@ -361,7 +360,7 @@ const roleMatrix = [
   gap: 16px;
   align-items: start;
 }
-.perm-users { padding: 20px 22px; }
+.perm-users { padding: 20px; }
 .perm-h { margin: 0 0 14px; font-size: 15px; font-weight: 600; color: var(--text-primary); }
 .perm-h-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .perm-h-row .perm-h { margin: 0; }
@@ -398,6 +397,7 @@ const roleMatrix = [
   width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--brand); color: var(--text-on-brand); font-size: 12px; font-weight: 600;
+  margin-right: 8px;
 }
 .u-uname { font-weight: 500; color: var(--text-primary); }
 
@@ -421,7 +421,7 @@ const roleMatrix = [
 .action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 /* ---- 矩阵 ---- */
-.perm-matrix { padding: 18px 20px; }
+.perm-matrix { padding: 20px; }
 .mtx { width: 100%; border-collapse: collapse; font-size: 13px; }
 .mtx th { text-align: left; padding: 10px 14px; color: var(--text-tertiary); font-weight: 500; border-bottom: 1px solid var(--border); }
 .mtx td { padding: 11px 14px; border-bottom: 1px solid var(--border); }

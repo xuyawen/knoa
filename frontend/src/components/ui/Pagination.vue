@@ -50,8 +50,6 @@ function setSize(v: string | number) {
 
 <template>
   <div class="pagination-bar">
-    <span class="total-text">共 {{ total }} 条</span>
-
     <div class="page-nav">
       <button
         class="page-btn nav"
@@ -81,11 +79,13 @@ function setSize(v: string | number) {
       </button>
     </div>
 
+    <span class="total-text">{{ total }} 条</span>
+
     <div class="size-select">
       <CustomSelect
         :model-value="String(pageSize)"
         :options="sizeOptions"
-        width="90px"
+        width="80px"
         @update:model-value="setSize"
       />
     </div>
@@ -97,34 +97,36 @@ function setSize(v: string | number) {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 16px;
-  padding: 12px 0;
-  font-size: 13px;
-  color: var(--text-secondary);
+  gap: 10px;
+  padding: 10px 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 
 .total-text {
   flex-shrink: 0;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .page-nav {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .page-btn {
-  min-width: 28px;
-  height: 28px;
-  padding: 0 6px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--bg-card);
-  color: var(--text-primary);
-  font-size: 13px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
   transition: border-color var(--dur-fast) var(--ease-out),
@@ -136,7 +138,7 @@ function setSize(v: string | number) {
   color: var(--brand);
 }
 .page-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 .page-btn.active {
@@ -148,6 +150,7 @@ function setSize(v: string | number) {
   border-color: transparent;
   background: transparent;
   cursor: default;
+  padding: 0 2px;
 }
 .page-btn.nav {
   padding: 0;
@@ -160,7 +163,7 @@ function setSize(v: string | number) {
 @media (max-width: 640px) {
   .pagination-bar {
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
     justify-content: center;
   }
   .total-text {

@@ -185,7 +185,7 @@ const showEdit = ref(false)
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 28px 32px;
+  padding: 20px;
   margin-bottom: 18px;
 }
 .hero-main {
@@ -257,7 +257,7 @@ const showEdit = ref(false)
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 22px 24px;
+  padding: 20px;
 }
 .stat-num {
   font-size: 28px;
@@ -285,7 +285,7 @@ const showEdit = ref(false)
   gap: 18px;
 }
 .section-card {
-  padding: 22px 24px;
+  padding: 20px;
 }
 .section-title {
   margin: 0 0 18px;

@@ -21,5 +21,5 @@ import SystemSettingsPanel from '@/components/user/SystemSettingsPanel.vue'
 .settings-head { margin-bottom: 18px; }
 .settings-title { margin: 0 0 4px; font-size: 20px; font-weight: 700; color: var(--text-primary); }
 .settings-sub { margin: 0; font-size: 13px; color: var(--text-tertiary); }
-.settings-card { padding: 8px 24px; }
+.settings-card { padding: 20px; }
 </style>

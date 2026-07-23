@@ -99,12 +99,16 @@ function resetFilters() {
 }
 
 // ── 关键词高亮 ──
+// 先转义 HTML 特殊字符再注入 <mark>，避免后端真实文档标题/摘要里的
+// <script>/<img onerror> 等被 v-html 执行（XSS 防护）。
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 const highlight = computed(() => {
   const q = submitted.value.trim()
-  if (!q) return (text: string) => text
+  if (!q) return (text: string) => escapeHtml(text)
   const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const re = new RegExp(`(${escaped})`, 'gi')
-  return (text: string) => text.replace(re, '<mark>$1</mark>')
+  return (text: string) => escapeHtml(text).replace(re, '<mark>$1</mark>')
 })
 
 function fileIcon(type: string): string {
@@ -307,7 +311,7 @@ function gotoQuery(text: string) {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 16px 18px;
+  padding: 20px;
   min-height: 300px;
 }
 .result-toolbar {

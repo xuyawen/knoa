@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 通用模态壳：teleport 到 body，背景遮罩 + 居中卡片。
 // 复用于所有弹框场景（确认框、会话过期、详情等），配色走 token。
-import { watch } from 'vue'
+import { watch, onBeforeUnmount } from 'vue'
 import Icon from './Icon.vue'
 
 const props = withDefaults(
@@ -20,13 +20,17 @@ function onBackdrop() {
   if (props.closeOnBackdrop) emit('close')
 }
 
-// 打开时锁滚动
+// 打开时锁滚动；组件在打开状态下被卸载（路由切换/父组件销毁）时也复位，
+// 否则 body 会永久 overflow:hidden 导致页面无法滚动。
 watch(
   () => props.show,
   (v) => {
     document.body.style.overflow = v ? 'hidden' : ''
   },
 )
+onBeforeUnmount(() => {
+  document.body.style.overflow = ''
+})
 </script>
 
 <template>
