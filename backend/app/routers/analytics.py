@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import Document, OperationLog, User
@@ -152,7 +152,7 @@ async def doc_stats(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """文档统计：按 category / status 聚合（文档统计分区真实数据源）。"""
+    """文档统计：按 category / status / type 聚合 + 近7天新增趋势（文档统计分区真实数据源）。"""
     by_cat = (await db.execute(
         select(Document.category, func.count())
         .group_by(Document.category)
@@ -163,9 +163,48 @@ async def doc_stats(
         .group_by(Document.status)
         .order_by(func.count().desc())
     )).all()
+    # 文档类型从 source_path 扩展名推断（与 knowledge.py _doc_type 对齐）
+    by_type = (await db.execute(
+        select(
+            case(
+                (Document.source_path.ilike("%.pdf"), "PDF"),
+                (Document.source_path.ilike("%.docx"), "DOCX"),
+                (Document.source_path.ilike("%.md"), "MD"),
+                (Document.source_path.ilike("%.txt"), "TXT"),
+                else_="其他",
+            ),
+            func.count(),
+        )
+        .group_by(
+            case(
+                (Document.source_path.ilike("%.pdf"), "PDF"),
+                (Document.source_path.ilike("%.docx"), "DOCX"),
+                (Document.source_path.ilike("%.md"), "MD"),
+                (Document.source_path.ilike("%.txt"), "TXT"),
+                else_="其他",
+            ),
+        )
+        .order_by(func.count().desc())
+    )).all()
     total = await db.scalar(select(func.count()).select_from(Document)) or 0
+
+    # 近7天新增文档趋势（按本地日期）
+    now = datetime.now(timezone.utc)
+    recent_trend: list[dict] = []
+    for i in range(7):
+        day_start = (now - timedelta(days=6 - i)).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        cnt = await db.scalar(
+            select(func.count())
+            .select_from(Document)
+            .where(Document.created_at >= day_start, Document.created_at < day_end)
+        ) or 0
+        recent_trend.append({"date": day_start.astimezone().strftime("%m-%d"), "count": cnt})
+
     return {
         "total": total,
         "byCategory": [{"category": (r[0] or "未分类"), "count": r[1]} for r in by_cat],
         "byStatus": [{"status": (r[0] or "未知"), "count": r[1]} for r in by_status],
+        "byType": [{"type": r[0], "count": r[1]} for r in by_type],
+        "recentTrend": recent_trend,
     }

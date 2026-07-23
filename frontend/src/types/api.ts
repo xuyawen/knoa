@@ -313,10 +313,22 @@ export interface DocCategory {
   count: number
 }
 
+export interface DocTypeItem {
+  type: string
+  count: number
+}
+
+export interface RecentTrendPoint {
+  date: string
+  count: number
+}
+
 export interface DocStats {
   total: number
   byCategory: DocCategory[]
   byStatus: { status: string; count: number }[]
+  byType: DocTypeItem[]
+  recentTrend: RecentTrendPoint[]
 }
 
 export interface OperationLogItem {

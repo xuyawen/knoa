@@ -177,11 +177,6 @@ const statusDistColumns = [
   { key: 'count', title: '文档数' },
   { key: 'ratio', title: '占比' },
 ]
-const categoryDistColumns = [
-  { key: 'category', title: '分类', strong: true },
-  { key: 'count', title: '文档数' },
-  { key: 'ratio', title: '占比' },
-]
 const healthColumns = [
   { key: 'name', title: '知识库', strong: true },
   { key: 'docCount', title: '文档数' },
@@ -202,6 +197,52 @@ const docStatsTotal = computed(() => docStats.value?.total ?? 0)
 function byStatusCount(status: string): number {
   return docStats.value?.byStatus?.find((s) => s.status === status)?.count ?? 0
 }
+
+const STATUS_TAG_CLASS: Record<string, string> = {
+  已审核: 'success',
+  待复核: 'warning',
+  已拒绝: 'danger',
+}
+function statusTagClass(s: string): string {
+  return STATUS_TAG_CLASS[s] ?? 'muted'
+}
+
+// 文档统计：分类分布横向条形（TOP 8 + 其他）
+const docStatsCatTotal = computed(() => docStats.value?.byCategory?.reduce((s, c) => s + c.count, 0) || 0)
+function buildDocStatsBar(label: string, value: number, seg: number, total: number, max: number) {
+  return {
+    label,
+    value,
+    pct: total ? ((value / total) * 100).toFixed(1) : '0',
+    width: max ? (value / max) * 100 : 0,
+    seg,
+  }
+}
+const docStatsBarData = computed(() => {
+  const sorted = [...(docStats.value?.byCategory ?? [])].sort((a, b) => b.count - a.count)
+  const max = Math.max(1, ...sorted.map((c) => c.count))
+  const rest = sorted.slice(8)
+  const rows = sorted.slice(0, 8).map((c, i) => buildDocStatsBar(c.category || '未分类', c.count, (i % 5) + 1, docStatsCatTotal.value, max))
+  if (rest.length) rows.push(buildDocStatsBar(`其他 (${rest.length})`, rest.reduce((s, c) => s + c.count, 0), 0, docStatsCatTotal.value, max))
+  return rows
+})
+
+// 文档统计：类型分布横向条形
+const typeTotal = computed(() => docStats.value?.byType?.reduce((s, t) => s + t.count, 0) || 0)
+const TYPE_ICON: Record<string, string> = {
+  MD: 'file-text',
+  TXT: 'file-text',
+  DOCX: 'file-type',
+  PDF: 'file',
+}
+const typeBarData = computed(() => {
+  const sorted = [...(docStats.value?.byType ?? [])].sort((a, b) => b.count - a.count)
+  const max = Math.max(1, ...sorted.map((t) => t.count))
+  return sorted.map((t, i) => buildDocStatsBar(t.type, t.count, (i % 5) + 1, typeTotal.value, max))
+})
+
+// 文档统计：近7天新增趋势
+const recentTrendMax = computed(() => Math.max(1, ...(docStats.value?.recentTrend ?? []).map((p) => p.count)))
 
 // ── 系统公告（真实，来自 getAnnouncements）──
 const announcements = ref<Announcement[]>([])
@@ -395,13 +436,15 @@ onMounted(() => {
         <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-violet-soft);color:var(--accent-violet)"><Icon name="folder" :size="22"/></div><div class="sc-body"><div class="sc-label">知识库数</div><div class="sc-value">{{ bases.length }}</div></div></div>
       </div>
 
-      <div class="charts-row">
+      <div class="charts-row docs-row">
         <!-- 按状态分布 -->
         <div class="ops-section card">
           <div class="panel-head"><span class="panel-title">按状态分布</span></div>
           <DataTable :columns="statusDistColumns" :rows="docStats?.byStatus ?? []">
             <template #cell="{ row, col }">
-              <template v-if="col.key === 'status'">{{ row.status }}</template>
+              <template v-if="col.key === 'status'">
+                <span class="status-tag" :class="statusTagClass(row.status)">{{ row.status }}</span>
+              </template>
               <template v-else-if="col.key === 'count'">{{ row.count }}</template>
               <template v-else-if="col.key === 'ratio'">{{ docStatsTotal ? ((row.count / docStatsTotal) * 100).toFixed(1) + '%' : '—' }}</template>
             </template>
@@ -411,14 +454,48 @@ onMounted(() => {
         <!-- 按分类分布 -->
         <div class="ops-section card">
           <div class="panel-head"><span class="panel-title">按分类分布</span></div>
-          <DataTable :columns="categoryDistColumns" :rows="docStats?.byCategory ?? []">
-            <template #cell="{ row, col }">
-              <template v-if="col.key === 'category'">{{ row.category }}</template>
-              <template v-else-if="col.key === 'count'">{{ row.count }}</template>
-              <template v-else-if="col.key === 'ratio'">{{ docStatsTotal ? ((row.count / docStatsTotal) * 100).toFixed(1) + '%' : '—' }}</template>
-            </template>
-            <template #empty>暂无数据</template>
-          </DataTable>
+          <div class="cat-bars slim">
+            <div v-for="b in docStatsBarData" :key="b.label" class="cat-bar-row">
+              <span class="cat-bar-label" :title="b.label">{{ b.label }}</span>
+              <div class="cat-bar-track"><div class="cat-bar-fill" :class="b.seg === 0 ? 'bar-uncat' : 'bar-seg-' + b.seg" :style="{ width: (b.width || 0) + '%' }"></div></div>
+              <span class="cat-bar-val">{{ b.value.toLocaleString() }}</span>
+              <span class="cat-bar-pct">{{ b.pct }}%</span>
+            </div>
+            <div v-if="!docStatsBarData.length" class="empty-hint">暂无数据</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="charts-row docs-row">
+        <!-- 按类型分布 -->
+        <div class="ops-section card">
+          <div class="panel-head"><span class="panel-title">按类型分布</span></div>
+          <div class="cat-bars slim">
+            <div v-for="b in typeBarData" :key="b.label" class="cat-bar-row">
+              <span class="cat-bar-label type-label">
+                <Icon :name="TYPE_ICON[b.label] || 'file'" :size="13" />
+                {{ b.label }}
+              </span>
+              <div class="cat-bar-track"><div class="cat-bar-fill" :class="'bar-seg-' + b.seg" :style="{ width: (b.width || 0) + '%' }"></div></div>
+              <span class="cat-bar-val">{{ b.value.toLocaleString() }}</span>
+              <span class="cat-bar-pct">{{ b.pct }}%</span>
+            </div>
+            <div v-if="!typeBarData.length" class="empty-hint">暂无数据</div>
+          </div>
+        </div>
+        <!-- 近7天新增文档 -->
+        <div class="chart-panel card">
+          <div class="panel-head"><span class="panel-title">近7天新增文档</span></div>
+          <div v-if="(docStats?.recentTrend ?? []).length" class="mini-bars">
+            <div v-for="p in docStats?.recentTrend" :key="p.date" class="mini-bar-col">
+              <div class="mini-bar-track-v">
+                <div class="mini-bar-fill-v" :style="{ height: (p.count / recentTrendMax) * 100 + '%' }"></div>
+              </div>
+              <span class="mini-bar-val">{{ p.count }}</span>
+              <span class="mini-bar-date">{{ p.date }}</span>
+            </div>
+          </div>
+          <div v-else class="empty-hint">暂无数据</div>
         </div>
       </div>
 
@@ -576,6 +653,7 @@ onMounted(() => {
 
 /* ---- 图表行 ---- */
 .charts-row { display: grid; grid-template-columns: calc((100% - 64px) * 3 / 5 + 32px) calc((100% - 64px) * 2 / 5 + 16px); gap: 16px; }
+.charts-row.docs-row { grid-template-columns: 1fr 1fr; }
 .panel-head { display: flex; align-items: center; gap: 6px; margin-bottom: 16px; }
 .panel-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .phint { color: var(--text-tertiary); cursor: pointer; }
@@ -633,6 +711,42 @@ onMounted(() => {
 .bar-seg-4 { background: var(--cat-4); }
 .bar-seg-5 { background: var(--cat-5); }
 .bar-uncat { background: var(--text-tertiary); }
+
+/* 文档统计分区：紧凑条形 */
+.cat-bars.slim { max-height: 220px; }
+.cat-bar-row .type-label { display: inline-flex; align-items: center; gap: 5px; }
+
+/* 状态 tag */
+.status-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 9px; border-radius: var(--radius-pill);
+  font-size: 12px; font-weight: 500; line-height: 1.6;
+}
+.status-tag.success { background: var(--success-soft); color: var(--success); }
+.status-tag.warning { background: var(--warning-soft); color: var(--warning); }
+.status-tag.danger { background: var(--danger-soft); color: var(--danger); }
+.status-tag.muted { background: var(--bg-subtle); color: var(--text-tertiary); }
+
+/* 近7天新增文档迷你柱状图 */
+.mini-bars {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 10px; height: 180px; padding: 8px 4px 0;
+}
+.mini-bar-col {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.mini-bar-track-v {
+  width: 100%; height: 120px; background: var(--bg-subtle); border-radius: var(--radius-sm);
+  display: flex; align-items: flex-end; overflow: hidden;
+}
+.mini-bar-fill-v {
+  width: 100%; background: linear-gradient(180deg, var(--brand), color-mix(in srgb, var(--brand) 55%, transparent));
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  min-height: 2px; transition: height .3s ease;
+}
+.mini-bar-val { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.mini-bar-date { font-size: 11px; color: var(--text-secondary); }
 
 /* ---- 操作记录 ---- */
 .ops-section { padding: 22px 24px; overflow: hidden; }
