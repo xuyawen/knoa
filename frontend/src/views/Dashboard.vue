@@ -711,10 +711,6 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="ops-section card">
-        <div class="panel-head"><span class="panel-title">说明</span></div>
-        <p class="note-text">活跃用户数来自当日有操作（登录 / 问答 / 文档管理）的去重用户；总用户数、角色/状态分布、近30天新增与近7天新增来自用户列表（仅管理员可见，无权限时仅显示活跃用户数与活跃趋势）。</p>
-      </div>
     </template>
 
     <!-- ====== 系统公告（真实：getAnnouncements 列表）====== -->
@@ -920,7 +916,6 @@ onMounted(() => {
 .score-pill.ok{color:var(--success);background:var(--success-soft)}
 .score-pill.bad{color:var(--danger);background:var(--danger-soft)}
 .empty-hint { padding:24px; text-align:center; color:var(--text-tertiary); font-size:13px; }
-.note-text { font-size:13px; color:var(--text-secondary); line-height:1.7; margin:0; }
 
 @media (max-width:1024px){
   .stats-row{grid-template-columns:repeat(3,1fr)}
