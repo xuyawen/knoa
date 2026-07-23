@@ -7,16 +7,21 @@ import { useKnowledgeStore } from '@/stores/knowledge'
 import Icon from '@/components/ui/Icon.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
+import AppModal from '@/components/ui/AppModal.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import { useAuthStore } from '@/stores/auth'
 import {
   getDashboardMetrics, getTrend, getDocCategory, getOperations, getAnnouncements, getDocStats, getUserStats,
+  createAnnouncement, updateAnnouncement, deleteAnnouncement,
 } from '@/api'
 import type {
   DashboardMetrics, TrendResponse, DocCategory, DocStats, UserStats,
-  OperationsResponse, OperationLogItem, Announcement,
+  OperationsResponse, OperationLogItem, Announcement, AnnouncementCreate,
 } from '@/types/api'
 
 const kb = useKnowledgeStore()
 const { bases, health, trending } = storeToRefs(kb)
+const auth = useAuthStore()
 const props = defineProps<{ section?: string }>()
 const section = computed(() => props.section ?? 'overview')
 
@@ -251,6 +256,58 @@ const recentTrendMax = computed(() => Math.max(1, ...(docStats.value?.recentTren
 // ── 系统公告（真实，来自 getAnnouncements）──
 const announcements = ref<Announcement[]>([])
 async function loadAnnouncements() { announcements.value = (await getAnnouncements()).items }
+
+// 公告管理（仅 admin）
+const showAnnModal = ref(false)
+const editingAnn = ref<Announcement | null>(null)
+const savingAnn = ref(false)
+const deleteTarget = ref<Announcement | null>(null)
+const annForm = ref({ title: '', content: '', level: 'info' as AnnouncementCreate['level'], pinned: false })
+const LEVEL_OPTIONS: { value: NonNullable<AnnouncementCreate['level']>; label: string }[] = [
+  { value: 'info', label: '普通' },
+  { value: 'warning', label: '警告' },
+  { value: 'success', label: '成功' },
+  { value: 'error', label: '严重' },
+]
+function resetAnnForm() {
+  annForm.value = { title: '', content: '', level: 'info', pinned: false }
+  editingAnn.value = null
+}
+function openCreateAnn() {
+  resetAnnForm()
+  showAnnModal.value = true
+}
+function openEditAnn(a: Announcement) {
+  editingAnn.value = a
+  annForm.value = { title: a.title, content: a.content, level: a.level, pinned: a.pinned }
+  showAnnModal.value = true
+}
+async function saveAnn() {
+  const { title, content, level, pinned } = annForm.value
+  if (!title.trim() || !content.trim()) return
+  savingAnn.value = true
+  try {
+    if (editingAnn.value) {
+      await updateAnnouncement(editingAnn.value.id, { title, content, level, pinned })
+    } else {
+      await createAnnouncement({ title, content, level, pinned })
+    }
+    showAnnModal.value = false
+    await loadAnnouncements()
+  } finally {
+    savingAnn.value = false
+  }
+}
+async function togglePin(a: Announcement) {
+  await updateAnnouncement(a.id, { pinned: !a.pinned })
+  await loadAnnouncements()
+}
+async function confirmDeleteAnn() {
+  if (!deleteTarget.value) return
+  await deleteAnnouncement(deleteTarget.value.id)
+  deleteTarget.value = null
+  await loadAnnouncements()
+}
 
 // ── 用户统计分区（真实，来自 /api/analytics/user-stats）──
 const userStats = ref<UserStats | null>(null)
@@ -713,20 +770,85 @@ onMounted(() => {
 
     </template>
 
-    <!-- ====== 系统公告（真实：getAnnouncements 列表）====== -->
+    <!-- ====== 系统公告（真实：getAnnouncements 列表 + admin 管理）====== -->
     <template v-else>
+      <div v-if="auth.isAdmin" class="ann-toolbar">
+        <button class="btn btn-primary btn-sm" @click="openCreateAnn">
+          <Icon name="plus" :size="14" /> 新建公告
+        </button>
+      </div>
       <div v-if="announcements.length" class="ann-list">
         <div v-for="a in announcements" :key="a.id" class="ann-card card" :class="'lv-' + a.level">
           <div class="ann-head">
             <Icon :name="a.pinned ? 'pin' : 'bell'" :size="15" class="ann-ic" />
             <span class="ann-title">{{ a.title }}</span>
             <span v-if="a.pinned" class="ann-pin">置顶</span>
+            <span class="ann-level" :class="'lvl-' + a.level">{{ { info: '普通', warning: '警告', success: '成功', error: '严重' }[a.level] }}</span>
             <span class="ann-time">{{ fmtTime(a.createdAt) }}</span>
+            <template v-if="auth.isAdmin">
+              <button class="ann-action" title="编辑" @click="openEditAnn(a)"><Icon name="edit" :size="14" /></button>
+              <button class="ann-action" :title="a.pinned ? '取消置顶' : '置顶'" @click="togglePin(a)">
+                <Icon :name="a.pinned ? 'pin-off' : 'pin'" :size="14" />
+              </button>
+              <button class="ann-action danger" title="删除" @click="deleteTarget = a"><Icon name="trash-2" :size="14" /></button>
+            </template>
           </div>
           <div class="ann-content">{{ a.content }}</div>
         </div>
       </div>
       <div v-else class="empty-hint">暂无系统公告</div>
+
+      <!-- 公告编辑弹框 -->
+      <AppModal :show="showAnnModal" :title="editingAnn ? '编辑公告' : '新建公告'" wide @close="showAnnModal = false">
+        <div class="ann-form">
+          <div class="form-row">
+            <label class="form-label">标题</label>
+            <input v-model="annForm.title" class="form-input" placeholder="公告标题" maxlength="200" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">级别</label>
+            <div class="seg">
+              <button
+                v-for="opt in LEVEL_OPTIONS"
+                :key="opt.value"
+                class="seg-btn"
+                :class="{ active: annForm.level === opt.value }"
+                @click="annForm.level = opt.value"
+              >{{ opt.label }}</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label">置顶</label>
+            <label class="switch">
+              <input type="checkbox" v-model="annForm.pinned" />
+              <span class="switch-track"><span class="switch-knob" /></span>
+              <span class="switch-text">{{ annForm.pinned ? '置顶' : '不置顶' }}</span>
+            </label>
+          </div>
+          <div class="form-row align-start">
+            <label class="form-label">内容</label>
+            <textarea v-model="annForm.content" class="form-input ann-textarea" placeholder="公告内容" rows="6" />
+          </div>
+        </div>
+        <template #foot>
+          <button class="btn btn-ghost btn-sm" @click="showAnnModal = false">取消</button>
+          <button
+            class="btn btn-primary btn-sm"
+            :disabled="savingAnn || !annForm.title.trim() || !annForm.content.trim()"
+            @click="saveAnn"
+          >{{ savingAnn ? '保存中…' : '保存' }}</button>
+        </template>
+      </AppModal>
+
+      <ConfirmDialog
+        :show="!!deleteTarget"
+        title="删除公告"
+        :message="deleteTarget ? `确认删除公告「${deleteTarget.title}」？该操作不可恢复。` : ''"
+        confirm-text="删除"
+        danger
+        @close="deleteTarget = null"
+        @confirm="confirmDeleteAnn"
+      />
     </template>
   </div>
 </template>
@@ -895,7 +1017,8 @@ onMounted(() => {
   background:var(--brand-soft); padding:2px 9px; border-radius:var(--radius-pill);
 }
 
-/* ---- 公告卡片 ---- */
+/* ---- 公告管理 ---- */
+.ann-toolbar { display:flex; justify-content:flex-end; }
 .ann-list { display:flex; flex-direction:column; gap:12px; }
 .ann-card { padding:16px 18px; border-left:3px solid var(--brand); }
 .ann-card.lv-warning { border-left-color:var(--warning); }
@@ -905,8 +1028,27 @@ onMounted(() => {
 .ann-ic { color:var(--brand); }
 .ann-title { font-size:14.5px; font-weight:700; color:var(--text-primary); }
 .ann-pin { font-size:11px; padding:1px 7px; border-radius:var(--radius-pill); background:var(--brand-soft); color:var(--brand); }
+.ann-level { font-size:11px; padding:1px 7px; border-radius:var(--radius-pill); }
+.ann-level.lvl-info { background:var(--bg-subtle); color:var(--text-secondary); }
+.ann-level.lvl-warning { background:var(--warning-soft); color:var(--warning); }
+.ann-level.lvl-success { background:var(--success-soft); color:var(--success); }
+.ann-level.lvl-error { background:var(--danger-soft); color:var(--danger); }
 .ann-time { margin-left:auto; font-size:12px; color:var(--text-tertiary); }
+.ann-action {
+  display:inline-flex; align-items:center; justify-content:center;
+  width:26px; height:26px; border-radius:var(--radius-sm);
+  color:var(--text-secondary); background:transparent; cursor:pointer;
+  transition:all var(--dur-fast);
+}
+.ann-action:hover { background:var(--bg-hover); color:var(--text-primary); }
+.ann-action.danger:hover { background:var(--danger-soft); color:var(--danger); }
 .ann-content { font-size:13px; color:var(--text-secondary); line-height:1.6; white-space:pre-wrap; }
+.ann-form { display:flex; flex-direction:column; gap:14px; }
+.ann-form .form-row { display:flex; align-items:center; gap:12px; }
+.ann-form .form-row.align-start { align-items:flex-start; }
+.ann-form .form-label { width:50px; flex-shrink:0; font-size:13px; color:var(--text-secondary); }
+.ann-form .form-input { flex:1; }
+.ann-textarea { min-height:120px; padding:10px 12px; resize:vertical; line-height:1.6; }
 
 /* ---- 通用 ---- */
 .score-pill {

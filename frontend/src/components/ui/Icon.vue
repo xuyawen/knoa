@@ -14,7 +14,7 @@ import {
   Flame, Clock, History, List, Globe, UsersRound, CircleDot, Link2, PanelLeftClose,
   Maximize2, Paperclip, Send, Copy, ArrowDownToLine, AppWindow, Star, Tag, Calendar, Sparkles,
   Info, Heart,
-  ArrowUpRight, ArrowDownRight, Pin, UserPlus, Volume2, ArrowUpDown, Lightbulb,
+  ArrowUpRight, ArrowDownRight, Pin, PinOff, UserPlus, Volume2, ArrowUpDown, Lightbulb,
   BrainCircuit, BookMarked, ThumbsUp, ThumbsDown, PenLine, ArrowUp, Square,
 } from 'lucide-vue-next'
 
@@ -37,7 +37,8 @@ const ICONS: Record<string, Component> = {
   listview: List, star: Star, tag: Tag, calendar: Calendar, sparkles: Sparkles,
   info: Info, heart: Heart, warning: AlertTriangle,
   'arrow-up-right': ArrowUpRight, 'arrow-down-right': ArrowDownRight,
-  pin: Pin, 'user-plus': UserPlus,
+  pin: Pin, 'pin-off': PinOff, 'user-plus': UserPlus,
+  'trash-2': Trash2,
   volume: Volume2,
   'pen-line': PenLine, 'brain-circuit': BrainCircuit, 'book-marked': BookMarked,
   'thumbs-up': ThumbsUp, 'thumbs-down': ThumbsDown, 'arrow-up': ArrowUp, square: Square,
