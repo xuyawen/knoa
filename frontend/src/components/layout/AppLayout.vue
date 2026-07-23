@@ -273,7 +273,7 @@ const sidebarCollapsed = ref(false)
           title="展开菜单"
           @click="sidebarCollapsed = false"
         >
-          <Icon name="panel-left-open" :size="16" />
+          <Icon name="chevrons-right" :size="16" />
         </button>
         <router-view />
       </main>

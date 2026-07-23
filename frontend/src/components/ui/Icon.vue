@@ -7,7 +7,7 @@ import type { Component } from 'vue'
 import {
   LayoutDashboard, FileText, Search, MessageSquare, Share2, Shield,
   User, UserCircle, Settings, Bell, LogOut, Lock, Key, ShieldCheck, Loader2,
-  ChevronLeft, ChevronRight, ChevronDown,
+  ChevronLeft, ChevronRight, ChevronsRight, ChevronDown,
   Sun, Moon, Monitor, Plus, Minus, X, Check, AlertTriangle, Pencil, Trash2,
   MoreHorizontal, Menu, Folder, Upload, Download, Archive, File, FileSpreadsheet,
   Presentation, FileType, Filter, RefreshCw, Eye, LayoutGrid, BarChart3, Users,
@@ -32,7 +32,7 @@ const ICONS: Record<string, Component> = {
   file: File, excel: FileSpreadsheet, pptx: Presentation, pdf: FileType, filter: Filter,
   refresh: RefreshCw, eye: Eye, grid: LayoutGrid, chart: BarChart3, users: Users,
   fire: Flame, clock: Clock, history: History, list: List, globe: Globe, team: UsersRound,
-  node: CircleDot, link: Link2, collapse: PanelLeftClose, 'panel-left-open': PanelLeftOpen, expand: Maximize2, attach: Paperclip,
+  node: CircleDot, link: Link2, collapse: PanelLeftClose, 'panel-left-open': PanelLeftOpen, 'chevrons-right': ChevronsRight, expand: Maximize2, attach: Paperclip,
   send: Send, copy: Copy, export: ArrowDownToLine, view: AppWindow, gridview: LayoutGrid,
   listview: List, star: Star, tag: Tag, calendar: Calendar, sparkles: Sparkles,
   info: Info, heart: Heart, warning: AlertTriangle,
