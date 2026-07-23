@@ -5,7 +5,6 @@
 // section 由路由决定（history/popular/filters）。
 import { ref, computed, nextTick, onMounted } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
-import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useToastStore } from '@/stores/toast'
 import { streamAsk, getTrending } from '@/api'
 import type { ThinkingStep, SourceItem, TrendingItem } from '@/types/api'
@@ -15,22 +14,12 @@ const section = computed(() => props.section ?? 'history')
 
 // 热门搜索（真实 trending 数据）
 const trending = ref<TrendingItem[]>([])
-onMounted(async () => {
+async function loadTrending() {
   try {
     trending.value = await getTrending()
   } catch {
     trending.value = []
   }
-})
-
-// 搜索筛选（交互 UI，后端筛选能力建设中）
-const sourceOptions = ['知识库', '联网搜索', '知识图谱']
-const sourceSel = ref<Set<string>>(new Set(['知识库']))
-function toggleSource(o: string) {
-  const next = new Set(sourceSel.value)
-  if (next.has(o)) next.delete(o)
-  else next.add(o)
-  sourceSel.value = next
 }
 
 const toast = useToastStore()
@@ -54,30 +43,59 @@ const suggested = [
   '如何申请系统权限？',
 ]
 
-// 结果筛选
-const sFilterType = ref('')
-const sFilterTime = ref('')
-const sFilterCat = ref('')
-const sFilterScope = ref('')
-const srchTypeOpts = [
-  { label: '全部类型', value: '' }, { label: 'PDF', value: 'PDF' },
-  { label: 'Word', value: 'DOCX' }, { label: 'Excel', value: 'XLSX' },
+// ── 来源筛选（按 SourceItem.sourceType 前端过滤，后端暂无时间/分类/权限元数据）
+const sourceOptions = [
+  { label: '知识库', value: 'kb' },
+  { label: '联网搜索', value: 'web' },
+  { label: '知识图谱', value: 'graph' },
 ]
-const srchTimeOpts = [
-  { label: '全部时间', value: '' }, { label: '近 7 天', value: '7d' },
-  { label: '近 30 天', value: '30d' }, { label: '近 90 天', value: '90d' },
-]
-const srchCatOpts = [
-  { label: '全部分类', value: '' }, { label: '制度规范', value: 'policy' },
-  { label: '培训资料', value: 'training' }, { label: '产品文档', value: 'product' },
-]
-const srchScopeOpts = [
-  { label: '全部权限', value: '' }, { label: '仅本人可见', value: 'self' },
-  { label: '部门可见', value: 'dept' }, { label: '公司可见', value: 'company' },
-]
-function clearFilters() {
-  sFilterType.value = ''; sFilterTime.value = ''
-  sFilterCat.value = ''; sFilterScope.value = ''
+const sourceSel = ref<Set<string>>(new Set(['kb']))
+function toggleSource(o: string) {
+  const next = new Set(sourceSel.value)
+  if (next.has(o)) next.delete(o)
+  else next.add(o)
+  sourceSel.value = next
+}
+const filteredSources = computed(() => {
+  if (!sources.value.length || sourceSel.value.size === 0) return sources.value
+  if (sourceSel.value.size === sourceOptions.length) return sources.value
+  return sources.value.filter((s) => s.sourceType && sourceSel.value.has(s.sourceType))
+})
+function resetSources() {
+  sourceSel.value = new Set(['kb'])
+}
+
+// ── 本地搜索历史
+const HISTORY_KEY = 'knoa_search_history'
+const MAX_HISTORY = 20
+const searchHistory = ref<string[]>([])
+onMounted(() => {
+  loadHistory()
+  void loadTrending()
+})
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY)
+    searchHistory.value = raw ? (JSON.parse(raw) as string[]) : []
+  } catch {
+    searchHistory.value = []
+  }
+}
+function saveHistory(text: string) {
+  if (!text.trim()) return
+  const next = [text, ...searchHistory.value.filter((h) => h !== text)].slice(0, MAX_HISTORY)
+  searchHistory.value = next
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+}
+function clearHistory() {
+  searchHistory.value = []
+  try { localStorage.removeItem(HISTORY_KEY) } catch { /* ignore */ }
+}
+function removeHistoryItem(text: string, e: Event) {
+  e.stopPropagation()
+  const next = searchHistory.value.filter((h) => h !== text)
+  searchHistory.value = next
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)) } catch { /* ignore */ }
 }
 
 function scrollToBottom() {
@@ -126,6 +144,7 @@ async function runSearch() {
     streaming.value = false
     askAbort.value = null
     searchCost.value = Math.round((performance.now() - t0) * 100) / 100
+    if (!errorMsg.value && submitted.value) saveHistory(submitted.value)
   }
 }
 
@@ -171,34 +190,27 @@ function clearSearch() {
       </div>
     </template>
 
-    <!-- ====== 搜索筛选（交互 UI）====== -->
+    <!-- ====== 搜索筛选（来源类型会实际过滤结果）====== -->
     <template v-else-if="section === 'filters'">
       <div class="card filter-card">
         <div class="panel-head">
           <span class="panel-title">搜索筛选</span>
           <Icon name="filter" :size="14" class="info-hint" />
         </div>
-        <p class="filter-desc">配置检索范围与来源类型，提交搜索时生效。</p>
+        <p class="filter-desc">配置检索来源类型，搜索结果会按选中类型过滤。</p>
         <div class="filter-group">
           <div class="filter-label">来源类型</div>
           <div class="filter-toggles">
             <button
               v-for="opt in sourceOptions"
-              :key="opt"
+              :key="opt.value"
               class="filter-toggle"
-              :class="{ on: sourceSel.has(opt) }"
-              @click="toggleSource(opt)"
-            >{{ opt }}</button>
+              :class="{ on: sourceSel.has(opt.value) }"
+              @click="toggleSource(opt.value)"
+            >{{ opt.label }}</button>
           </div>
         </div>
-        <div class="filter-group">
-          <div class="filter-label">时间范围</div>
-          <div class="filter-toggles">
-            <button class="filter-toggle on">不限</button>
-            <button class="filter-toggle">近 7 天</button>
-            <button class="filter-toggle">近 30 天</button>
-          </div>
-        </div>
+        <div class="filter-hint">提示：默认只检索知识库。勾选「联网搜索」可在无命中时自动补充网络结果（若管理员已开启联网能力）。</div>
       </div>
     </template>
 
@@ -228,31 +240,49 @@ function clearSearch() {
       <span class="adv-link">高级搜索 <Icon name="chevron-down" :size="11" /></span>
     </div>
 
-    <!-- 空状态：热门搜索建议 -->
-    <div v-if="!submitted" class="suggest-row">
-      <span class="suggest-label">大家都在搜</span>
-      <button v-for="(s, i) in suggested" :key="i" class="chip" @click="pick(s)">{{ s }}</button>
-    </div>
+    <!-- 空状态：最近搜索 + 热门搜索建议 -->
+    <template v-if="!submitted">
+      <div v-if="searchHistory.length" class="history-row">
+        <div class="history-head">
+          <span class="history-title">最近搜索</span>
+          <button class="history-clear" @click="clearHistory">清空</button>
+        </div>
+        <div class="history-list">
+          <button
+            v-for="h in searchHistory"
+            :key="h"
+            class="history-chip"
+            @click="pick(h)"
+          >
+            <Icon name="clock" :size="13" />
+            <span class="history-txt">{{ h }}</span>
+            <span class="history-del" title="移除" @click="removeHistoryItem(h, $event)"><Icon name="close" :size="11" /></span>
+          </button>
+        </div>
+      </div>
+      <div class="suggest-row">
+        <span class="suggest-label">大家都在搜</span>
+        <button v-for="(s, i) in suggested" :key="i" class="chip" @click="pick(s)">{{ s }}</button>
+      </div>
+    </template>
 
     <!-- ====== 结果区 ====== -->
     <div v-else class="result-area" ref="scrollRef">
       <!-- 筛选行 + 结果计数 -->
       <div class="result-toolbar">
         <div class="filter-row">
-          <CustomSelect v-model="sFilterType" :options="srchTypeOpts" placeholder="文件类型" width="110px" />
-          <CustomSelect v-model="sFilterTime" :options="srchTimeOpts" placeholder="更新时间" width="115px" />
-          <CustomSelect v-model="sFilterCat" :options="srchCatOpts" placeholder="文档分类" width="115px" />
-          <CustomSelect v-model="sFilterScope" :options="srchScopeOpts" placeholder="权限范围" width="110px" />
-          <button class="flink" @click="clearFilters">清空</button>
-          <span class="flink expand">展开 <Icon name="chevron-down" :size="11" /></span>
+          <span class="filter-label-inline">来源</span>
+          <button
+            v-for="opt in sourceOptions"
+            :key="opt.value"
+            class="filter-toggle"
+            :class="{ on: sourceSel.has(opt.value) }"
+            @click="toggleSource(opt.value)"
+          >{{ opt.label }}</button>
+          <button class="flink" @click="resetSources">重置</button>
         </div>
         <div class="result-meta">
-          <span>找到 <b>{{ sources.length }}</b> 条结果<span v-if="searchCost !== null">（用时 {{ searchCost.toFixed(2) }} 秒）</span></span>
-          <span class="sort-opt">相似度排序 <Icon name="chevron-down" :size="11" /></span>
-          <div class="view-tog">
-            <button class="vt active"><Icon name="listview" :size="15" /></button>
-            <button class="vt"><Icon name="gridview" :size="15" /></button>
-          </div>
+          <span>找到 <b>{{ filteredSources.length }}</b> 条结果<span v-if="searchCost !== null">（用时 {{ searchCost.toFixed(2) }} 秒）</span></span>
         </div>
       </div>
       <!-- 问题头 -->
@@ -286,10 +316,10 @@ function clearSearch() {
       </div>
 
       <!-- 来源卡片（溯源） -->
-      <div v-if="sources.length" class="refs-section">
-        <div class="refs-label">为你检索到 {{ sources.length }} 个相关来源</div>
+      <div v-if="filteredSources.length" class="refs-section">
+        <div class="refs-label">为你检索到 {{ filteredSources.length }} 个相关来源</div>
         <div class="refs-list">
-          <div v-for="(s, i) in sources" :key="s.id ?? i" class="ref-card card">
+          <div v-for="(s, i) in filteredSources" :key="s.id ?? i" class="ref-card card">
             <div class="ref-icon" :class="`src-${s.sourceType || 'kb'}`">
               <Icon
                 :name="s.sourceType === 'web' ? 'globe' : s.sourceType === 'graph' ? 'node' : 'doc'"
@@ -394,24 +424,11 @@ function clearSearch() {
   font-size: 12.5px; color: var(--brand); background: none; border: none;
   cursor: pointer; font-family: inherit; padding: 0;
 }
-.flink.expand { color: var(--text-secondary); margin-left: auto; }
 .result-meta {
   display: flex; align-items: center; gap: 16px;
   font-size: 13px; color: var(--text-secondary);
 }
 .result-meta b { color: var(--text-primary); }
-.sort-opt {
-  display: inline-flex; align-items: center; gap: 2px;
-  cursor: pointer; color: var(--brand); font-size: 12.5px;
-}
-.view-tog { display: flex; margin-left: auto; gap: 2px; }
-.vt {
-  width: 30px; height: 28px; display: inline-flex; align-items: center;
-  justify-content: center; border-radius: var(--radius-sm);
-  background: transparent; color: var(--text-tertiary); cursor: pointer;
-  border: 1px solid transparent; transition: all var(--dur-fast);
-}
-.vt.active { background: var(--brand-soft); color: var(--brand); border-color: var(--brand); }
 
 /* ---- 建议 ---- */
 .suggest-row {
@@ -437,6 +454,46 @@ function clearSearch() {
   font-family: inherit;
 }
 .chip:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+
+/* ---- 搜索历史 ---- */
+.history-row { display: flex; flex-direction: column; gap: 10px; }
+.history-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.history-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.history-clear {
+  font-size: 12.5px; color: var(--text-tertiary); background: none; border: none;
+  cursor: pointer; font-family: inherit;
+}
+.history-clear:hover { color: var(--danger); }
+.history-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.history-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 280px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all var(--dur-fast);
+  font-family: inherit;
+}
+.history-chip:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+.history-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-del {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  color: var(--text-tertiary); flex-shrink: 0;
+}
+.history-chip:hover .history-del { color: var(--text-secondary); }
+.history-del:hover { background: var(--bg-hover); color: var(--danger); }
+
+/* 结果区筛选 */
+.filter-label-inline {
+  font-size: 12.5px; font-weight: 600; color: var(--text-secondary); margin-right: 2px;
+}
 
 /* ---- 结果区 ---- */
 .result-area {
