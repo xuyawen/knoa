@@ -1,78 +1,58 @@
 <script setup lang="ts">
-// 智能搜索 — 搜索即问答：复用 /api/ask 流式接口，
-// 把输入当作问题直接检索，结果以「AI 答案 + 溯源卡片」呈现。
-// 去掉了原 mock 中无后端支撑的假筛选下拉与假统计数。
-// section 由路由决定（history/popular/filters）。
-import { ref, computed, nextTick, onMounted } from 'vue'
+// 智能搜索 — 文档搜索结果页：左侧历史/热门，右侧结果列表 + 关键词高亮。
+import { ref, computed, onMounted } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
+import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useToastStore } from '@/stores/toast'
-import { streamAsk, getTrending } from '@/api'
-import type { ThinkingStep, SourceItem, TrendingItem } from '@/types/api'
+import { searchDocs, getTrending } from '@/api'
+import type { SearchDocItem, TrendingItem, Paginated } from '@/types/api'
 
 const props = defineProps<{ section?: string }>()
 const section = computed(() => props.section ?? 'history')
 
-// 热门搜索（真实 trending 数据）
-const trending = ref<TrendingItem[]>([])
-async function loadTrending() {
-  try {
-    trending.value = await getTrending()
-  } catch {
-    trending.value = []
-  }
-}
-
 const toast = useToastStore()
 
+// ── 搜索框 ──
 const query = ref('')
-const submitted = ref('')        // 当前已提交的问题
-const answer = ref('')           // 流式累积的回答正文
-const sources = ref<SourceItem[]>([])
-const thinking = ref<ThinkingStep[]>([])
-const streaming = ref(false)
-const errorMsg = ref('')
-const showThinking = ref(false)
-const askAbort = ref<AbortController | null>(null)
-const scrollRef = ref<HTMLElement | null>(null)
+const submitted = ref('')
+const loading = ref(false)
+const results = ref<Paginated<SearchDocItem> | null>(null)
 const searchCost = ref<number | null>(null)
 
-const suggested = [
-  '数据安全分级分类标准是怎样的？',
-  '员工入职需要准备哪些材料？',
-  '差旅报销流程是什么？',
-  '如何申请系统权限？',
+// ── 来源筛选（真实过滤，后端已支撑）──
+const typeOpts = [
+  { label: '全部类型', value: '' },
+  { label: 'PDF', value: 'pdf' },
+  { label: 'Word', value: 'docx' },
+  { label: 'TXT', value: 'txt' },
+  { label: 'MD', value: 'md' },
 ]
-
-// ── 来源筛选（按 SourceItem.sourceType 前端过滤，后端暂无时间/分类/权限元数据）
-const sourceOptions = [
-  { label: '知识库', value: 'kb' },
-  { label: '联网搜索', value: 'web' },
-  { label: '知识图谱', value: 'graph' },
+const scopeOpts = [
+  { label: '全部权限', value: '' },
+  { label: '公开', value: 'public' },
+  { label: '公司内部', value: 'company' },
+  { label: '部门', value: 'department' },
+  { label: '私有', value: 'private' },
 ]
-const sourceSel = ref<Set<string>>(new Set(['kb']))
-function toggleSource(o: string) {
-  const next = new Set(sourceSel.value)
-  if (next.has(o)) next.delete(o)
-  else next.add(o)
-  sourceSel.value = next
-}
-const filteredSources = computed(() => {
-  if (!sources.value.length || sourceSel.value.size === 0) return sources.value
-  if (sourceSel.value.size === sourceOptions.length) return sources.value
-  return sources.value.filter((s) => s.sourceType && sourceSel.value.has(s.sourceType))
-})
-function resetSources() {
-  sourceSel.value = new Set(['kb'])
-}
+const statusOpts = [
+  { label: '已审核', value: '已审核' },
+  { label: '待复核', value: '待复核' },
+  { label: '已拒绝', value: '已拒绝' },
+]
+const filterType = ref('')
+const filterScope = ref('')
+const filterStatus = ref('已审核')
 
-// ── 本地搜索历史
+// ── 本地搜索历史 ──
 const HISTORY_KEY = 'knoa_search_history'
 const MAX_HISTORY = 20
 const searchHistory = ref<string[]>([])
+
 onMounted(() => {
   loadHistory()
   void loadTrending()
 })
+
 function loadHistory() {
   try {
     const raw = localStorage.getItem(HISTORY_KEY)
@@ -98,267 +78,344 @@ function removeHistoryItem(text: string, e: Event) {
   try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)) } catch { /* ignore */ }
 }
 
-function scrollToBottom() {
-  nextTick(() => {
-    const el = scrollRef.value
-    if (el) el.scrollTop = el.scrollHeight
-  })
+// ── 热门搜索 ──
+const trending = ref<TrendingItem[]>([])
+async function loadTrending() {
+  try { trending.value = await getTrending() } catch { trending.value = [] }
 }
 
-async function runSearch() {
+// ── 执行搜索 ──
+async function runSearch(page = 1) {
   const text = query.value.trim()
-  if (!text || streaming.value) return
-  const t0 = performance.now()
+  if (!text || loading.value) return
+  loading.value = true
   submitted.value = text
-  answer.value = ''
-  sources.value = []
-  thinking.value = []
-  errorMsg.value = ''
-  showThinking.value = false
-  streaming.value = true
-
-  const ac = new AbortController()
-  askAbort.value = ac
+  const t0 = performance.now()
   try {
-    // 纯搜索场景：不挂 sessionId，走全局检索；事件结构与 Chat 完全一致。
-    // 传 mode='search' 让后端埋点区分「搜索」与「问答」，Dashboard 才能分别统计。
-    for await (const ev of streamAsk(text, null, null, undefined, { signal: ac.signal, mode: 'search' })) {
-      if (ev.event === 'thinking') {
-        thinking.value = [...thinking.value, ev.data as ThinkingStep]
-      } else if (ev.event === 'sources') {
-        sources.value = ev.data as SourceItem[]
-      } else if (ev.event === 'delta') {
-        answer.value += (ev.data as { content: string }).content
-        scrollToBottom()
-      } else if (ev.event === 'error') {
-        errorMsg.value = (ev.data as { message: string }).message
-        toast.error(`搜索出错：${errorMsg.value}`)
-      }
-      // 'done' / 'message' 在搜索场景无需持久化，忽略
-    }
+    results.value = await searchDocs(text, {
+      page,
+      size: 20,
+      type: filterType.value,
+      scope: filterScope.value,
+      status: filterStatus.value,
+    })
+    saveHistory(text)
   } catch (e: any) {
-    if (e?.name !== 'AbortError') {
-      toast.error(`搜索中断：${e?.message || e}`)
-    }
+    toast.error(`搜索失败：${e?.message || e}`)
+    results.value = null
   } finally {
-    streaming.value = false
-    askAbort.value = null
-    searchCost.value = Math.round((performance.now() - t0) * 100) / 100
-    if (!errorMsg.value && submitted.value) saveHistory(submitted.value)
+    loading.value = false
+    searchCost.value = Math.round((performance.now() - t0) * 10) / 1000
   }
 }
 
-function stop() {
-  askAbort.value?.abort()
-}
-
-function resetSearch() {
-  submitted.value = ''
-  answer.value = ''
-  sources.value = []
-  thinking.value = []
-  errorMsg.value = ''
-}
-
-function pick(s: string) {
-  query.value = s
-  runSearch()
+function pick(text: string) {
+  query.value = text
+  void runSearch()
 }
 
 function clearSearch() {
   query.value = ''
 }
+
+function resetFilters() {
+  filterType.value = ''
+  filterScope.value = ''
+  filterStatus.value = '已审核'
+}
+
+// ── 关键词高亮 ──
+const highlight = computed(() => {
+  const q = submitted.value.trim()
+  if (!q) return (text: string) => text
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`(${escaped})`, 'gi')
+  return (text: string) => text.replace(re, '<mark>$1</mark>')
+})
+
+function fileIcon(type: string): string {
+  switch (type.toUpperCase()) {
+    case 'PDF': return 'file-text'
+    case 'DOCX': return 'file-text'
+    case 'XLSX': return 'table'
+    case 'MD': return 'file-code'
+    default: return 'file'
+  }
+}
+function fileIconClass(type: string): string {
+  const t = type.toUpperCase()
+  if (t === 'PDF') return 'pdf'
+  if (t === 'DOCX') return 'docx'
+  if (t === 'XLSX') return 'xlsx'
+  if (t === 'MD') return 'md'
+  return 'txt'
+}
+function fmtTime(iso: string) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? iso : d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+function scopeLabel(scope: string): string {
+  const map: Record<string, string> = { public: '公开', company: '公司内部', department: '部门可见', private: '仅本人可见' }
+  return map[scope] || scope
+}
 </script>
 
 <template>
   <div class="search-page">
-    <!-- ====== 热门搜索（真实 trending）====== -->
-    <template v-if="section === 'popular'">
-      <div class="card popular-card">
-        <div class="panel-head">
-          <span class="panel-title">热门搜索榜</span>
-          <Icon name="fire" :size="14" class="info-hint" />
-        </div>
-        <ul v-if="trending.length" class="popular-list">
-          <li v-for="(t, i) in trending" :key="t.question">
-            <span class="rank" :class="'rk-' + Math.min(i + 1, 3)">{{ i + 1 }}</span>
-            <span class="q">{{ t.question }}</span>
-            <span class="cnt">{{ t.count }}</span>
-          </li>
-        </ul>
-        <div v-else class="empty-hint">暂无热门搜索数据</div>
-      </div>
-    </template>
-
-    <!-- ====== 搜索筛选（来源类型会实际过滤结果）====== -->
-    <template v-else-if="section === 'filters'">
-      <div class="card filter-card">
-        <div class="panel-head">
-          <span class="panel-title">搜索筛选</span>
-          <Icon name="filter" :size="14" class="info-hint" />
-        </div>
-        <p class="filter-desc">配置检索来源类型，搜索结果会按选中类型过滤。</p>
-        <div class="filter-group">
-          <div class="filter-label">来源类型</div>
-          <div class="filter-toggles">
-            <button
-              v-for="opt in sourceOptions"
-              :key="opt.value"
-              class="filter-toggle"
-              :class="{ on: sourceSel.has(opt.value) }"
-              @click="toggleSource(opt.value)"
-            >{{ opt.label }}</button>
-          </div>
-        </div>
-        <div class="filter-hint">提示：默认只检索知识库。勾选「联网搜索」可在无命中时自动补充网络结果（若管理员已开启联网能力）。</div>
-      </div>
-    </template>
-
-    <!-- ====== 搜索历史 / 默认：搜索即问答 ====== -->
-    <template v-else>
-    <div class="search-bar-row card">
-      <div class="search-input-wrap">
-        <Icon name="search" :size="17" class="sb-icon" />
-        <input
-          v-model="query"
-          type="text"
-          placeholder="企业数据安全管理规范"
-          class="sb-input"
-          @keydown.enter="runSearch"
-        />
-        <button v-if="query" class="sb-clear" @click="clearSearch">
-          <Icon name="close" :size="13" />
+    <!-- 左侧边栏 -->
+    <aside class="search-sidebar">
+      <div class="nav-menu">
+        <button class="nav-item" :class="{ active: section === 'history' }">
+          <Icon name="clock" :size="16" />
+          <span>搜索历史</span>
+        </button>
+        <button class="nav-item" :class="{ active: section === 'popular' }">
+          <Icon name="fire" :size="16" />
+          <span>热门搜索</span>
         </button>
       </div>
-      <button
-        class="btn btn-primary sb-btn"
-        :disabled="!query.trim() || streaming"
-        @click="runSearch"
-      >
-        {{ streaming ? '检索中…' : '搜索' }}
-      </button>
-      <span class="adv-link">高级搜索 <Icon name="chevron-down" :size="11" /></span>
-    </div>
 
-    <!-- 空状态：最近搜索 + 热门搜索建议 -->
-    <template v-if="!submitted">
-      <div v-if="searchHistory.length" class="history-row">
-        <div class="history-head">
-          <span class="history-title">最近搜索</span>
-          <button class="history-clear" @click="clearHistory">清空</button>
+      <div class="side-section">
+        <div class="side-head">
+          <span class="side-title">搜索历史</span>
+          <button v-if="searchHistory.length" class="side-clear" @click="clearHistory">清空</button>
         </div>
-        <div class="history-list">
-          <button
+        <div v-if="searchHistory.length" class="side-list">
+          <div
             v-for="h in searchHistory"
             :key="h"
-            class="history-chip"
+            class="side-item"
             @click="pick(h)"
           >
             <Icon name="clock" :size="13" />
-            <span class="history-txt">{{ h }}</span>
-            <span class="history-del" title="移除" @click="removeHistoryItem(h, $event)"><Icon name="close" :size="11" /></span>
+            <span class="side-txt">{{ h }}</span>
+            <button class="side-del" title="移除" @click.stop="removeHistoryItem(h, $event)">
+              <Icon name="close" :size="10" />
+            </button>
+          </div>
+        </div>
+        <div v-else class="side-empty">暂无搜索历史</div>
+      </div>
+
+      <div class="side-section">
+        <div class="side-head">
+          <span class="side-title">热门搜索</span>
+        </div>
+        <div v-if="trending.length" class="side-list">
+          <div
+            v-for="(t, i) in trending.slice(0, 8)"
+            :key="t.question"
+            class="side-item"
+            @click="pick(t.question)"
+          >
+            <span class="side-rank" :class="'rk-' + Math.min(i + 1, 3)">{{ i + 1 }}</span>
+            <span class="side-txt">{{ t.question }}</span>
+          </div>
+        </div>
+        <div v-else class="side-empty">暂无热门数据</div>
+      </div>
+    </aside>
+
+    <!-- 右侧主区域 -->
+    <main class="search-main">
+      <!-- 搜索栏 -->
+      <div class="search-bar-row card">
+        <div class="search-input-wrap">
+          <Icon name="search" :size="17" class="sb-icon" />
+          <input
+            v-model="query"
+            type="text"
+            placeholder="企业数据安全管理规范"
+            class="sb-input"
+            @keydown.enter="runSearch()"
+          />
+          <button v-if="query" class="sb-clear" @click="clearSearch">
+            <Icon name="close" :size="13" />
           </button>
         </div>
-      </div>
-      <div class="suggest-row">
-        <span class="suggest-label">大家都在搜</span>
-        <button v-for="(s, i) in suggested" :key="i" class="chip" @click="pick(s)">{{ s }}</button>
-      </div>
-    </template>
-
-    <!-- ====== 结果区 ====== -->
-    <div v-else class="result-area" ref="scrollRef">
-      <!-- 筛选行 + 结果计数 -->
-      <div class="result-toolbar">
-        <div class="filter-row">
-          <span class="filter-label-inline">来源</span>
-          <button
-            v-for="opt in sourceOptions"
-            :key="opt.value"
-            class="filter-toggle"
-            :class="{ on: sourceSel.has(opt.value) }"
-            @click="toggleSource(opt.value)"
-          >{{ opt.label }}</button>
-          <button class="flink" @click="resetSources">重置</button>
-        </div>
-        <div class="result-meta">
-          <span>找到 <b>{{ filteredSources.length }}</b> 条结果<span v-if="searchCost !== null">（用时 {{ searchCost.toFixed(2) }} 秒）</span></span>
-        </div>
-      </div>
-      <!-- 问题头 -->
-      <div class="result-head">
-        <h3 class="result-q">{{ submitted }}</h3>
-        <button class="btn-ghost-sm" @click="resetSearch">新搜索</button>
-      </div>
-
-      <!-- 思考过程（折叠） -->
-      <div v-if="thinking.length" class="thinking">
-        <button class="thinking-toggle" @click="showThinking = !showThinking">
-          <Icon name="sparkles" :size="13" />
-          AI 检索过程（{{ thinking.length }} 步）
-          <Icon name="chevron-down" :size="11" :class="{ rotated: showThinking }" />
+        <button
+          class="btn btn-primary sb-btn"
+          :disabled="!query.trim() || loading"
+          @click="runSearch()"
+        >
+          {{ loading ? '检索中…' : '搜索' }}
         </button>
-        <ul v-if="showThinking" class="thinking-list">
-          <li v-for="t in thinking" :key="t.step">
-            <span class="think-action">{{ t.action }}</span>
-            <span class="think-detail">{{ t.detail }}</span>
-          </li>
-        </ul>
+        <span class="adv-link">高级搜索 <Icon name="chevron-down" :size="11" /></span>
       </div>
 
-      <!-- 回答正文 -->
-      <div class="answer-card card">
-        <div v-if="answer" class="answer-body">{{ answer }}</div>
-        <div v-else-if="streaming" class="answer-loading">
+      <!-- 结果区 -->
+      <div v-if="submitted" class="result-area card">
+        <div class="result-toolbar">
+          <div class="filter-row">
+            <CustomSelect v-model="filterType" :options="typeOpts" placeholder="文件类型" width="110px" />
+            <CustomSelect v-model="filterScope" :options="scopeOpts" placeholder="权限范围" width="120px" />
+            <CustomSelect v-model="filterStatus" :options="statusOpts" placeholder="文档状态" width="110px" />
+            <button class="flink" @click="resetFilters">清空</button>
+            <button class="btn btn-primary btn-sm" @click="runSearch(results?.page ?? 1)">应用筛选</button>
+          </div>
+          <div class="result-meta">
+            找到约 <b>{{ results?.total ?? 0 }}</b> 条结果
+            <span v-if="searchCost !== null">（用时 {{ searchCost.toFixed(3) }} 秒）</span>
+          </div>
+        </div>
+
+        <div v-if="loading" class="result-loading">
           <span class="dot" /><span class="dot" /><span class="dot" />
         </div>
-        <div v-else-if="errorMsg" class="answer-error">{{ errorMsg }}</div>
-      </div>
 
-      <!-- 来源卡片（溯源） -->
-      <div v-if="filteredSources.length" class="refs-section">
-        <div class="refs-label">为你检索到 {{ filteredSources.length }} 个相关来源</div>
-        <div class="refs-list">
-          <div v-for="(s, i) in filteredSources" :key="s.id ?? i" class="ref-card card">
-            <div class="ref-icon" :class="`src-${s.sourceType || 'kb'}`">
-              <Icon
-                :name="s.sourceType === 'web' ? 'globe' : s.sourceType === 'graph' ? 'node' : 'doc'"
-                :size="16"
-              />
+        <div v-else-if="results && results.items.length" class="doc-list">
+          <div
+            v-for="doc in results.items"
+            :key="doc.id"
+            class="doc-card"
+          >
+            <div class="doc-icon" :class="fileIconClass(doc.type)">
+              <Icon :name="fileIcon(doc.type)" :size="20" />
             </div>
-            <div class="ref-info">
-              <div class="ref-name">{{ s.title }}</div>
-              <div class="ref-meta">
-                <span class="ref-kb">{{ s.kb }}</span>
-                <span v-if="s.confidence" class="ref-conf">相关度 {{ Math.round(s.confidence * 100) }}%</span>
+            <div class="doc-body">
+              <div class="doc-title" v-html="highlight(doc.title)"></div>
+              <div class="doc-snippet" v-html="highlight(doc.snippet || '暂无摘要')"></div>
+              <div class="doc-meta">
+                <span class="meta-item">
+                  <Icon name="folder" :size="12" />
+                  来自：{{ doc.kbName }}{{ doc.category ? ` > ${doc.category}` : '' }}
+                </span>
+                <span class="meta-item">
+                  <Icon name="clock" :size="12" />
+                  更新时间：{{ fmtTime(doc.updatedAt) }}
+                </span>
+                <span class="meta-item">
+                  <Icon name="shield" :size="12" />
+                  权限：{{ scopeLabel(doc.scope) }}
+                </span>
               </div>
-              <div class="ref-snippet">{{ s.snippet }}</div>
             </div>
           </div>
         </div>
+
+        <div v-else-if="results" class="empty-hint">未找到与「{{ submitted }}」相关的文档</div>
       </div>
 
-      <!-- 停止 / 重新搜索 -->
-      <div class="result-actions">
-        <button v-if="streaming" class="btn btn-ghost" @click="stop">
-          <Icon name="close" :size="14" /> 停止
-        </button>
-        <button v-else class="btn btn-ghost" @click="runSearch">
-          <Icon name="refresh" :size="14" /> 重新搜索
-        </button>
+      <!-- 空状态提示 -->
+      <div v-else class="welcome card">
+        <Icon name="search" :size="40" class="welcome-icon" />
+        <div class="welcome-title">输入关键词，搜索知识库文档</div>
+        <div class="welcome-desc">支持按文件类型、权限范围、审核状态筛选</div>
       </div>
-    </div>
-    </template>
+    </main>
   </div>
 </template>
 
 <style scoped>
 .search-page {
   display: flex;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ---- 左侧边栏 ---- */
+.search-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
   flex-direction: column;
   gap: 16px;
 }
-/* ---- 搜索栏 ---- */
+.nav-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--dur-fast);
+}
+.nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.nav-item.active { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+
+.side-section {
+  padding: 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.side-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.side-clear {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.side-clear:hover { color: var(--danger); }
+.side-list { display: flex; flex-direction: column; gap: 2px; }
+.side-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--dur-fast);
+}
+.side-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.side-txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-rank {
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 5px;
+  font-size: 11px; font-weight: 700;
+  background: var(--bg-subtle); color: var(--text-secondary);
+}
+.side-rank.rk-1 { background: var(--brand); color: var(--text-on-brand); }
+.side-rank.rk-2 { background: var(--brand-soft); color: var(--brand); }
+.side-rank.rk-3 { background: var(--warning-soft); color: var(--warning); }
+.side-del {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  color: var(--text-tertiary); opacity: 0;
+  transition: all var(--dur-fast);
+}
+.side-item:hover .side-del { opacity: 1; }
+.side-del:hover { background: var(--bg-hover); color: var(--danger); }
+.side-empty { font-size: 12.5px; color: var(--text-tertiary); padding: 8px 0; }
+
+/* ---- 右侧主区域 ---- */
+.search-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+/* 搜索栏 */
 .search-bar-row {
   display: flex;
   align-items: center;
@@ -413,287 +470,129 @@ function clearSearch() {
   cursor: pointer; white-space: nowrap;
 }
 
-/* ---- 结果工具栏（筛选 + 计数） ---- */
-.result-toolbar { display: flex; flex-direction: column; gap: 10px; }
+/* 结果区 */
+.result-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  min-height: 300px;
+}
+.result-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 14px;
+}
 .filter-row {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 10px 14px; border-radius: var(--radius-md);
-  background: var(--bg-subtle); border: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.btn-sm {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12.5px;
 }
 .flink {
   font-size: 12.5px; color: var(--brand); background: none; border: none;
   cursor: pointer; font-family: inherit; padding: 0;
 }
 .result-meta {
-  display: flex; align-items: center; gap: 16px;
   font-size: 13px; color: var(--text-secondary);
 }
 .result-meta b { color: var(--text-primary); }
 
-/* ---- 建议 ---- */
-.suggest-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 4px 0;
+.result-loading {
+  display: flex; gap: 5px; padding: 24px 0; justify-content: center;
 }
-.suggest-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
-.chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  font-size: 12.5px;
-  color: var(--text-primary);
-  background: var(--bg-surface);
-  cursor: pointer;
-  transition: all var(--dur-fast);
-  white-space: nowrap;
-  font-family: inherit;
-}
-.chip:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
-
-/* ---- 搜索历史 ---- */
-.history-row { display: flex; flex-direction: column; gap: 10px; }
-.history-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-}
-.history-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
-.history-clear {
-  font-size: 12.5px; color: var(--text-tertiary); background: none; border: none;
-  cursor: pointer; font-family: inherit;
-}
-.history-clear:hover { color: var(--danger); }
-.history-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.history-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  max-width: 280px;
-  padding: 6px 6px 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  cursor: pointer;
-  transition: all var(--dur-fast);
-  font-family: inherit;
-}
-.history-chip:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
-.history-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.history-del {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; border-radius: 50%;
-  color: var(--text-tertiary); flex-shrink: 0;
-}
-.history-chip:hover .history-del { color: var(--text-secondary); }
-.history-del:hover { background: var(--bg-hover); color: var(--danger); }
-
-/* 结果区筛选 */
-.filter-label-inline {
-  font-size: 12.5px; font-weight: 600; color: var(--text-secondary); margin-right: 2px;
-}
-
-/* ---- 结果区 ---- */
-.result-area {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-.result-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.result-q {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0;
-  line-height: 1.4;
-}
-.btn-ghost-sm {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: transparent;
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-family: inherit;
-  transition: all var(--dur-fast);
-}
-.btn-ghost-sm:hover { background: var(--bg-hover); color: var(--text-primary); }
-
-/* 思考过程 */
-.thinking {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-subtle);
-  overflow: hidden;
-}
-.thinking-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 9px 12px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-}
-.thinking-toggle .chevron-down { margin-left: auto; transition: transform var(--dur-fast); color: var(--text-tertiary); }
-.thinking-toggle .chevron-down.rotated { transform: rotate(180deg); }
-.thinking-list { margin: 0; padding: 4px 12px 10px 26px; }
-.thinking-list li { font-size: 12px; color: var(--text-tertiary); margin-bottom: 4px; line-height: 1.5; }
-.think-action {
-  display: inline-block;
-  padding: 0 7px;
-  margin-right: 6px;
-  border-radius: var(--radius-pill);
-  background: var(--brand-soft);
-  color: var(--brand);
-  font-weight: 600;
-}
-
-/* 回答正文 */
-.answer-card {
-  padding: 18px 20px;
-}
-.answer-body {
-  font-size: 13.5px;
-  line-height: 1.8;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.answer-loading { display: flex; gap: 5px; padding: 4px 0; }
-.answer-loading .dot {
+.result-loading .dot {
   width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary);
   animation: blink 1.2s infinite ease-in-out;
 }
-.answer-loading .dot:nth-child(2) { animation-delay: 0.2s; }
-.answer-loading .dot:nth-child(3) { animation-delay: 0.4s; }
+.result-loading .dot:nth-child(2) { animation-delay: 0.2s; }
+.result-loading .dot:nth-child(3) { animation-delay: 0.4s; }
 @keyframes blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
-.answer-error { font-size: 12.5px; color: var(--danger); }
 
-/* 来源卡片（溯源） */
-.refs-section { margin-top: 2px; }
-.refs-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; }
-.refs-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
-.ref-card {
+/* 文档列表 */
+.doc-list { display: flex; flex-direction: column; gap: 14px; }
+.doc-card {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  transition: box-shadow var(--dur-fast), transform var(--dur-fast);
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
 }
-.ref-card:hover { box-shadow: var(--shadow-float); transform: translateY(-1px); }
-.ref-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.doc-card:last-child { border-bottom: none; padding-bottom: 0; }
+.doc-icon {
+  width: 44px; height: 44px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
 }
-.ref-icon.src-kb { background: var(--accent-blue-soft); color: var(--accent-blue); }
-.ref-icon.src-web { background: var(--accent-green-soft); color: var(--accent-green); }
-.ref-icon.src-graph { background: var(--accent-amber-soft); color: var(--accent-amber); }
-.ref-info { min-width: 0; }
-.ref-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ref-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-tertiary); margin: 2px 0 4px; }
-.ref-kb { color: var(--brand); }
-.ref-snippet {
-  font-size: 11.5px;
-  color: var(--text-tertiary);
-  line-height: 1.5;
+.doc-icon.pdf { background: #fff0f0; color: #d93025; }
+.doc-icon.docx { background: #e8f0fe; color: #1a73e8; }
+.doc-icon.xlsx { background: #e6f4ea; color: #137333; }
+.doc-icon.md { background: var(--bg-subtle); color: var(--text-secondary); }
+.doc-icon.txt { background: var(--bg-subtle); color: var(--text-secondary); }
+.doc-body { flex: 1; min-width: 0; }
+.doc-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+.doc-title :deep(mark) {
+  background: #fff3b0;
+  color: #b45f06;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+.doc-snippet {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 8px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-
-/* 操作 */
-.result-actions { display: flex; gap: 8px; }
-.btn-ghost {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 34px;
-  padding: 0 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: transparent;
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-family: inherit;
-  transition: all var(--dur-fast);
+.doc-snippet :deep(mark) {
+  background: #fff3b0;
+  color: #b45f06;
+  padding: 0 2px;
+  border-radius: 2px;
 }
-.btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+.doc-meta {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.meta-item { display: inline-flex; align-items: center; gap: 4px; }
 
-/* 热门搜索榜 */
-.popular-card { padding: 20px; }
-.popular-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.popular-list li {
+.empty-hint {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+/* 欢迎态 */
+.welcome {
+  flex: 1;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  transition: background var(--dur-fast);
-}
-.popular-list li:hover { background: var(--bg-hover); }
-.rank {
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  border-radius: 7px;
-  display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
+  gap: 10px;
+  min-height: 300px;
 }
-.rank.rk-1 { background: var(--brand); color: var(--text-on-brand); }
-.rank.rk-2 { background: var(--brand-soft); color: var(--brand); }
-.rank.rk-3 { background: var(--warning-soft); color: var(--warning); }
-.q { flex: 1; font-size: 13.5px; color: var(--text-primary); }
-.cnt { font-size: 12px; font-weight: 600; color: var(--brand); background: var(--brand-soft); padding: 2px 9px; border-radius: var(--radius-pill); }
-
-/* 搜索筛选 */
-.filter-card { padding: 20px; max-width: 640px; }
-.filter-desc { margin: 0 0 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
-.filter-group { margin-bottom: 18px; }
-.filter-label { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 10px; }
-.filter-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
-.filter-toggle {
-  padding: 7px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all var(--dur-fast);
-}
-.filter-toggle:hover { border-color: var(--brand); color: var(--brand); }
-.filter-toggle.on { background: var(--brand); color: var(--text-on-brand); border-color: var(--brand); }
+.welcome-icon { color: var(--brand-soft); }
+.welcome-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.welcome-desc { font-size: 13px; color: var(--text-secondary); }
 </style>

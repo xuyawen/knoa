@@ -32,6 +32,7 @@ import type {
   DocumentTaskOut,
   DocumentList,
   Paginated,
+  SearchDocsResponse,
 } from '@/types/api'
 import { authHeaders, TokenExpiredError } from './http'
 
@@ -64,6 +65,24 @@ export async function createKnowledgeBase(payload: {
 
 export async function getTrending(): Promise<TrendingItem[]> {
   const resp = await fetch('/api/trending', { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 全局文档搜索（智能搜索页文档结果列表）。 */
+export async function searchDocs(
+  q: string,
+  opts?: { page?: number; size?: number; type?: string; scope?: string; category?: string; status?: string },
+): Promise<SearchDocsResponse> {
+  const params = new URLSearchParams()
+  params.set('q', q)
+  if (opts?.page) params.set('page', String(opts.page))
+  if (opts?.size) params.set('size', String(opts.size))
+  if (opts?.type) params.set('doc_type', opts.type)
+  if (opts?.scope) params.set('scope', opts.scope)
+  if (opts?.category) params.set('category', opts.category)
+  if (opts?.status) params.set('status', opts.status)
+  const resp = await fetch(`/api/search/docs?${params.toString()}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
 }

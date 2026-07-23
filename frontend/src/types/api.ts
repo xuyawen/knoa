@@ -427,3 +427,20 @@ export interface DocumentTaskOut {
   createdAt: string
   documentTitle: string | null
 }
+
+/** 全局文档搜索结果项（智能搜索页文档卡片）。 */
+export interface SearchDocItem {
+  id: string
+  title: string
+  type: string
+  status: string
+  updatedAt: string
+  kbId: string
+  kbName: string
+  category: string | null
+  scope: string
+  uploaderName: string | null
+  snippet: string
+}
+
+export type SearchDocsResponse = Paginated<SearchDocItem>

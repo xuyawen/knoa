@@ -167,3 +167,18 @@ class DocumentTaskOut(CamelModel):
     completed_at: str | None = None
     created_at: str
     document_title: str | None = None
+
+
+class SearchDocOut(CamelModel):
+    """全局文档搜索结果项（智能搜索页文档卡片）。"""
+    id: str
+    title: str
+    type: str
+    status: str
+    updated_at: str
+    kb_id: str
+    kb_name: str
+    category: str | None = None
+    scope: str = "public"
+    uploader_name: str | None = None
+    snippet: str

@@ -45,6 +45,7 @@ from app.models.knowledge import (
     KBBatchDeleteIn,
     KnowledgeBaseOut,
     KnowledgeBasesResponse,
+    SearchDocOut,
 )
 from app.models.operation_log import record_operation
 
@@ -290,6 +291,77 @@ async def list_documents(
     pages = max(1, (total + size - 1) // size) if total else 1
     return {
         "items": [_doc_out(r[0]) for r in rows],
+        "total": total,
+        "page": page,
+        "page_size": size,
+        "pages": pages,
+    }
+
+
+@router.get("/search/docs", response_model=PaginatedOut[SearchDocOut])
+async def search_docs(
+    q: str = Query(..., min_length=1, description="搜索关键词"),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    doc_type: str | None = None,
+    scope: str | None = None,
+    category: str | None = None,
+    status: str | None = Query("已审核", description="文档状态"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """全局文档搜索：跨用户有权限的知识库，按标题模糊匹配返回文档卡片。
+
+    用于「智能搜索」页的文档结果列表，支持文件类型 / 分类 / 权限范围 / 状态过滤。
+    """
+    accessible = await get_accessible_kb_ids(db, user)
+    if not accessible:
+        return {
+            "items": [], "total": 0, "page": page, "page_size": size, "pages": 1,
+        }
+
+    kb_ids = [uuid.UUID(x) for x in accessible]
+    base = (
+        select(Document, KnowledgeBase.name.label("kb_name"))
+        .join(KnowledgeBase, KnowledgeBase.id == Document.kb_id)
+        .where(Document.kb_id.in_(kb_ids), Document.title.ilike(f"%{q}%"))
+    )
+    if status:
+        base = base.where(Document.status == status)
+    if doc_type:
+        base = base.where(Document.source_path.ilike(f"%{doc_type.lower()}"))
+    if scope:
+        base = base.where(Document.scope == scope)
+    if category:
+        base = base.where(Document.category == category)
+
+    stmt = base.order_by(Document.updated_at.desc())
+    rows, total = await paginate(db, stmt, page=page, page_size=size)
+    pages = max(1, (total + size - 1) // size) if total else 1
+
+    def _snippet(content: str | None) -> str:
+        if not content:
+            return ""
+        txt = content.replace("\n", " ").strip()
+        return txt[:200] + ("..." if len(txt) > 200 else "")
+
+    return {
+        "items": [
+            SearchDocOut(
+                id=str(d.id),
+                title=d.title,
+                type=_doc_type(d.source_path),
+                status=d.status,
+                updated_at=d.updated_at.isoformat() if d.updated_at else "",
+                kb_id=str(d.kb_id),
+                kb_name=kb_name or "",
+                category=d.category,
+                scope=d.scope,
+                uploader_name=d.uploader_name,
+                snippet=_snippet(d.content_md),
+            )
+            for d, kb_name in rows
+        ],
         "total": total,
         "page": page,
         "page_size": size,
