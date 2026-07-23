@@ -378,6 +378,12 @@ export interface AnnouncementUpdate {
   pinned?: boolean
 }
 
+/** 热门问答榜 / 知识缺口榜 单项。 */
+export interface HotQueryItem {
+  query: string
+  count: number
+}
+
 /** 系统设置（个人偏好）。P8 新增。 */
 export interface Settings {
   preferredModel: string | null   // 偏好问答模型；null=使用系统默认

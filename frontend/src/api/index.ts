@@ -27,6 +27,7 @@ import type {
   TtsResult,
   DocStats,
   UserStats,
+  HotQueryItem,
   DepartmentNode,
   DocumentTaskOut,
   DocumentList,
@@ -551,6 +552,20 @@ export async function markAnnouncementRead(id: string): Promise<void> {
     const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
     throw new Error(err.detail || `HTTP ${resp.status}`)
   }
+}
+
+/** 热门问答榜（近 30 天 action=ask 聚合 Top 10）。 */
+export async function getHotAsk(): Promise<HotQueryItem[]> {
+  const resp = await fetch('/api/analytics/hot-ask', { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 知识缺口榜（近 30 天零检索命中的提问聚合 Top 10）。 */
+export async function getKnowledgeGaps(): Promise<HotQueryItem[]> {
+  const resp = await fetch('/api/analytics/knowledge-gaps', { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
 }
 
 /** 读取个人系统设置（preferredModel / ttsEnabled）。P8 新增。 */

@@ -283,6 +283,7 @@ class OperationLog(Base):
     action: Mapped[str] = mapped_column(String(20), index=True)  # login/upload/approve/reject/delete/ask
     related_doc_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     detail: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    source_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 

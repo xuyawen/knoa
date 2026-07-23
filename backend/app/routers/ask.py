@@ -69,6 +69,7 @@ async def ask(
     async def event_generator():
         logger.info("ask stream start", extra={"request_id": rid})
         n = 0
+        src_count = 0
         # 流式生成器自己持有 DB 会话，并在生成结束后才关闭 ——
         # 这样事务生命周期跟随 SSE 流，而非跟随「路由返回」（sse-starlette
         # 在后台 task 跑生成器，路由早已 return，get_db 的 finally 会提前关会话，
@@ -79,7 +80,7 @@ async def ask(
             # 作为 Dashboard「AI 问答 / 用户搜索」与趋势图真实数据源。
             # 搜索页复用本接口时传 mode='search'，埋点动作相应区分，
             # 使「问答次数」与「搜索次数」成为两条独立真实数据。
-            await record_operation(
+            logged = await record_operation(
                 gen_db,
                 user,
                 "search" if req.mode == "search" else "ask",
@@ -110,13 +111,28 @@ async def ask(
                 if await request.is_disconnected():
                     logger.info("ask stream client disconnected, stop early", extra={"request_id": rid})
                     break
+                # 捕获检索来源数量，问答结束后回填到操作日志（知识缺口榜数据源）
+                if event.get("event") == "sources":
+                    data = event.get("data")
+                    if isinstance(data, dict):
+                        items = data.get("items") or data.get("sources") or []
+                    else:
+                        items = data or []
+                    src_count = len(items)
                 n += 1
                 yield {
                     "event": event["event"],
                     "data": json.dumps(event["data"], ensure_ascii=False),
                 }
         finally:
+            # 回填检索命中数（best-effort，失败不影响主流程）
+            if logged is not None:
+                try:
+                    logged.source_count = src_count
+                    await gen_db.commit()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("ask backfill source_count failed: %s", e)
             await gen_db.close()
-        logger.info("ask stream done events=%d", n, extra={"request_id": rid})
+        logger.info("ask stream done events=%d src=%d", n, src_count, extra={"request_id": rid})
 
     return EventSourceResponse(event_generator())

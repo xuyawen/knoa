@@ -272,3 +272,55 @@ async def doc_stats(
         "byType": [{"type": r[0], "count": r[1]} for r in by_type],
         "recentTrend": recent_trend,
     }
+
+
+def _window(days: int) -> datetime:
+    now = datetime.now(timezone.utc)
+    return (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+@router.get("/analytics/hot-ask")
+async def hot_ask(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """热门问答榜：近 30 天 action=ask 的提问按文本聚合，取 Top 10。"""
+    cutoff = _window(30)
+    rows = (await db.execute(
+        select(OperationLog.detail, func.count())
+        .where(
+            OperationLog.action == "ask",
+            OperationLog.detail.isnot(None),
+            OperationLog.detail != "",
+            OperationLog.created_at >= cutoff,
+        )
+        .group_by(OperationLog.detail)
+        .order_by(func.count().desc())
+        .limit(10)
+    )).all()
+    return [{"query": r[0], "count": r[1]} for r in rows]
+
+
+@router.get("/analytics/knowledge-gaps")
+async def knowledge_gaps(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """知识缺口榜：近 30 天 action∈(ask,search) 且检索命中数为 0 的提问，
+    按文本聚合取 Top 10，提示运营该补哪些文档。"""
+    cutoff = _window(30)
+    rows = (await db.execute(
+        select(OperationLog.detail, func.count())
+        .where(
+            OperationLog.action.in_(["ask", "search"]),
+            OperationLog.source_count <= 0,
+            OperationLog.detail.isnot(None),
+            OperationLog.detail != "",
+            OperationLog.created_at >= cutoff,
+        )
+        .group_by(OperationLog.detail)
+        .order_by(func.count().desc())
+        .limit(10)
+    )).all()
+    return [{"query": r[0], "count": r[1]} for r in rows]
+

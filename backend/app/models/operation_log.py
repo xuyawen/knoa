@@ -51,11 +51,14 @@ async def record_operation(
     action: str,
     related_doc_id: str | None = None,
     detail: str | None = None,
-) -> None:
+) -> "OperationLog | None":
     """best-effort 写一条操作日志；失败仅告警不抛，绝不阻塞主流程。
 
     内部自行 commit，因此即使调用方（如登录）本身不 commit 也能持久化；
     若调用方随后还会 commit，多次 commit 无害。
+
+    返回新建的 OperationLog 实例（失败为 None），供调用方事后回填
+    source_count 等字段。
     """
     try:
         log = OperationLog(
@@ -67,5 +70,7 @@ async def record_operation(
         )
         db.add(log)
         await db.commit()
+        return log
     except Exception as e:  # noqa: BLE001
         logger.warning("record_operation(%s) failed: %s", action, e)
+        return None

@@ -12,11 +12,11 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
   getDashboardMetrics, getTrend, getDocCategory, getOperations, getAnnouncements, getDocStats, getUserStats,
-  createAnnouncement, updateAnnouncement, deleteAnnouncement,
+  createAnnouncement, updateAnnouncement, deleteAnnouncement, getHotAsk, getKnowledgeGaps,
 } from '@/api'
 import type {
   DashboardMetrics, TrendResponse, DocCategory, DocStats, UserStats,
-  OperationsResponse, OperationLogItem, Announcement, AnnouncementCreate,
+  OperationsResponse, OperationLogItem, Announcement, AnnouncementCreate, HotQueryItem,
 } from '@/types/api'
 
 const kb = useKnowledgeStore()
@@ -76,6 +76,15 @@ const barData = computed(() => {
 
 // ── 热门搜索榜（真实，来自 knowledge store / getTrending）──
 const topTrending = computed(() => trending.value.slice(0, 8))
+
+// ── 热门内容：热门问答榜 + 知识缺口榜（真实，来自 operation_log 聚合）──
+const hotAsk = ref<HotQueryItem[]>([])
+const knowledgeGaps = ref<HotQueryItem[]>([])
+async function loadHotContent() {
+  const [a, g] = await Promise.all([getHotAsk(), getKnowledgeGaps()])
+  hotAsk.value = a
+  knowledgeGaps.value = g
+}
 
 // ── 健康概览行（真实）──
 const healthRows = computed(() =>
@@ -371,6 +380,8 @@ function loadSection(s: string) {
     void loadTrend(trendRange.value)
   } else if (s === 'announcements') {
     void loadAnnouncements()
+  } else if (s === 'popular') {
+    void loadHotContent()
   } else if (s === 'users') {
     void loadMetrics(); void loadUserStats()
   }
@@ -622,6 +633,32 @@ onMounted(() => {
           </div>
         </div>
         <div v-else class="empty-hint">暂无热门搜索数据</div>
+      </div>
+
+      <div class="charts-row docs-row">
+        <div class="chart-panel card">
+          <div class="panel-head"><span class="panel-title">热门问答榜</span><Icon name="message" :size="14" class="phint"/></div>
+          <div v-if="hotAsk.length" class="trend-list">
+            <div v-for="(t,i) in hotAsk" :key="t.query" class="trend-item">
+              <span class="trend-rank" :class="'rk-'+Math.min(i+1,3)">{{ i+1 }}</span>
+              <span class="trend-q">{{ t.query }}</span>
+              <span class="trend-count">{{ t.count }}</span>
+            </div>
+          </div>
+          <div v-else class="empty-hint">近 30 天暂无问答记录</div>
+        </div>
+
+        <div class="chart-panel card">
+          <div class="panel-head"><span class="panel-title">知识缺口榜</span><Icon name="alert" :size="14" class="phint"/></div>
+          <div v-if="knowledgeGaps.length" class="trend-list">
+            <div v-for="(t,i) in knowledgeGaps" :key="t.query" class="trend-item">
+              <span class="trend-rank" :class="'rk-'+Math.min(i+1,3)">{{ i+1 }}</span>
+              <span class="trend-q">{{ t.query }}</span>
+              <span class="trend-count">{{ t.count }}</span>
+            </div>
+          </div>
+          <div v-else class="empty-hint">近 30 天暂无知识缺口</div>
+        </div>
       </div>
     </template>
 
