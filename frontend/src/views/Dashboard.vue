@@ -1093,14 +1093,6 @@ onMounted(() => {
 .ann-form .form-input::placeholder { color:var(--text-placeholder); }
 .ann-form .form-input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px var(--brand-ring); }
 .ann-textarea { min-height:140px; height:auto; padding:10px 12px; resize:vertical; line-height:1.6; }
-.ann-form .seg { display:inline-flex; align-items:center; background:var(--bg-subtle); border:1px solid var(--border); border-radius:var(--radius-md); padding:3px; }
-.ann-form .seg-btn {
-  height:30px; padding:0 14px; border:none; border-radius:var(--radius-sm);
-  background:transparent; color:var(--text-secondary); font-size:13px;
-  cursor:pointer; transition:all var(--dur-fast);
-}
-.ann-form .seg-btn:hover { color:var(--text-primary); }
-.ann-form .seg-btn.active { background:var(--brand); color:var(--text-on-brand); font-weight:600; box-shadow:var(--shadow-sm); }
 .ann-form .switch { display:inline-flex; align-items:center; gap:10px; cursor:pointer; user-select:none; }
 .ann-form .switch input { position:absolute; opacity:0; width:0; height:0; }
 .ann-form .switch-track {

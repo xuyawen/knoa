@@ -226,7 +226,7 @@ function scopeLabel(scope: string): string {
               <CustomSelect v-model="filterType" :options="typeOpts" placeholder="文件类型" width="110px" />
               <CustomSelect v-model="filterScope" :options="scopeOpts" placeholder="权限范围" width="120px" />
               <CustomSelect v-model="filterStatus" :options="statusOpts" placeholder="文档状态" width="110px" />
-              <button class="flink" @click="resetFilters">清空</button>
+              <button class="btn-link muted" @click="resetFilters">清空</button>
               <button class="btn btn-primary btn-sm" @click="runSearch(results?.page ?? 1)">应用筛选</button>
             </div>
             <div class="result-meta">
@@ -285,7 +285,7 @@ function scopeLabel(scope: string): string {
           <h2 class="page-title">
             <Icon name="clock" :size="18" /> 搜索历史
           </h2>
-          <button v-if="searchHistory.length" class="flink" @click="clearHistory">清空全部</button>
+          <button v-if="searchHistory.length" class="btn-link muted" @click="clearHistory">清空全部</button>
         </div>
         <div class="card list-page">
           <div v-if="searchHistory.length" class="history-list">
@@ -480,11 +480,6 @@ function scopeLabel(scope: string): string {
   padding: 0 14px;
   font-size: 12.5px;
 }
-.flink {
-  font-size: 12.5px; color: var(--brand); background: none; border: none;
-  cursor: pointer; font-family: inherit; padding: 0;
-}
-.flink:hover { text-decoration: underline; }
 .result-meta {
   font-size: 13px; color: var(--text-secondary);
 }

@@ -444,13 +444,6 @@ const roleMatrix = [
 }
 .form-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 .form-input:disabled { background: var(--bg-subtle); color: var(--text-tertiary); cursor: not-allowed; }
-.seg { display: inline-flex; gap: 4px; }
-.seg-btn {
-  padding: 6px 14px; border: 1px solid var(--border); border-radius: var(--radius-md);
-  font-size: 12px; color: var(--text-secondary); background: var(--bg-surface); cursor: pointer; transition: all var(--dur-fast);
-}
-.seg-btn:hover { border-color: var(--brand); }
-.seg-btn.active { background: var(--brand); color: var(--text-on-brand); border-color: var(--brand); }
 .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .switch input { display: none; }
 .switch-track {

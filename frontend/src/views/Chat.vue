@@ -608,7 +608,7 @@ watch(messages, scrollToBottom, { deep: false })
               <template v-else-if="col.key === 'msgCount'">{{ row.msgCount }}</template>
               <template v-else-if="col.key === 'updatedAt'">{{ row.updatedAt ? row.updatedAt.slice(0, 10) : '—' }}</template>
               <template v-else-if="col.key === 'actions'">
-                <button class="link-btn" @click="openSession(row.id)">查看对话</button>
+                <button class="btn-link" @click="openSession(row.id)">查看对话</button>
               </template>
             </template>
             <template #empty>暂无会话记录</template>
@@ -699,17 +699,6 @@ watch(messages, scrollToBottom, { deep: false })
   cursor: pointer;
 }
 
-/* 问答记录表格内的链接按钮 */
-.link-btn {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--brand);
-  font-weight: 500;
-  font-size: 13px;
-  cursor: pointer;
-}
-.link-btn:hover { text-decoration: underline; }
 
 /* ============ 侧栏 ============ */
 .chat-sidebar {

@@ -296,6 +296,54 @@ textarea {
 .btn-lg { height: var(--btn-h-lg); padding: 0 22px; }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
+/* 轻量文字按钮（清空 / 查看对话 / 更多 等次操作，全站统一） */
+.btn-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--brand);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn-link:hover { text-decoration: underline; }
+.btn-link.muted { color: var(--text-tertiary); }
+.btn-link.muted:hover { color: var(--text-secondary); }
+
+/* 胶囊分段按钮（级别 / 角色筛选等，全站统一） */
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.seg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.seg-btn:hover { color: var(--text-primary); }
+.seg-btn.active { background: var(--brand); color: var(--text-on-brand); font-weight: 600; }
+
 /* 表单 */
 .input,
 .select {
