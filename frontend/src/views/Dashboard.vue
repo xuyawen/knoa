@@ -10,13 +10,16 @@ import DataTable from '@/components/ui/DataTable.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useToastStore } from '@/stores/toast'
 import {
   getDashboardMetrics, getTrend, getDocCategory, getOperations, getAnnouncements, getDocStats, getUserStats,
   createAnnouncement, updateAnnouncement, deleteAnnouncement, getHotAsk, getKnowledgeGaps,
+  getDocumentById,
 } from '@/api'
 import type {
   DashboardMetrics, TrendResponse, DocCategory, DocStats, UserStats,
   OperationsResponse, OperationLogItem, Announcement, AnnouncementCreate, HotQueryItem,
+  DocumentDetail,
 } from '@/types/api'
 
 const kb = useKnowledgeStore()
@@ -153,16 +156,32 @@ async function loadOps(page = opsPage.value, size = opsPageSize.value) {
   opsPageSize.value = size
   opsData.value = await getOperations(page, size)
 }
-const activityLog = computed<Array<{ time: string; user: string; type: string; content: string; file: string; action: string }>>(() =>
+const activityLog = computed<Array<{ time: string; user: string; type: string; content: string; file: string; action: string; docId: string | null }>>(() =>
   (opsData.value?.items ?? []).map((o: OperationLogItem) => ({
     time: fmtTime(o.createdAt),
     user: o.displayName || (o.userId ? `用户${o.userId.slice(0, 8)}` : '未知用户'),
     type: o.actionLabel,
     content: o.detail || defaultContent(o.action),
-    file: o.relatedDocId ? `…${o.relatedDocId.slice(-8)}` : '',
+    file: o.detail && ['upload','approve','reject','delete'].includes(o.action) ? o.detail : '',
     action: o.action,
+    docId: (o.relatedDocId && ['upload','approve','reject','delete'].includes(o.action)) ? o.relatedDocId : null,
   })),
 )
+
+// 相关文档点击预览（与文档审核页一致）
+const previewDoc = ref<DocumentDetail | null>(null)
+const previewLoading = ref(false)
+async function openPreview(docId: string) {
+  previewLoading.value = true
+  previewDoc.value = null
+  try {
+    previewDoc.value = await getDocumentById(docId)
+  } catch (e: any) {
+    useToastStore().error(`加载文档失败：${e?.message || e}`)
+  } finally {
+    previewLoading.value = false
+  }
+}
 function fmtTime(iso: string): string {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return iso
@@ -514,7 +533,7 @@ onMounted(() => {
             </template>
             <template v-else-if="col.key === 'content'">{{ row.content }}</template>
             <template v-else-if="col.key === 'file'">
-              <span v-if="row.file" class="doc-link">{{ row.file }}</span>
+              <span v-if="row.file" class="doc-link" @click="row.docId && openPreview(row.docId)">{{ row.file }}</span>
               <span v-else class="na">—</span>
             </template>
           </template>
@@ -886,6 +905,19 @@ onMounted(() => {
         @close="deleteTarget = null"
         @confirm="confirmDeleteAnn"
       />
+
+      <AppModal :show="!!previewDoc" :title="previewDoc?.title || '文档预览'" wide @close="previewDoc = null">
+        <div v-if="previewLoading" class="modal-hint">加载中…</div>
+        <template v-else-if="previewDoc">
+          <div class="preview-meta">
+            <span class="type-text">{{ previewDoc.type }}</span>
+            <span class="col-time">{{ previewDoc.updatedAt?.slice(0, 16) || '' }}</span>
+            <span class="status-badge mini" :class="'status-' + (previewDoc.status || '')">{{ previewDoc.status }}</span>
+            <span v-if="previewDoc.originalFilename" class="doc-file-name">{{ previewDoc.originalFilename }}</span>
+          </div>
+          <pre class="preview-body">{{ previewDoc.contentMd || '（无内容）' }}</pre>
+        </template>
+      </AppModal>
     </template>
   </div>
 </template>
@@ -897,7 +929,7 @@ onMounted(() => {
 .stats-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
 .stats-row.three { grid-template-columns: repeat(3, 1fr); }
 .stat-card {
-  padding: 20px 22px;
+  padding: 20px;
   display: flex; align-items: center; gap: 16px;
 }
 .sc-icon {
@@ -931,7 +963,7 @@ onMounted(() => {
 }
 
 /* ---- 趋势面板 ---- */
-.chart-panel { padding: 22px 24px; overflow: hidden; }
+.chart-panel { padding: 20px; overflow: hidden; }
 .trend-tabs { display: flex; gap: 4px; margin-bottom: 16px; }
 .ttab {
   padding: 5px 14px; border-radius: var(--radius-md);
@@ -956,7 +988,7 @@ onMounted(() => {
 }
 
 /* ---- 文档分类占比 ---- */
-.pie-panel { padding: 22px 24px; }
+.pie-panel { padding: 20px; }
 .cat-body { display: flex; flex-direction: column; gap: 16px; }
 .cat-summary { display: flex; flex-direction: column; gap: 8px; }
 .cat-stack { height: 8px; border-radius: 4px; background: var(--bg-subtle); overflow: hidden; }
@@ -1017,7 +1049,7 @@ onMounted(() => {
 .mini-bar-date { font-size: 11px; color: var(--text-secondary); }
 
 /* ---- 操作记录 ---- */
-.ops-section { padding: 22px 24px; overflow: hidden; }
+.ops-section { padding: 20px; overflow: hidden; }
 
 /* 访问量明细：迷你条形 + 数值 */
 .vcell { display: flex; align-items: center; gap: 8px; min-width: 90px; }
@@ -1031,8 +1063,28 @@ onMounted(() => {
   border-radius:var(--radius-pill); font-size:12px; font-weight:500;
   background:var(--brand-soft); color:var(--brand);
 }
-.doc-link { color:var(--brand); font-size:12.5px; }
+.doc-link { color:var(--brand); font-size:12.5px; cursor:pointer; }
+.doc-link:hover { text-decoration:underline; }
 .na { color:var(--text-tertiary); }
+
+/* ---- 文档预览弹窗 ---- */
+.modal-hint { padding:40px 0; text-align:center; color:var(--text-tertiary); font-size:13px; }
+.preview-meta {
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding-bottom:12px; margin-bottom:14px; border-bottom:1px solid var(--border);
+}
+.type-text { font-size:12px; font-weight:600; color:var(--text-secondary); background:var(--bg-subtle); padding:2px 10px; border-radius:var(--radius-sm); }
+.col-time { font-size:12px; color:var(--text-tertiary); }
+.status-badge.mini { font-size:11px; font-weight:600; padding:2px 9px; border-radius:var(--radius-pill); }
+.status-badge.mini.status-已审核 { background:var(--success-soft); color:var(--success); }
+.status-badge.mini.status-待复核 { background:var(--warning-soft); color:var(--warning); }
+.status-badge.mini.status-已拒绝 { background:var(--danger-soft); color:var(--danger); }
+.doc-file-name { font-size:12px; color:var(--text-tertiary); }
+.preview-body {
+  margin:0; padding:14px 16px; background:var(--bg-subtle); border-radius:var(--radius-md);
+  font-size:13px; line-height:1.75; color:var(--text-primary); white-space:pre-wrap; word-break:break-word;
+  max-height:420px; overflow-y:auto;
+}
 
 /* ---- 热门搜索榜 ---- */
 .trend-list { display:flex; flex-direction:column; gap:4px; }

@@ -24,6 +24,7 @@ import {
   getDocumentTask,
   getDocumentTasks,
 } from '@/api'
+import { uploadToOss } from '@/utils/oss'
 import type { DocumentItem, DocumentDetail, AIReview, DepartmentNode, DocumentTaskOut } from '@/types/api'
 
 const knowledge = useKnowledgeStore()
@@ -329,8 +330,20 @@ async function onUploadFiles(e: Event) {
     const entry = reactive<UploadTask>({ id: '', filename: f.name, progress: 0, status: 'uploading' })
     uploadTasks.value.push(entry)
     try {
-      const b64 = await readFileB64(f)
-      const doc = await uploadDocument(selectedKb.value, f.name, b64)
+      // 优先 OSS 前端直传（后端启用时）；未启用或签名被拒则回退旧 base64 流程
+      let doc: DocumentItem
+      try {
+        const { url } = await uploadToOss(f, `uploads/docs/${selectedKb.value}`)
+        doc = await uploadDocument(selectedKb.value, f.name, { fileUrl: url })
+      } catch (ossErr: any) {
+        const msg = String(ossErr?.message || '')
+        if (msg.includes('OSS 未启用')) {
+          const b64 = await readFileB64(f)
+          doc = await uploadDocument(selectedKb.value, f.name, { contentB64: b64 })
+        } else {
+          throw ossErr
+        }
+      }
       // 拿到 task id（上传阶段后端已置 done/100，审核阶段会再推进）
       const tasks = await getDocumentTasks(doc.id)
       const task = tasks.items[0]
@@ -442,6 +455,7 @@ async function onPreview(doc: DocumentItem) {
   if (!selectedKb.value) return
   previewLoading.value = true
   previewDoc.value = null
+  aiReview.value = null
   try {
     previewDoc.value = await getDocument(selectedKb.value, doc.id)
   } catch (e: any) {
@@ -451,8 +465,8 @@ async function onPreview(doc: DocumentItem) {
   }
 }
 
-/* ---------- AI 审核 ---------- */
-async function onAiReview(doc: DocumentItem) {
+/* ---------- AI 审核（在预览弹窗右侧展示） ---------- */
+async function onAiReview(doc: { id: string }) {
   if (!selectedKb.value) return
   aiReviewLoading.value = true
   aiReview.value = null
@@ -648,7 +662,6 @@ async function confirmBatchDelete() {
               <button class="action-btn" title="预览" @click="onPreview(row)"><Icon name="eye" :size="15" /></button>
               <button class="action-btn" title="通过审核" @click="onApprove(row)"><Icon name="check" :size="15" /></button>
               <button class="action-btn" title="驳回" @click="onReject(row)"><Icon name="close" :size="15" /></button>
-              <button class="action-btn" title="AI 审核" @click="onAiReview(row)"><Icon name="sparkles" :size="15" /></button>
               <button class="action-btn" title="删除" @click="onDelete(row)"><Icon name="trash" :size="15" /></button>
             </div>
           </template>
@@ -680,7 +693,6 @@ async function confirmBatchDelete() {
           <button class="action-btn" title="预览" @click="onPreview(d)"><Icon name="eye" :size="15" /></button>
           <button class="action-btn" title="通过审核" @click="onApprove(d)"><Icon name="check" :size="15" /></button>
           <button class="action-btn" title="驳回" @click="onReject(d)"><Icon name="close" :size="15" /></button>
-          <button class="action-btn" title="AI 审核" @click="onAiReview(d)"><Icon name="sparkles" :size="15" /></button>
           <button class="action-btn" title="删除" @click="onDelete(d)"><Icon name="trash" :size="15" /></button>
         </div>
       </div>
@@ -700,44 +712,65 @@ async function confirmBatchDelete() {
       @update:page-size="currentPage = 1; loadDocs()"
     />
 
-    <!-- ====== 预览弹窗 ====== -->
+    <!-- ====== 预览弹窗（含 AI 辅助审核） ====== -->
     <AppModal :show="!!previewDoc" title="文档预览" wide @close="previewDoc = null">
       <div v-if="previewLoading" class="modal-hint">加载中…</div>
       <template v-else-if="previewDoc">
-        <div class="preview-meta">
-          <span class="type-text">{{ previewDoc.type }}</span>
-          <span class="col-time">{{ fmtTime(previewDoc.updatedAt) }}</span>
-          <span class="status-badge mini" :class="statusType(previewDoc.status)">{{ previewDoc.status }}</span>
+        <div class="preview-toolbar">
+          <button
+            class="btn btn-primary btn-sm"
+            :disabled="aiReviewLoading"
+            @click="onAiReview(previewDoc)"
+          >
+            <span v-if="aiReviewLoading" class="spinner sm"></span>
+            {{ aiReviewLoading ? '分析中…' : (aiReview ? '重新审核' : 'AI 审核') }}
+          </button>
         </div>
-        <pre class="preview-body">{{ previewDoc.contentMd || '（无内容）' }}</pre>
-      </template>
-    </AppModal>
-
-    <!-- ====== AI 审核弹窗 ====== -->
-    <AppModal :show="!!aiReview" title="AI 辅助审核" wide @close="aiReview = null">
-      <div v-if="aiReviewLoading" class="modal-hint">AI 分析中…</div>
-      <template v-else-if="aiReview">
-        <div class="ai-verdict" :class="aiReview.verdict">
-          建议：{{ aiReview.verdict === 'approve' ? '通过' : aiReview.verdict === 'reject' ? '驳回' : '人工复核' }}
-        </div>
-        <p class="ai-summary">{{ aiReview.summary }}</p>
-        <div v-if="aiReview.similarityFindings?.length" class="ai-section">
-          <h4>相似文档</h4>
-          <ul class="ai-list">
-            <li v-for="(f, i) in aiReview.similarityFindings" :key="i">
-              <span class="ai-sim">相似度 {{ (f.similarity * 100).toFixed(0) }}%</span>
-              <span class="ai-doc">{{ f.docTitle }}</span>
-              <p class="ai-snippet">{{ f.snippet }}</p>
-            </li>
-          </ul>
-        </div>
-        <div v-if="aiReview.qualityNotes?.length" class="ai-section">
-          <h4>质量建议</h4>
-          <ul class="ai-list"><li v-for="(q, i) in aiReview.qualityNotes" :key="i">{{ q }}</li></ul>
-        </div>
-        <div v-if="aiReview.outdatedFindings?.length" class="ai-section">
-          <h4>过时内容</h4>
-          <ul class="ai-list"><li v-for="(o, i) in aiReview.outdatedFindings" :key="i">{{ o }}</li></ul>
+        <div class="preview-split">
+          <!-- 左：文档内容 -->
+          <div class="preview-left">
+            <div class="preview-meta">
+              <span class="type-text">{{ previewDoc.type }}</span>
+              <span class="col-time">{{ fmtTime(previewDoc.updatedAt) }}</span>
+              <span class="status-badge mini" :class="statusType(previewDoc.status)">{{ previewDoc.status }}</span>
+            </div>
+            <pre class="preview-body">{{ previewDoc.contentMd || '（无内容）' }}</pre>
+          </div>
+          <!-- 右：AI 审核建议 -->
+          <aside class="preview-right">
+            <div class="ai-panel-head">AI 辅助审核</div>
+            <div v-if="aiReviewLoading" class="ai-loading">
+              <span class="spinner"></span>
+              正在调用大模型分析文档，请稍候…
+            </div>
+            <template v-else-if="aiReview">
+              <div class="ai-verdict" :class="aiReview.verdict">
+                建议：{{ aiReview.verdict === 'approve' ? '通过' : aiReview.verdict === 'reject' ? '驳回' : '人工复核' }}
+              </div>
+              <p class="ai-summary">{{ aiReview.summary }}</p>
+              <div v-if="aiReview.similarityFindings?.length" class="ai-section">
+                <h4>相似文档</h4>
+                <ul class="ai-list">
+                  <li v-for="(f, i) in aiReview.similarityFindings" :key="i">
+                    <span class="ai-sim">相似度 {{ (f.similarity * 100).toFixed(0) }}%</span>
+                    <span class="ai-doc">{{ f.docTitle }}</span>
+                    <p class="ai-snippet">{{ f.snippet }}</p>
+                  </li>
+                </ul>
+              </div>
+              <div v-if="aiReview.qualityNotes?.length" class="ai-section">
+                <h4>质量建议</h4>
+                <ul class="ai-list"><li v-for="(q, i) in aiReview.qualityNotes" :key="i">{{ q }}</li></ul>
+              </div>
+              <div v-if="aiReview.outdatedFindings?.length" class="ai-section">
+                <h4>过时内容</h4>
+                <ul class="ai-list"><li v-for="(o, i) in aiReview.outdatedFindings" :key="i">{{ o }}</li></ul>
+              </div>
+            </template>
+            <div v-else class="ai-empty">
+              点击左上角「AI 审核」按钮，调用大模型分析该文档并给出建议。
+            </div>
+          </aside>
         </div>
       </template>
     </AppModal>
@@ -1090,6 +1123,29 @@ async function confirmBatchDelete() {
 
 /* ---- 弹窗内容 ---- */
 .modal-hint { color: var(--text-tertiary); text-align: center; padding: 20px 0; }
+.ai-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: ai-spin 0.7s linear infinite;
+}
+.spinner.sm {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+}
+@keyframes ai-spin { to { transform: rotate(360deg); } }
 .preview-meta {
   display: flex;
   align-items: center;
@@ -1111,6 +1167,50 @@ async function confirmBatchDelete() {
   margin: 0;
   color: var(--text-secondary);
 }
+/* 预览弹窗顶部工具条（AI 审核触发） */
+.preview-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+/* 预览 + AI 审核左右分栏 */
+.preview-split {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+}
+.preview-left {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.preview-right {
+  flex: 0 0 268px;
+  border-left: 1px solid var(--border);
+  padding-left: 16px;
+  max-height: 58vh;
+  overflow-y: auto;
+}
+.ai-panel-head {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+.ai-empty {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  line-height: 1.6;
+  padding: 12px 0;
+}
+.ai-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .ai-verdict {
   display: inline-block;
   padding: 4px 12px;

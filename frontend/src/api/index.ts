@@ -29,10 +29,14 @@ import type {
   UserStats,
   HotQueryItem,
   DepartmentNode,
+  DepartmentOut,
+  DepartmentCreateIn,
+  DepartmentUpdateIn,
   DocumentTaskOut,
   DocumentList,
   Paginated,
   SearchDocsResponse,
+  RecordsResponse,
 } from '@/types/api'
 import { authHeaders, TokenExpiredError } from './http'
 
@@ -110,16 +114,43 @@ export async function getDocuments(
 }
 
 /** 上传单篇文档（.md / .txt / .docx / .pdf）。
- *  前端把文件读成 base64 原始字节（contentB64）提交，后端按扩展名解析。 */
+ *  两种提交方式（互斥，优先 fileUrl）：
+ *   - fileUrl：前端已直传 OSS，只回传可访问地址，后端按 URL 回抓字节解析
+ *   - contentB64：旧流程，前端把文件读成 base64 原始字节提交 */
 export async function uploadDocument(
   kbId: string,
   filename: string,
-  contentB64: string,
+  opts?: { contentB64?: string; fileUrl?: string },
 ): Promise<DocumentItem> {
+  const body: Record<string, unknown> = { filename }
+  if (opts?.fileUrl) body.fileUrl = opts.fileUrl
+  else if (opts?.contentB64) body.contentB64 = opts.contentB64
   const resp = await fetch(`/api/knowledge-bases/${kbId}/documents`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ filename, contentB64 }),
+    body: JSON.stringify(body),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+/** 获取 OSS PostObject 直传签名（空前端凭此直传，AccessKey 不落浏览器）。 */
+export async function getOssSign(prefix: string, filename: string): Promise<{
+  accessKeyId: string
+  policy: string
+  signature: string
+  host: string
+  key: string
+  url: string
+  expiresAt: number
+}> {
+  const resp = await fetch('/api/oss/sign', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ prefix, filename }),
   })
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
@@ -131,6 +162,15 @@ export async function uploadDocument(
 /** 文档详情：返回解析后的全文（contentMd）。 */
 export async function getDocument(kbId: string, docId: string): Promise<DocumentDetail> {
   const resp = await fetch(`/api/knowledge-bases/${kbId}/documents/${docId}`, {
+    headers: authHeaders(),
+  })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.json()
+}
+
+/** 按文档 id 直接取详情（操作审计/问答溯源点击预览用，无需已知 kbId）。 */
+export async function getDocumentById(docId: string): Promise<DocumentDetail> {
+  const resp = await fetch(`/api/documents/${docId}`, {
     headers: authHeaders(),
   })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
@@ -206,6 +246,19 @@ export async function getSessions(
   const resp = await fetch(`/api/sessions?page=${page}&size=${size}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
+}
+
+/** 检索记录分页（服务端分页 + 来源类型过滤）。 */
+export async function getRecords(
+  opts?: { page?: number; size?: number; filter?: string },
+): Promise<RecordsResponse> {
+  const params = new URLSearchParams()
+  if (opts?.page) params.set('page', String(opts.page))
+  if (opts?.size) params.set('size', String(opts.size))
+  if (opts?.filter) params.set('f', opts.filter)
+  const qs = params.toString()
+  const resp = fetch(`/api/records${qs ? `?${qs}` : ''}`, { headers: authHeaders() })
+  return (await resp).json()
 }
 
 /** 新建空会话，返回 id。 */
@@ -385,7 +438,12 @@ export async function* streamAsk(
   knowledgeBase?: string | null,
   sessionId?: string | null,
   files?: ChatAttachment[],
-  opts?: { timeoutMs?: number; signal?: AbortSignal; mode?: string },
+  opts?: {
+    timeoutMs?: number
+    signal?: AbortSignal
+    mode?: string
+    modelConfig?: Record<string, unknown> | null  // ModelConfig 页下发的配置，随 ask 请求带去后端
+  },
 ): AsyncGenerator<SSEEvent> {
   // 客户端超时保护：Agentic RAG 多步决策链可能需要多次 LLM 调用（每轮 15~40s），
   // 90s 对复杂问题不够用，拉到 180s 给足余量
@@ -401,10 +459,23 @@ export async function* streamAsk(
   }, timeoutMs)
 
   try {
+    const body: Record<string, unknown> = {
+      question,
+      knowledgeBase,
+      sessionId,
+      files: files ?? [],
+      mode: opts?.mode ?? 'chat',
+    }
+    // 把模型配置摊平进请求体（后端 AskRequest 对应字段，空值不传以走后端默认）
+    if (opts?.modelConfig) {
+      for (const [k, v] of Object.entries(opts.modelConfig)) {
+        if (v !== null && v !== undefined && v !== '') body[k] = v
+      }
+    }
     const resp = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ question, knowledgeBase, sessionId, files: files ?? [], mode: opts?.mode ?? 'chat' }),
+      body: JSON.stringify(body),
       signal: ac.signal,
     })
 
@@ -628,6 +699,46 @@ export async function getDepartments(): Promise<DepartmentNode[]> {
   const resp = await fetch(`/api/departments`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp.json()
+}
+
+/** 新建部门（仅 admin）。 */
+export async function createDepartment(payload: DepartmentCreateIn): Promise<DepartmentOut> {
+  const resp = await fetch('/api/departments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+/** 更新部门（仅 admin）。 */
+export async function updateDepartment(id: string, payload: DepartmentUpdateIn): Promise<DepartmentOut> {
+  const resp = await fetch(`/api/departments/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+/** 删除部门（仅 admin；有子部门或关联文档时后端阻止）。 */
+export async function deleteDepartment(id: string): Promise<void> {
+  const resp = await fetch(`/api/departments/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+  if (!resp.ok && resp.status !== 204) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
 }
 
 /** 某知识库文档去重标签枚举。P5 标签筛选下拉使用。 */

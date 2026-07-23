@@ -4,7 +4,7 @@ import { useAuthStore } from '@/stores/auth'
 // 路由表：认证页（Login）在布局外；其余业务页挂在 AppLayout 下。
 // auth 守卫以 HttpOnly Cookie 为准：进入受保护页前，若无登录态则尝试用已有
 // Cookie 还原（仅一次）；还原失败跳登录页（带 redirect 回跳参数）。
-// 每个左侧子菜单项都是一条真实嵌套路由，由视图的 `section` prop 决定渲染内容，
+// 每个左侧子菜单项都是一条真实嵌套路由，各自对应一个独立视图组件，
 // 因此每个菜单项都对应一个可收藏、URL 独立的完整页面。
 import Login from '@/views/Login.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -13,8 +13,11 @@ import Documents from '@/views/Documents.vue'
 import Search from '@/views/Search.vue'
 import SearchHistory from '@/views/SearchHistory.vue'
 import Chat from '@/views/Chat.vue'
+import RecordsView from '@/views/RecordsView.vue'
+import ModelConfig from '@/views/ModelConfig.vue'
 import Graph from '@/views/Graph.vue'
 import Permission from '@/views/Permission.vue'
+import DepartmentView from '@/views/DepartmentView.vue'
 import Profile from '@/views/Profile.vue'
 import Settings from '@/views/Settings.vue'
 import NotFound from '@/views/NotFound.vue'
@@ -45,12 +48,11 @@ const routes: RouteRecordRaw[] = [
       { path: 'search', name: 'search', component: Search, meta: { title: '智能搜索', icon: 'search' } },
       { path: 'search/history', name: 'search-history', component: SearchHistory, meta: { title: '智能搜索', icon: 'clock' } },
 
-      // ===== AI 智能问答 =====
-      { path: 'chat', name: 'chat', component: Chat, props: { section: 'new' }, meta: { title: 'AI 智能问答', icon: 'chat' } },
-      { path: 'chat/new', name: 'chat-new', component: Chat, props: { section: 'new' }, meta: { title: 'AI 智能问答', icon: 'plus' } },
-      { path: 'chat/history', name: 'chat-history', component: Chat, props: { section: 'history' }, meta: { title: 'AI 智能问答', icon: 'history' } },
-      { path: 'chat/records', name: 'chat-records', component: Chat, props: { section: 'records' }, meta: { title: 'AI 智能问答', icon: 'list' } },
-      { path: 'chat/model', name: 'chat-model', component: Chat, props: { section: 'model' }, meta: { title: 'AI 智能问答', icon: 'settings' } },
+      // ===== 智能问答（一个页面一个文件）=====
+      { path: 'chat', name: 'chat', component: Chat, meta: { title: '智能问答', icon: 'chat' } },
+      { path: 'chat/new', name: 'chat-new', component: Chat, meta: { title: '智能问答', icon: 'plus' } },
+      { path: 'chat/records', name: 'chat-records', component: RecordsView, meta: { title: '检索记录', icon: 'list' } },
+      { path: 'chat/model', name: 'chat-model', component: ModelConfig, meta: { title: '智能问答', icon: 'settings' } },
 
       // ===== 知识图谱 =====
       { path: 'graph', name: 'graph', component: Graph, props: { section: 'global' }, meta: { title: '知识图谱', icon: 'graph' } },
@@ -59,8 +61,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'graph/relations', name: 'graph-relations', component: Graph, props: { section: 'relations' }, meta: { title: '知识图谱', icon: 'link' } },
       { path: 'graph/stats', name: 'graph-stats', component: Graph, props: { section: 'stats' }, meta: { title: '知识图谱', icon: 'chart' } },
 
-      // ===== 其它一级页 =====
-      { path: 'permission', name: 'permission', component: Permission, meta: { title: '权限管理', icon: 'shield' } },
+      // ===== 系统管理（一个页面一个文件）=====
+      { path: 'permission', name: 'permission', component: Permission, meta: { title: '系统管理', icon: 'shield' } },
+      { path: 'permission/departments', name: 'perm-departments', component: DepartmentView, meta: { title: '系统管理', icon: 'team' } },
       { path: 'profile', name: 'profile', component: Profile, meta: { title: '个人中心', icon: 'user' } },
       { path: 'settings', name: 'settings', component: Settings, meta: { title: '系统设置', icon: 'settings' } },
     ],

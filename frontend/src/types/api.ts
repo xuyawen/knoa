@@ -104,11 +104,13 @@ export interface SourceItem {
   id: number
   chunkId: string
   kb: string
+  kbId?: string          // KB UUID（查看文档详情用）
   title: string
   snippet: string
   confidence: number
   sourceType?: 'kb' | 'web' | 'graph'   // 来源类型：知识库 / 联网 / 知识图谱
   url?: string                // 联网来源的原始链接
+  docId?: string               // 文档 UUID（查看文档详情用）
 }
 
 export interface SourceDetail {
@@ -153,7 +155,8 @@ export interface ThinkingStep {
 export interface ChatAttachment {
   kind: 'image' | 'audio' | 'video'
   mimeType: string
-  dataB64?: string              // 纯 base64（无 `data:` 前缀）；发送与历史回显都用它
+  dataB64?: string              // 纯 base64（无 `data:` 前缀）；旧流程发送与历史回显用
+  url?: string                  // OSS 直传后的可访问地址；优先于 dataB64 发送给大模型
   name?: string | null
 }
 
@@ -412,6 +415,30 @@ export interface DepartmentNode {
   children: DepartmentNode[]
 }
 
+/** 部门（扁平，用于列表页）。 */
+export interface DepartmentOut {
+  id: string
+  name: string
+  parentId: string | null
+  description: string | null
+  sortOrder: number
+  createdAt: string
+}
+
+export interface DepartmentCreateIn {
+  name: string
+  parentId?: string | null
+  description?: string | null
+  sortOrder?: number
+}
+
+export interface DepartmentUpdateIn {
+  name?: string
+  parentId?: string | null
+  description?: string | null
+  sortOrder?: number
+}
+
 /** 文档处理任务（P5 上传进度轮询）。progress 0~100。 */
 export interface DocumentTaskOut {
   id: string
@@ -444,3 +471,20 @@ export interface SearchDocItem {
 }
 
 export type SearchDocsResponse = Paginated<SearchDocItem>
+
+/** 检索记录单项（/api/records 服务端分页返回）。 */
+export interface RecordItem {
+  id: string
+  sessionId: string
+  sessionTitle: string
+  question: string
+  answer: string
+  sources: SourceItem[] | null
+  sourceCount: number
+  kbCount: number
+  webCount: number
+  graphCount: number
+  createdAt: string
+}
+
+export type RecordsResponse = Paginated<RecordItem>

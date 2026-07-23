@@ -63,7 +63,7 @@ onMounted(loadAnnouncements)
 /* ---------- 顶部主导航 ---------- */
 const topNavItems = [
   { to: '/dashboard', label: '首页大盘' },
-  { to: '/chat', label: 'AI智能问答' },
+  { to: '/chat', label: '智能问答' },
   { to: '/documents', label: '文档管理' },
   { to: '/search', label: '智能搜索' },
   { to: '/graph', label: '知识图谱' },
@@ -98,9 +98,8 @@ const subMenus: Record<string, SubItem[]> = {
     { label: '搜索历史', icon: 'clock', to: '/search/history', activeNames: ['search-history'] },
   ],
   chat: [
-    { label: '新建对话', icon: 'plus', to: '/chat/new', activeNames: ['chat', 'chat-new'] },
-    { label: '历史会话', icon: 'history', to: '/chat/history', activeNames: ['chat-history'] },
-    { label: '问答记录', icon: 'list', to: '/chat/records', activeNames: ['chat-records'] },
+    { label: '对话', icon: 'plus', to: '/chat/new', activeNames: ['chat', 'chat-new'] },
+    { label: '检索记录', icon: 'list', to: '/chat/records', activeNames: ['chat-records'] },
     { label: '模型配置', icon: 'settings', to: '/chat/model', activeNames: ['chat-model'] },
   ],
   graph: [
@@ -109,11 +108,15 @@ const subMenus: Record<string, SubItem[]> = {
     { label: '关系检索', icon: 'link', to: '/graph/relations', activeNames: ['graph-relations'] },
     { label: '图谱统计', icon: 'chart', to: '/graph/stats', activeNames: ['graph-stats'] },
   ],
+  permission: [
+    { label: '用户管理', icon: 'users', to: '/permission', activeNames: ['permission'] },
+    { label: '部门管理', icon: 'team', to: '/permission/departments', activeNames: ['perm-departments'] },
+  ],
 }
 
 const currentSubItems = computed<SubItem[]>(() => {
-  const p = route.path.replace(/^\//, '').split('/')[0]
-  return subMenus[p] ?? []
+  const name = route.name as string
+  return Object.values(subMenus).find((g) => g.some((i) => i.activeNames.includes(name))) ?? []
 })
 
 function isSubActive(item: SubItem): boolean {
@@ -269,11 +272,11 @@ const sidebarCollapsed = ref(false)
       <main class="main-content">
         <button
           v-if="sidebarCollapsed && currentSubItems.length"
-          class="float-expand-btn"
+          class="side-handle"
           title="展开菜单"
           @click="sidebarCollapsed = false"
         >
-          <Icon name="chevrons-right" :size="18" />
+          <Icon name="chevrons-right" :size="16" />
         </button>
         <router-view />
       </main>
@@ -648,32 +651,31 @@ const sidebarCollapsed = ref(false)
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 24px 28px;
+  padding: 20px;
   position: relative;
 }
-/* 收起时：内容区左上角悬浮展开按钮 */
-.float-expand-btn {
+/* 收起时：左边缘安静把手（像侧栏延伸，非浮块） */
+.side-handle {
   position: absolute;
-  top: 16px;
-  left: 16px;
-  display: inline-flex;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  width: 22px;
+  height: 48px;
+  border: none;
+  border-right: 1px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   background: var(--bg-surface);
-  box-shadow: var(--shadow-sm);
   color: var(--text-secondary);
   cursor: pointer;
   z-index: 10;
   transition: all var(--dur-fast) var(--ease-out);
 }
-.float-expand-btn:hover {
-  background: var(--brand);
-  color: #fff;
-  border-color: var(--brand);
-  box-shadow: var(--shadow-md);
+.side-handle:hover {
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 </style>
