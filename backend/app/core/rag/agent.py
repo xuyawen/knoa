@@ -310,6 +310,13 @@ class AgenticRAGAgent:
         self._graph_chunks: list[dict] = []  # 本轮图检索召回的相关 chunk
         self._summary_text: str = ""  # 本轮会话的滚动摘要文本（注入 system）
         self._model_override: str | None = None  # 用户偏好模型（settings.preferred_model）
+        # 模型配置（前端 ModelConfig 下发，单次请求内有效）
+        self._gen_temperature: float | None = None
+        self._gen_top_p: float | None = None
+        self._top_k: int | None = None
+        self._web_search_enabled: bool | None = None
+        self._custom_system_prompt: str | None = None
+        self._concise_mode: bool | None = None
 
     async def _classify_intent(self, question: str) -> "str | None":
         """LLM 意图分类（greeting/web_search/simple/complex）。
@@ -357,6 +364,13 @@ class AgenticRAGAgent:
         session_id: str | None = None,
         files: "list[dict] | None" = None,
         model: str | None = None,
+        # ── 模型配置（前端 ModelConfig 页下发；None=用后端默认）──
+        temperature: "float | None" = None,
+        top_p: "float | None" = None,
+        top_k: "int | None" = None,
+        web_search: "bool | None" = None,
+        system_prompt: "str | None" = None,
+        concise_mode: "bool | None" = None,
     ) -> AsyncIterator[dict]:
         """主入口：返回 SSE 兼容的事件流。
 
@@ -364,6 +378,12 @@ class AgenticRAGAgent:
         为空则用 config.LLM_MODEL。意图分类/滚动摘要等内部短调用仍走默认模型。
         """
         self._model_override = model
+        self._gen_temperature = temperature
+        self._gen_top_p = top_p
+        self._top_k = top_k
+        self._web_search_enabled = web_search
+        self._custom_system_prompt = system_prompt
+        self._concise_mode = concise_mode
         t0 = time.perf_counter()
         intent = "simple"
         retrieved = 0
@@ -474,7 +494,7 @@ class AgenticRAGAgent:
             raw_history, summary = await self._load_session_history(session)
             self._summary_text = summary or ""
             st.messages = [
-                {"role": "system", "content": AGENT_SYSTEM_PROMPT + self._memory_section() + self._summary_section()},
+                {"role": "system", "content": self._build_system_prompt()},
                 *raw_history,
                 {"role": "user", "content": user_content},
             ]
@@ -484,8 +504,13 @@ class AgenticRAGAgent:
             elif intent == "greeting":
                 st.next = "_n_start_skip"          # 问候/常识 → 直接友好回答
             elif intent == "web_search":
-                st.web_loop = False
-                st.next = "_n_web_search"          # 实时信息 → 搜一次即生成
+                if self._web_search_enabled is False:
+                    # 用户关闭联网 → 退化为普通业务路由，走知识库检索
+                    intent = "simple"
+                    st.next = "_n_route"
+                else:
+                    st.web_loop = False
+                    st.next = "_n_web_search"      # 实时信息 → 搜一次即生成
             else:
                 st.next = "_n_route"               # simple/complex 业务问题 → agent 决策循环
 
@@ -569,7 +594,15 @@ class AgenticRAGAgent:
         # 动作名归一化
         name = result.name
         if name == "web_search":
-            pass  # 已是正确动作，跳过归一化
+            # 用户关闭联网搜索 → 强制改为知识库检索（避免无来源空答）
+            if self._web_search_enabled is False:
+                name = "retrieve"
+                result = ToolCallResult(
+                    name="retrieve",
+                    arguments={"query": st.question},
+                    raw_text=result.raw_text,
+                )
+            # 否则已是正确动作，跳过归一化
         elif name not in ("retrieve", "supplement_search", "direct_answer"):
             if "query" in result.arguments:
                 name = "retrieve"
@@ -678,7 +711,8 @@ class AgenticRAGAgent:
     async def _n_retrieve(self, st: "_AgentState") -> AsyncIterator[dict]:
         st.retrieval_attempted = True
         query = st.route_result.arguments.get("query", st.question)
-        retrieved = await self.retriever.retrieve(query, st.kb_id, top_k=5)
+        top_k = self._top_k or settings.RAG_TOP_K
+        retrieved = await self.retriever.retrieve(query, st.kb_id, top_k=top_k)
         if retrieved:
             # 连续编号，接在已有来源（图/联网预检索）之后，
             # 避免与图谱预检索已占用的 1..N 撞号导致引用错位
@@ -699,7 +733,8 @@ class AgenticRAGAgent:
     async def _n_supplement(self, st: "_AgentState") -> AsyncIterator[dict]:
         refined_query = st.route_result.arguments.get("refined_query", st.question)
         gap = st.route_result.arguments.get("gap_description", "")
-        retrieved = await self.retriever.retrieve(refined_query, st.kb_id, top_k=5)
+        top_k = self._top_k or settings.RAG_TOP_K
+        retrieved = await self.retriever.retrieve(refined_query, st.kb_id, top_k=top_k)
         if retrieved:
             # 同 _n_retrieve：连续编号，避免与图谱预检索的 1..N 撞号
             for i, r in enumerate(retrieved, len(st.all_sources) + 1):
@@ -716,6 +751,11 @@ class AgenticRAGAgent:
         st.next = "_n_route"
 
     async def _n_web_search(self, st: "_AgentState") -> AsyncIterator[dict]:
+        # 防御：用户关闭联网时（理论上入口/route 已拦截），兜底转知识库生成
+        if self._web_search_enabled is False:
+            st.messages.append({"role": "user", "content": "注意：联网搜索已关闭，请仅基于已有知识库资料回答。"})
+            st.next = "_n_generate" if st.retrieval_attempted else "_n_route"
+            return
         # 兼容两条入口：agent 循环内（route_result 已设置，取 arguments.query）
         # 与启发式直搜（_should_web_search 直接进本节点，route_result 为 None，退用原问题）
         query = st.route_result.arguments.get("query", st.question) if st.route_result else st.question
@@ -762,6 +802,7 @@ class AgenticRAGAgent:
                     "请基于以上对话上下文及来源资料回答用户问题。"
                     "引用时使用 [1] [2] 标注编号；若某条标记为联网来源可注明「据联网信息」；"
                     "确实无来源覆盖时再如实说明。"
+                    + self._concise_suffix(),
                 ),
             })
         else:
@@ -772,10 +813,15 @@ class AgenticRAGAgent:
                     "注意：已在知识库中检索，但未找到与问题相关的文档。\n"
                     "请直接告知用户「当前知识库中没有找到相关内容」，不要编造或猜测具体信息。"
                     "如果用户的问题属于常识范畴可以简短回答，否则建议缩小范围重新提问。"
-                ),
+                ) + self._concise_suffix(),
             })
         full_answer = ""
-        async for delta in self.llm.stream_chat(final_messages, model=self._model_override):
+        gen_args: dict = {"model": self._model_override}
+        if self._gen_temperature is not None:
+            gen_args["temperature"] = self._gen_temperature
+        if self._gen_top_p is not None:
+            gen_args["top_p"] = self._gen_top_p
+        async for delta in self.llm.stream_chat(final_messages, **gen_args):
             full_answer += delta
             yield {"event": "delta", "data": {"content": delta}}
         st.final_answer_text = full_answer
@@ -800,7 +846,10 @@ class AgenticRAGAgent:
                 *list(st.messages)[1:],  # 跳过 system，保留 history + user(含图)
             ]
             try:
-                st.final_answer_text = await self.llm.chat(quick_msgs, model=self._model_override)
+                st.final_answer_text = await self.llm.chat(
+                    quick_msgs, model=self._model_override,
+                    temperature=self._gen_temperature, top_p=self._gen_top_p,
+                )
             except Exception:
                 st.final_answer_text = "好的，收到！"
             yield {"event": "delta", "data": {"content": st.final_answer_text}}
@@ -829,7 +878,10 @@ class AgenticRAGAgent:
             {"role": "user", "content": user_content},
         ]
         full_answer = ""
-        async for delta in self.llm.stream_chat(quick_messages, model=self._model_override):
+        async for delta in self.llm.stream_chat(
+            quick_messages, model=self._model_override,
+            temperature=self._gen_temperature, top_p=self._gen_top_p,
+        ):
             full_answer += delta
             yield {"event": "delta", "data": {"content": delta}}
         st.final_answer_text = full_answer
@@ -862,7 +914,9 @@ class AgenticRAGAgent:
         return [
             SourceItemOut(
                 id=r["id"], chunk_id=r["chunk_id"], kb=r["kb"],
-                title=r["title"], snippet=r["snippet"],
+                kb_id=r.get("kb_id"),
+                title=r["title"], doc_id=r.get("doc_id"),
+                snippet=r["snippet"],
                 confidence=r.get("confidence", 0.0),
                 source_type=r.get("source_type", "kb"),
                 url=r.get("url"),
@@ -880,6 +934,22 @@ class AgenticRAGAgent:
     @staticmethod
     def _extract_citations(text: str) -> list[int]:
         return sorted(set(int(m) for m in re.findall(r"\[(\d+)\]", text)))
+
+    def _build_system_prompt(self) -> str:
+        """路由 system prompt = 默认路由器指令 + 记忆 + 摘要 + 用户自定义人设。"""
+        prompt = AGENT_SYSTEM_PROMPT + self._memory_section() + self._summary_section()
+        if self._custom_system_prompt and self._custom_system_prompt.strip():
+            prompt += (
+                "\n\n## 用户自定义补充指令（优先遵循，但不覆盖以上核心原则）\n"
+                + self._custom_system_prompt.strip()
+            )
+        return prompt
+
+    def _concise_suffix(self) -> str:
+        """简洁模式：追加到最终生成指令的收尾约束（不开启则空串）。"""
+        if self._concise_mode:
+            return "\n\n【回答风格】请尽量简洁，直接给结论和要点，去掉寒暄、铺垫和重复解释。"
+        return ""
 
     def _memory_section(self) -> str:
         """把召回的用户记忆格式化成可注入 system prompt 的文本块（无记忆则返回空串）。"""
@@ -1075,10 +1145,18 @@ class AgenticRAGAgent:
             blocks.append({"type": "text", "text": question})
         for f in files:
             if f.get("kind") == "image":
-                blocks.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{f['mime_type']};base64,{f['data_b64']}"},
-                })
+                # OSS 直传优先用 url（大模型直接拉取，省去大 base64 往返）；
+                # 否则回退旧 data URI 路径
+                if f.get("url"):
+                    blocks.append({
+                        "type": "image_url",
+                        "image_url": {"url": f["url"]},
+                    })
+                elif f.get("data_b64"):
+                    blocks.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{f['mime_type']};base64,{f['data_b64']}"},
+                    })
         return blocks if blocks else question
 
     async def _get_or_create_session(self, session_id: str | None, question: str) -> ChatSession:

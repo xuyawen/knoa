@@ -24,10 +24,14 @@ class LLMProvider(Protocol):
         messages: list[dict[str, str]],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        top_p: float | None = None,
     ) -> AsyncIterator[str]: ...
 
     async def chat(
-        self, messages: list[dict[str, str]], temperature: float | None = None
+        self,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        top_p: float | None = None,
     ) -> str: ...
 
     async def tool_call(

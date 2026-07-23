@@ -61,6 +61,12 @@ class RAGPipeline:
         session_id: str | None = None,
         files: "list[dict] | None" = None,
         model: str | None = None,
+        temperature: "float | None" = None,
+        top_p: "float | None" = None,
+        top_k: "int | None" = None,
+        web_search: "bool | None" = None,
+        system_prompt: "str | None" = None,
+        concise_mode: "bool | None" = None,
     ) -> AsyncIterator[dict]:
         """流式回答 — 事件格式与前端 SSE 消费端兼容。
 
@@ -72,8 +78,12 @@ class RAGPipeline:
           error      — 错误信息
 
         model: 用户偏好模型（settings.preferred_model）透传；为空用默认。
+        temperature/top_p/top_k/web_search/system_prompt/concise_mode:
+        前端 ModelConfig 页下发的可配置项；None=用后端默认。
         """
         async for event in self._agent.stream_answer(
-            question, kb_id, session_id, files=files, model=model
+            question, kb_id, session_id, files=files, model=model,
+            temperature=temperature, top_p=top_p, top_k=top_k,
+            web_search=web_search, system_prompt=system_prompt, concise_mode=concise_mode,
         ):
             yield event

@@ -26,4 +26,7 @@ class EmbeddingModel:
     async def embed_query(self, text: str) -> list[float]:
         """编码查询文本"""
         resp = await self.client.embeddings.create(model=self.model, input=text)
-        return resp.data[0].embedding
+        data = resp.data
+        if not data:
+            raise ValueError(f"embedding 服务返回空结果 (input={text[:50]!r})")
+        return data[0].embedding

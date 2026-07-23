@@ -186,7 +186,9 @@ class HybridRetriever:
                 "chunk_id": cid,
                 "content": info["content"],
                 "kb": info["kb_name"],
+                "kb_id": info["kb_id"],
                 "title": info["doc_title"],
+                "doc_id": info["document_id"],
                 "snippet": info["content"][:150].replace("\n", " ") + "...",
                 "confidence": round(confidence, 2),
             })

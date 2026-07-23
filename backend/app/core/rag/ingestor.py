@@ -14,6 +14,17 @@ from app.db import DocChunk, Document
 
 logger = logging.getLogger(__name__)
 
+# 后台图谱抽取任务引用集：持有 task 到完成，防止被 CPython GC 取消
+# （与 routers/knowledge.py 的 _spawn_background 同款机制）
+_BACKGROUND_TASKS: set = set()
+
+
+def _spawn_graph_task(coro):
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
+
 
 class DocumentIngester:
     def __init__(
@@ -49,15 +60,14 @@ class DocumentIngester:
                 await self._graph.extract(kb_id, doc.title, chunk_infos, db)
 
     def _schedule_graph_extract(self, kb_id: str, doc_id: object) -> None:
-        """后台异步抽取图谱：用独立 DB 会话，无运行事件环则跳过（不阻塞）。"""
+        """后台异步抽取图谱：用独立 DB 会话，无运行事件环则跳过（不阻塞）。
+        任务引用由 _spawn_graph_task 持有，避免被事件循环 GC 提前取消。"""
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
-            loop = None
-        if loop is None:
             logger.warning("graph extract skipped (no running loop) for doc %s", doc_id)
             return
-        loop.create_task(self._background_graph_extract(kb_id, doc_id))
+        _spawn_graph_task(self._background_graph_extract(kb_id, doc_id))
 
     async def _background_graph_extract(self, kb_id: str, doc_id: object) -> None:
         """独立会话重抽图谱：重新拉 chunk → LLM 抽取 → 独立提交；失败不影响主流程。"""

@@ -56,6 +56,7 @@ class ESRetriever:
                 meta[cid] = {
                     "content": src.get("content", ""),
                     "kb_id": src.get("kb_id", kb_id),
+                    "doc_id": src.get("doc_id", ""),
                     "doc_title": src.get("doc_title", "未知文档"),
                     "distance": distance,
                 }
@@ -80,7 +81,9 @@ class ESRetriever:
                     "chunk_id": cid,
                     "content": info["content"],
                     "kb": info["kb_id"],
+                    "kb_id": info["kb_id"],
                     "title": info["doc_title"],
+                    "doc_id": info.get("doc_id"),
                     "snippet": info["content"][:150].replace("\n", " ") + "...",
                     "confidence": round(confidence, 2),
                 }

@@ -35,6 +35,7 @@ class OpenAICompatProvider:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model: str | None = None,
+        top_p: float | None = None,
     ) -> AsyncIterator[str]:
         """兼容多提供商流式输出，安全地提取 content + reasoning_content。
 
@@ -42,13 +43,16 @@ class OpenAICompatProvider:
         为空则回落实例默认模型（config.LLM_MODEL）。
         """
         try:
-            stream = await self.client.chat.completions.create(
-                model=model or self.model,
-                messages=messages,
-                temperature=temperature or self.default_temperature,
-                max_tokens=max_tokens or self.max_tokens,
-                stream=True,
-            )
+            params: dict[str, Any] = {
+                "model": model or self.model,
+                "messages": messages,
+                "temperature": temperature or self.default_temperature,
+                "max_tokens": max_tokens or self.max_tokens,
+                "stream": True,
+            }
+            if top_p is not None:
+                params["top_p"] = top_p
+            stream = await self.client.chat.completions.create(**params)
         except Exception as e:
             raise ValueError(f"LLM API 请求失败: {e}")
 
@@ -70,14 +74,18 @@ class OpenAICompatProvider:
         messages: list[dict[str, Any]],
         temperature: float | None = None,
         model: str | None = None,
+        top_p: float | None = None,
     ) -> str:
         """非流式调用"""
-        response = await self.client.chat.completions.create(
-            model=model or self.model,
-            messages=messages,
-            temperature=temperature or self.default_temperature,
-            max_tokens=self.max_tokens,
-        )
+        params: dict[str, Any] = {
+            "model": model or self.model,
+            "messages": messages,
+            "temperature": temperature or self.default_temperature,
+            "max_tokens": self.max_tokens,
+        }
+        if top_p is not None:
+            params["top_p"] = top_p
+        response = await self.client.chat.completions.create(**params)
         msg = response.choices[0].message
         # 只返回真正的回答 content，丢弃 reasoning_content（推理过程不对外暴露）
         return (getattr(msg, "content", "") or "").strip()

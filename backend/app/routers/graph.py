@@ -13,12 +13,12 @@ P4 扩展：
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_accessible_kb_ids
 from app.db import KGEdge, KGNode, KnowledgeBase, User
 from app.deps import get_db
 
@@ -55,9 +55,15 @@ async def get_graph(
     _current: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """返回图谱节点/边 + 统计。node_type/biz_category/from/to 真正参与查询。"""
+    # RBAC：按用户可见 KB 范围过滤，避免越权读取全公司图谱
+    allowed = await get_accessible_kb_ids(db, _current)
+    if kb_id and kb_id not in allowed:
+        raise HTTPException(status_code=403, detail="无权访问该知识库的图谱")
     node_q = select(KGNode)
     if kb_id:
         node_q = node_q.where(KGNode.kb_id == kb_id)
+    else:
+        node_q = node_q.where(KGNode.kb_id.in_(allowed))
     if node_type:
         node_q = node_q.where(KGNode.type == node_type)
     if biz_category:
@@ -74,6 +80,8 @@ async def get_graph(
     edge_q = select(KGEdge)
     if kb_id:
         edge_q = edge_q.where(KGEdge.kb_id == kb_id)
+    else:
+        edge_q = edge_q.where(KGEdge.kb_id.in_(allowed))
     edges = list((await db.scalars(edge_q)).all())
 
     # (kb_id, label) 是实体去重键，库内唯一 → label 可作节点索引
@@ -112,11 +120,17 @@ async def graph_hot_nodes(
     _current: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """热门实体 TopN：按度数（被关系边引用次数）近似热度。"""
+    allowed = await get_accessible_kb_ids(db, _current)
+    if kb_id and kb_id not in allowed:
+        raise HTTPException(status_code=403, detail="无权访问该知识库的图谱")
     node_q = select(KGNode)
     edge_q = select(KGEdge)
     if kb_id:
         node_q = node_q.where(KGNode.kb_id == kb_id)
         edge_q = edge_q.where(KGEdge.kb_id == kb_id)
+    else:
+        node_q = node_q.where(KGNode.kb_id.in_(allowed))
+        edge_q = edge_q.where(KGEdge.kb_id.in_(allowed))
     nodes = list((await db.scalars(node_q)).all())
     edges = list((await db.scalars(edge_q)).all())
 
@@ -137,9 +151,14 @@ async def graph_recent_nodes(
     _current: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """最近更新实体 TopN：按 created_at 倒序。"""
+    allowed = await get_accessible_kb_ids(db, _current)
+    if kb_id and kb_id not in allowed:
+        raise HTTPException(status_code=403, detail="无权访问该知识库的图谱")
     node_q = select(KGNode).order_by(KGNode.created_at.desc()).limit(limit)
     if kb_id:
         node_q = node_q.where(KGNode.kb_id == kb_id)
+    else:
+        node_q = node_q.where(KGNode.kb_id.in_(allowed))
     nodes = list((await db.scalars(node_q)).all())
     return [_node_out(n) for n in nodes]
 
@@ -152,11 +171,17 @@ async def graph_export(
     _current: User = Depends(get_current_user),
 ) -> JSONResponse:
     """导出完整图谱 {nodes, edges}。json 直接返回；gexf 返回 GEXF XML 供 Gephi 等。"""
+    allowed = await get_accessible_kb_ids(db, _current)
+    if kb_id and kb_id not in allowed:
+        raise HTTPException(status_code=403, detail="无权访问该知识库的图谱")
     node_q = select(KGNode)
     edge_q = select(KGEdge)
     if kb_id:
         node_q = node_q.where(KGNode.kb_id == kb_id)
         edge_q = edge_q.where(KGEdge.kb_id == kb_id)
+    else:
+        node_q = node_q.where(KGNode.kb_id.in_(allowed))
+        edge_q = edge_q.where(KGEdge.kb_id.in_(allowed))
     nodes = list((await db.scalars(node_q)).all())
     edges = list((await db.scalars(edge_q)).all())
 

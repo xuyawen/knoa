@@ -195,9 +195,6 @@ class GraphStore:
         except Exception as e:
             logger.warning("graph extract LLM failed (skip graph for doc %s): %s", doc_title, e)
             return
-        except Exception as e:
-            logger.warning("graph extract LLM failed (skip graph for doc %s): %s", doc_title, e)
-            return
 
         graph = _coerce_graph(raw)
         entities = graph["entities"]
@@ -448,7 +445,9 @@ class GraphStore:
                 {
                     "chunk_id": str(c.id),
                     "kb": c.kb_id,
+                    "kb_id": c.kb_id,
                     "title": title or c.kb_id,
+                    "doc_id": str(c.document_id),
                     "snippet": c.content[:300],
                     "content": c.content,
                     "confidence": 0.7,
@@ -578,7 +577,9 @@ class GraphStore:
                     {
                         "chunk_id": str(c.id),
                         "kb": c.kb_id,
+                        "kb_id": c.kb_id,
                         "title": title or c.kb_id,
+                        "doc_id": str(c.document_id),
                         "snippet": c.content[:300],
                         "content": c.content,
                         "confidence": 0.7,
