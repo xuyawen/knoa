@@ -46,22 +46,28 @@ function pct(v: number): string {
   return `${s}${v.toFixed(1)}%`
 }
 
-// ── 饼图：文档分类占比（真实，来自 getDocCategory）──
-const CIRC = 2 * Math.PI * 46
+// ── 文档分类占比（真实，来自 getDocCategory）──
 const categories = ref<DocCategory[]>([])
 async function loadCategories() { categories.value = await getDocCategory() }
-const pieTotal = computed(() => categories.value.reduce((s, c) => s + c.count, 0) || 0)
-const pieData = computed(() => {
-  const total = pieTotal.value || 1
-  let acc = 0
-  return categories.value.map((c, i) => {
-    const frac = c.count / total
-    const len = frac * CIRC
-    const dash = `${len.toFixed(1)} ${(CIRC - len).toFixed(1)}`
-    const offset = (-acc * CIRC).toFixed(1)
-    acc += frac
-    return { label: c.category, value: c.count, pct: (frac * 100).toFixed(1), seg: (i % 5) + 1, dash, offset }
-  })
+const catTotal = computed(() => categories.value.reduce((s, c) => s + c.count, 0) || 0)
+const UNCAT = '未分类'
+function isUncat(c: DocCategory) { return c.category === UNCAT || !c.category }
+const uncatCount = computed(() => categories.value.filter(isUncat).reduce((s, c) => s + c.count, 0))
+const classified = computed(() => categories.value.filter((c) => !isUncat(c)))
+const classifiedTotal = computed(() => classified.value.reduce((s, c) => s + c.count, 0) || 0)
+const classifiedCount = computed(() => classified.value.length)
+const TOP_N = 8
+function buildBar(label: string, value: number, seg: number) {
+  const pctTotal = catTotal.value ? ((value / catTotal.value) * 100).toFixed(1) : '0'
+  const width = classifiedTotal.value ? (value / classifiedTotal.value) * 100 : 0
+  return { label, value, pctTotal, width, seg }
+}
+const barData = computed(() => {
+  const sorted = [...classified.value].sort((a, b) => b.count - a.count)
+  const rest = sorted.slice(TOP_N)
+  const rows = sorted.slice(0, TOP_N).map((c, i) => buildBar(c.category, c.count, (i % 5) + 1))
+  if (rest.length) rows.push(buildBar(`其他 (${rest.length})`, rest.reduce((s, c) => s + c.count, 0), 0))
+  return rows
 })
 
 // ── 热门搜索榜（真实，来自 knowledge store / getTrending）──
@@ -300,26 +306,38 @@ onMounted(() => {
             <span class="panel-title">文档分类占比</span>
             <Icon name="info" :size="13" class="phint" />
           </div>
-          <div class="pie-body">
-            <div class="donut-chart">
-              <svg viewBox="0 0 120 120" class="donut-svg">
-                <circle v-for="p in pieData" :key="p.label" cx="60" cy="60" r="46" fill="none"
-                  stroke-width="18" :stroke-dasharray="p.dash" :stroke-dashoffset="p.offset"
-                  class="donut-seg" :class="'seg-' + p.seg" transform="rotate(-90 60 60)" />
-              </svg>
-              <div class="donut-center">
-                <div class="donut-total">{{ pieTotal.toLocaleString() }}</div>
-                <div class="donut-label">文档总数</div>
+
+          <div v-if="catTotal === 0" class="empty-hint">暂无文档</div>
+          <div v-else class="cat-body">
+            <!-- 分层：已分类 vs 未分类 -->
+            <div class="cat-summary">
+              <div class="cat-stack">
+                <div
+                  class="cat-stack-fill"
+                  :style="{ width: (classifiedTotal && catTotal ? (classifiedTotal / catTotal) * 100 : 0) + '%' }"
+                ></div>
+              </div>
+              <div class="cat-summary-meta">
+                <span><span class="dot dot-ok"></span>已分类 {{ classifiedCount }} 类 · {{ classifiedTotal.toLocaleString() }} 条</span>
+                <span><span class="dot dot-gray"></span>未分类 {{ uncatCount.toLocaleString() }} 条</span>
               </div>
             </div>
-            <div class="pie-legend">
-              <div v-for="p in pieData" :key="p.label" class="legend-item">
-                <span class="legend-dot" :class="'seg-' + p.seg"></span>
-                <span class="legend-label">{{ p.label }}</span>
-                <span class="legend-val">{{ p.value.toLocaleString() }}</span>
-                <span class="legend-pct">{{ p.pct }}%</span>
+
+            <!-- 已分类分布：横向条形（降序，TOP 8 + 其他） -->
+            <div class="cat-bars">
+              <div v-for="b in barData" :key="b.label" class="cat-bar-row">
+                <span class="cat-bar-label" :title="b.label">{{ b.label }}</span>
+                <div class="cat-bar-track">
+                  <div
+                    class="cat-bar-fill"
+                    :class="b.seg === 0 ? 'bar-uncat' : 'bar-seg-' + b.seg"
+                    :style="{ width: (b.width || 0) + '%' }"
+                  ></div>
+                </div>
+                <span class="cat-bar-val">{{ b.value.toLocaleString() }}</span>
+                <span class="cat-bar-pct">{{ b.pctTotal }}%</span>
               </div>
-              <div v-if="!pieData.length" class="empty-hint">暂无文档</div>
+              <div v-if="!barData.length" class="empty-hint">暂无已分类文档</div>
             </div>
           </div>
         </div>
@@ -578,27 +596,30 @@ onMounted(() => {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-/* ---- 饼图 ---- */
+/* ---- 文档分类占比 ---- */
 .pie-panel { padding: 22px 24px; }
-.pie-body { display: flex; align-items: center; gap: 24px; }
-.donut-chart { position: relative; width: 130px; height: 130px; flex-shrink: 0; }
-.donut-svg { width: 100%; height: 100%; }
-.donut-seg.seg-1{stroke:var(--cat-1)}.donut-seg.seg-2{stroke:var(--cat-2)}
-.donut-seg.seg-3{stroke:var(--cat-3)}.donut-seg.seg-4{stroke:var(--cat-4)}
-.donut-seg.seg-5{stroke:var(--cat-5)}
-.legend-dot.seg-1{background:var(--cat-1)}.legend-dot.seg-2{background:var(--cat-2)}
-.legend-dot.seg-3{background:var(--cat-3)}.legend-dot.seg-4{background:var(--cat-4)}
-.legend-dot.seg-5{background:var(--cat-5)}
+.cat-body { display: flex; flex-direction: column; gap: 16px; }
+.cat-summary { display: flex; flex-direction: column; gap: 8px; }
+.cat-stack { height: 8px; border-radius: 4px; background: var(--bg-subtle); overflow: hidden; }
+.cat-stack-fill { height: 100%; background: var(--brand); border-radius: 4px; transition: width .3s ease; }
+.cat-summary-meta { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); }
+.cat-summary-meta .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.cat-summary-meta .dot-ok { background: var(--success); }
+.cat-summary-meta .dot-gray { background: var(--text-tertiary); }
 
-.donut-center { position: absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; }
-.donut-total { font-size: 20px; font-weight: 800; color: var(--text-primary); }
-.donut-label { font-size: 11px; color: var(--text-tertiary); }
-.pie-legend { flex:1; display:flex; flex-direction:column; gap:10px; }
-.legend-item { display:flex; align-items:center; gap:8px; font-size:13px; }
-.legend-dot { width:10px; height:10px; border-radius:3px; flex-shrink:0; }
-.legend-label { flex:1; color:var(--text-secondary); }
-.legend-val { font-weight:600; color:var(--text-primary); min-width:48px; text-align:right; }
-.legend-pct { color:var(--text-tertiary); min-width:44px; text-align:right; font-size:12px; }
+.cat-bars { display: flex; flex-direction: column; gap: 10px; max-height: 280px; overflow-y: auto; padding-right: 4px; }
+.cat-bar-row { display: grid; grid-template-columns: 120px 1fr 46px 48px; align-items: center; gap: 10px; }
+.cat-bar-label { font-size: 12.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cat-bar-track { height: 8px; background: var(--bg-subtle); border-radius: 4px; overflow: hidden; }
+.cat-bar-fill { height: 100%; border-radius: 4px; transition: width .3s ease; min-width: 2px; }
+.cat-bar-val { font-size: 12.5px; font-weight: 600; color: var(--text-primary); text-align: right; }
+.cat-bar-pct { font-size: 12px; color: var(--text-tertiary); text-align: right; }
+.bar-seg-1 { background: var(--cat-1); }
+.bar-seg-2 { background: var(--cat-2); }
+.bar-seg-3 { background: var(--cat-3); }
+.bar-seg-4 { background: var(--cat-4); }
+.bar-seg-5 { background: var(--cat-5); }
+.bar-uncat { background: var(--text-tertiary); }
 
 /* ---- 操作记录 ---- */
 .ops-section { padding: 22px 24px; overflow: hidden; }
