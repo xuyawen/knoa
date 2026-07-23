@@ -28,4 +28,9 @@ export default defineConfig({
       },
     },
   },
+  // emptyOutDir disabled: the bundler's pre-delete uses trash which is blocked
+  // by the workspace safe-delete layer on this volume; overwrite in place instead.
+  build: {
+    emptyOutDir: false,
+  },
 })
