@@ -269,11 +269,11 @@ const sidebarCollapsed = ref(false)
       <main class="main-content">
         <button
           v-if="sidebarCollapsed && currentSubItems.length"
-          class="edge-expand-btn"
+          class="float-expand-btn"
           title="展开菜单"
           @click="sidebarCollapsed = false"
         >
-          <Icon name="chevrons-right" :size="20" />
+          <Icon name="chevrons-right" :size="18" />
         </button>
         <router-view />
       </main>
@@ -651,29 +651,29 @@ const sidebarCollapsed = ref(false)
   padding: 24px 28px;
   position: relative;
 }
-/* 收起时：内容区左边缘的展开按钮（竖条） */
-.edge-expand-btn {
+/* 收起时：内容区左上角悬浮展开按钮 */
+.float-expand-btn {
   position: absolute;
-  top: 50%;
-  left: 0;
-  transform: translateY(-50%);
-  display: flex;
+  top: 16px;
+  left: 16px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 56px;
-  border: none;
-  border-right: 1px solid var(--border);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
   color: var(--text-secondary);
   cursor: pointer;
   z-index: 10;
   transition: all var(--dur-fast) var(--ease-out);
-  overflow: visible;
 }
-.edge-expand-btn:hover {
-  background: var(--brand-soft);
-  color: var(--brand);
+.float-expand-btn:hover {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+  box-shadow: var(--shadow-md);
 }
 </style>
