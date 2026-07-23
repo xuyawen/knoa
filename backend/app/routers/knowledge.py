@@ -321,11 +321,10 @@ async def search_docs(
             "items": [], "total": 0, "page": page, "page_size": size, "pages": 1,
         }
 
-    kb_ids = [uuid.UUID(x) for x in accessible]
     base = (
         select(Document, KnowledgeBase.name.label("kb_name"))
         .join(KnowledgeBase, KnowledgeBase.id == Document.kb_id)
-        .where(Document.kb_id.in_(kb_ids), Document.title.ilike(f"%{q}%"))
+        .where(Document.kb_id.in_(accessible), Document.title.ilike(f"%{q}%"))
     )
     if status:
         base = base.where(Document.status == status)
