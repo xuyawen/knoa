@@ -559,28 +559,29 @@ const sidebarCollapsed = ref(false)
   flex-direction: column;
   border-right: 1px solid var(--border);
   background: var(--bg-surface);
-  padding-top: 20px;
-  overflow-y: auto;
+  height: 100%;
   transition: width var(--dur) var(--ease-out);
 }
 .sub-sidebar.collapsed {
   width: 0;
   min-width: 0;
-  padding-top: 0;
   border-right: none;
   overflow: hidden;
 }
 .sub-sidebar-header {
-  padding: 0 18px 14px;
+  padding: 18px 18px 12px;
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
+  flex-shrink: 0;
 }
 .sub-nav {
   display: flex;
   flex-direction: column;
   gap: 2px;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .sub-item {
   display: flex;
@@ -611,28 +612,28 @@ const sidebarCollapsed = ref(false)
 
 .sub-footer {
   padding: 12px 18px;
-  margin-top: auto;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
 }
 .sub-collapse {
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  background: var(--bg-surface);
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
   border-radius: var(--radius-md);
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--text-tertiary);
   cursor: pointer;
   font-family: inherit;
   transition: all var(--dur-fast) var(--ease-out);
   width: 100%;
-  justify-content: center;
 }
 .sub-collapse:hover {
   background: var(--bg-hover);
   color: var(--text-secondary);
-  border-color: var(--border-strong);
 }
 
 /* 主内容区 */
