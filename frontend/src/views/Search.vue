@@ -1,16 +1,18 @@
 <script setup lang="ts">
-// 智能搜索 — 左侧为功能导航，右侧按 section 显示对应内容页。
+// 智能搜索主页：搜索框 + 筛选条 + 文档结果列表（带关键词高亮）。
 import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useToastStore } from '@/stores/toast'
-import { searchDocs, getTrending } from '@/api'
-import type { SearchDocItem, TrendingItem, Paginated } from '@/types/api'
+import { searchDocs } from '@/api'
+import type { SearchDocItem, Paginated } from '@/types/api'
+import { useSearchHistory } from '@/composables/useSearchHistory'
 
-const props = defineProps<{ section?: string }>()
-const section = computed(() => props.section ?? 'search')
-
+const route = useRoute()
+const router = useRouter()
 const toast = useToastStore()
+const { save: saveHistory } = useSearchHistory()
 
 // ── 搜索框 ──
 const query = ref('')
@@ -19,7 +21,7 @@ const loading = ref(false)
 const results = ref<Paginated<SearchDocItem> | null>(null)
 const searchCost = ref<number | null>(null)
 
-// ── 来源筛选（真实过滤，后端已支撑）──
+// ── 来源筛选 ──
 const typeOpts = [
   { label: '全部类型', value: '' },
   { label: 'PDF', value: 'pdf' },
@@ -43,46 +45,13 @@ const filterType = ref('')
 const filterScope = ref('')
 const filterStatus = ref('已审核')
 
-// ── 本地搜索历史 ──
-const HISTORY_KEY = 'knoa_search_history'
-const MAX_HISTORY = 20
-const searchHistory = ref<string[]>([])
-
 onMounted(() => {
-  loadHistory()
-  void loadTrending()
-})
-
-function loadHistory() {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY)
-    searchHistory.value = raw ? (JSON.parse(raw) as string[]) : []
-  } catch {
-    searchHistory.value = []
+  const q = (route.query.q as string) || ''
+  if (q) {
+    query.value = q
+    void runSearch()
   }
-}
-function saveHistory(text: string) {
-  if (!text.trim()) return
-  const next = [text, ...searchHistory.value.filter((h) => h !== text)].slice(0, MAX_HISTORY)
-  searchHistory.value = next
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)) } catch { /* ignore */ }
-}
-function clearHistory() {
-  searchHistory.value = []
-  try { localStorage.removeItem(HISTORY_KEY) } catch { /* ignore */ }
-}
-function removeHistoryItem(text: string, e: Event) {
-  e.stopPropagation()
-  const next = searchHistory.value.filter((h) => h !== text)
-  searchHistory.value = next
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)) } catch { /* ignore */ }
-}
-
-// ── 热门搜索 ──
-const trending = ref<TrendingItem[]>([])
-async function loadTrending() {
-  try { trending.value = await getTrending() } catch { trending.value = [] }
-}
+})
 
 // ── 执行搜索 ──
 async function runSearch(page = 1) {
@@ -107,11 +76,6 @@ async function runSearch(page = 1) {
     loading.value = false
     searchCost.value = Math.round((performance.now() - t0) * 10) / 1000
   }
-}
-
-function pick(text: string) {
-  query.value = text
-  void runSearch()
 }
 
 function clearSearch() {
@@ -159,154 +123,101 @@ function scopeLabel(scope: string): string {
   const map: Record<string, string> = { public: '公开', company: '公司内部', department: '部门可见', private: '仅本人可见' }
   return map[scope] || scope
 }
+
+// 从结果/历史/热门跳转过来时复用当前查询
+function gotoQuery(text: string) {
+  router.push({ path: '/search', query: { q: text } })
+}
 </script>
 
 <template>
   <div class="search-page">
-    <!-- 主区域：按 section 显示内容页 -->
-    <main class="search-main">
-      <!-- === 搜索主页 / 筛选页 === -->
-      <template v-if="section === 'search' || section === 'filters'">
-        <div class="search-bar-row card">
-          <div class="search-input-wrap">
-            <Icon name="search" :size="17" class="sb-icon" />
-            <input
-              v-model="query"
-              type="text"
-              placeholder="企业数据安全管理规范"
-              class="sb-input"
-              @keydown.enter="runSearch()"
-            />
-            <button v-if="query" class="sb-clear" @click="clearSearch">
-              <Icon name="close" :size="13" />
-            </button>
+    <!-- 搜索框 -->
+    <div class="search-bar-row card">
+      <div class="search-input-wrap">
+        <Icon name="search" :size="17" class="sb-icon" />
+        <input
+          v-model="query"
+          type="text"
+          placeholder="企业数据安全管理规范"
+          class="sb-input"
+          @keydown.enter="runSearch()"
+        />
+        <button v-if="query" class="sb-clear" @click="clearSearch">
+          <Icon name="close" :size="13" />
+        </button>
+      </div>
+      <button
+        class="btn btn-primary"
+        :disabled="!query.trim() || loading"
+        @click="runSearch()"
+      >
+        {{ loading ? '检索中…' : '搜索' }}
+      </button>
+    </div>
+
+    <!-- 筛选条（默认展示在搜索框下方） -->
+    <div class="filter-bar card">
+      <CustomSelect v-model="filterType" :options="typeOpts" placeholder="文件类型" width="110px" />
+      <CustomSelect v-model="filterScope" :options="scopeOpts" placeholder="权限范围" width="120px" />
+      <CustomSelect v-model="filterStatus" :options="statusOpts" placeholder="文档状态" width="110px" />
+      <button class="btn-link muted" @click="resetFilters">清空</button>
+      <button class="btn btn-primary btn-sm" @click="runSearch(results?.page ?? 1)">应用筛选</button>
+    </div>
+
+    <!-- 结果区 -->
+    <div v-if="submitted" class="result-area card">
+      <div class="result-toolbar">
+        <div class="result-meta">
+          找到约 <b>{{ results?.total ?? 0 }}</b> 条结果
+          <span v-if="searchCost !== null">（用时 {{ searchCost.toFixed(3) }} 秒）</span>
+        </div>
+      </div>
+
+      <div v-if="loading" class="result-loading">
+        <span class="dot" /><span class="dot" /><span class="dot" />
+      </div>
+
+      <div v-else-if="results && results.items.length" class="doc-list">
+        <div
+          v-for="doc in results.items"
+          :key="doc.id"
+          class="doc-card"
+          @click="gotoQuery(doc.title)"
+        >
+          <div class="doc-icon" :class="fileIconClass(doc.type)">
+            <Icon :name="fileIcon(doc.type)" :size="20" />
           </div>
-          <button
-            class="btn btn-primary"
-            :disabled="!query.trim() || loading"
-            @click="runSearch()"
-          >
-            {{ loading ? '检索中…' : '搜索' }}
-          </button>
-        </div>
-
-        <div class="filter-bar card">
-          <CustomSelect v-model="filterType" :options="typeOpts" placeholder="文件类型" width="110px" />
-          <CustomSelect v-model="filterScope" :options="scopeOpts" placeholder="权限范围" width="120px" />
-          <CustomSelect v-model="filterStatus" :options="statusOpts" placeholder="文档状态" width="110px" />
-          <button class="btn-link muted" @click="resetFilters">清空</button>
-          <button class="btn btn-primary btn-sm" @click="runSearch(results?.page ?? 1)">应用筛选</button>
-        </div>
-
-        <div v-if="submitted" class="result-area card">
-          <div class="result-toolbar">
-            <div class="result-meta">
-              找到约 <b>{{ results?.total ?? 0 }}</b> 条结果
-              <span v-if="searchCost !== null">（用时 {{ searchCost.toFixed(3) }} 秒）</span>
+          <div class="doc-body">
+            <div class="doc-title" v-html="highlight(doc.title)"></div>
+            <div class="doc-snippet" v-html="highlight(doc.snippet || '暂无摘要')"></div>
+            <div class="doc-meta">
+              <span class="meta-item">
+                <Icon name="folder" :size="12" />
+                来自：{{ doc.kbName }}{{ doc.category ? ` > ${doc.category}` : '' }}
+              </span>
+              <span class="meta-item">
+                <Icon name="clock" :size="12" />
+                更新时间：{{ fmtTime(doc.updatedAt) }}
+              </span>
+              <span class="meta-item">
+                <Icon name="shield" :size="12" />
+                权限：{{ scopeLabel(doc.scope) }}
+              </span>
             </div>
           </div>
-
-          <div v-if="loading" class="result-loading">
-            <span class="dot" /><span class="dot" /><span class="dot" />
-          </div>
-
-          <div v-else-if="results && results.items.length" class="doc-list">
-            <div
-              v-for="doc in results.items"
-              :key="doc.id"
-              class="doc-card"
-            >
-              <div class="doc-icon" :class="fileIconClass(doc.type)">
-                <Icon :name="fileIcon(doc.type)" :size="20" />
-              </div>
-              <div class="doc-body">
-                <div class="doc-title" v-html="highlight(doc.title)"></div>
-                <div class="doc-snippet" v-html="highlight(doc.snippet || '暂无摘要')"></div>
-                <div class="doc-meta">
-                  <span class="meta-item">
-                    <Icon name="folder" :size="12" />
-                    来自：{{ doc.kbName }}{{ doc.category ? ` > ${doc.category}` : '' }}
-                  </span>
-                  <span class="meta-item">
-                    <Icon name="clock" :size="12" />
-                    更新时间：{{ fmtTime(doc.updatedAt) }}
-                  </span>
-                  <span class="meta-item">
-                    <Icon name="shield" :size="12" />
-                    权限：{{ scopeLabel(doc.scope) }}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div v-else-if="results" class="empty-hint">未找到与「{{ submitted }}」相关的文档</div>
         </div>
+      </div>
 
-        <div v-else class="welcome card">
-          <Icon name="search" :size="40" class="welcome-icon" />
-          <div class="welcome-title">输入关键词，搜索知识库文档</div>
-          <div class="welcome-desc">支持按文件类型、权限范围、审核状态筛选</div>
-        </div>
-      </template>
+      <div v-else-if="results" class="empty-hint">未找到与「{{ submitted }}」相关的文档</div>
+    </div>
 
-      <!-- === 搜索历史页 === -->
-      <template v-else-if="section === 'history'">
-        <div class="page-header">
-          <h2 class="page-title">
-            <Icon name="clock" :size="18" /> 搜索历史
-          </h2>
-          <button v-if="searchHistory.length" class="btn-link muted" @click="clearHistory">清空全部</button>
-        </div>
-        <div class="card list-page">
-          <div v-if="searchHistory.length" class="history-list">
-            <div
-              v-for="h in searchHistory"
-              :key="h"
-              class="history-row"
-              @click="pick(h)"
-            >
-              <Icon name="clock" :size="14" class="row-icon" />
-              <span class="row-text">{{ h }}</span>
-              <button class="row-action" title="删除" @click.stop="removeHistoryItem(h, $event)">
-                <Icon name="trash-2" :size="14" />
-              </button>
-            </div>
-          </div>
-          <div v-else class="empty-page">
-            <Icon name="clock" :size="40" />
-            <div>暂无搜索历史</div>
-          </div>
-        </div>
-      </template>
-
-      <!-- === 热门搜索页 === -->
-      <template v-else-if="section === 'popular'">
-        <div class="page-header">
-          <h2 class="page-title">
-            <Icon name="fire" :size="18" /> 热门搜索
-          </h2>
-        </div>
-        <div class="card list-page">
-          <div v-if="trending.length" class="trending-list">
-            <div
-              v-for="(t, i) in trending.slice(0, 10)"
-              :key="t.question"
-              class="trending-row"
-              @click="pick(t.question)"
-            >
-              <span class="trend-rank" :class="'rk-' + Math.min(i + 1, 3)">{{ i + 1 }}</span>
-              <span class="row-text">{{ t.question }}</span>
-              <span class="trend-count" v-if="t.count">{{ t.count }} 次</span>
-            </div>
-          </div>
-          <div v-else class="empty-page">
-            <Icon name="fire" :size="40" />
-            <div>暂无热门数据</div>
-          </div>
-        </div>
-      </template>
-    </main>
+    <!-- 未搜索时的欢迎态 -->
+    <div v-else class="welcome card">
+      <Icon name="search" :size="40" class="welcome-icon" />
+      <div class="welcome-title">输入关键词，搜索知识库文档</div>
+      <div class="welcome-desc">支持按文件类型、权限范围、审核状态筛选</div>
+    </div>
   </div>
 </template>
 
@@ -317,32 +228,6 @@ function scopeLabel(scope: string): string {
   gap: 16px;
   height: 100%;
   min-height: 0;
-}
-
-.search-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  overflow-y: auto;
-}
-
-/* 页面标题 */
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 2px;
-}
-.page-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
 }
 
 /* 搜索栏 */
@@ -440,6 +325,7 @@ function scopeLabel(scope: string): string {
   gap: 14px;
   padding: 14px 0;
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
 }
 .doc-card:last-child { border-bottom: none; padding-bottom: 0; }
 .doc-icon {
@@ -513,77 +399,4 @@ function scopeLabel(scope: string): string {
 .welcome-icon { color: var(--brand-soft); }
 .welcome-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .welcome-desc { font-size: 13px; color: var(--text-secondary); }
-
-/* ---- 历史/热门 列表页 ---- */
-.list-page {
-  flex: 1;
-  padding: 8px 0;
-  min-height: 300px;
-}
-.history-list, .trending-list {
-  display: flex;
-  flex-direction: column;
-}
-.history-row, .trending-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 18px;
-  cursor: pointer;
-  transition: background var(--dur-fast);
-}
-.history-row:hover, .trending-row:hover { background: var(--bg-hover); }
-.row-icon { color: var(--text-tertiary); flex-shrink: 0; }
-.row-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13.5px;
-  color: var(--text-primary);
-}
-.row-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px; height: 28px;
-  border-radius: 6px;
-  color: var(--text-tertiary);
-  background: transparent;
-  border: none;
-  opacity: 0;
-  transition: all var(--dur-fast);
-}
-.history-row:hover .row-action { opacity: 1; }
-.row-action:hover { background: var(--danger-soft); color: var(--danger); }
-
-.trend-rank {
-  width: 22px; height: 22px;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 6px;
-  font-size: 12px; font-weight: 700;
-  background: var(--bg-subtle); color: var(--text-secondary);
-  flex-shrink: 0;
-}
-.trend-rank.rk-1 { background: var(--brand); color: var(--text-on-brand); }
-.trend-rank.rk-2 { background: var(--brand-soft); color: var(--brand); }
-.trend-rank.rk-3 { background: var(--warning-soft); color: var(--warning); }
-.trend-count {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  flex-shrink: 0;
-}
-
-.empty-page {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  min-height: 260px;
-  color: var(--text-tertiary);
-  font-size: 13px;
-}
 </style>

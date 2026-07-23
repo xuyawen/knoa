@@ -94,7 +94,7 @@ const subMenus: Record<string, SubItem[]> = {
     { label: '文档归档', icon: 'archive', to: '/documents/archive', activeNames: ['docs-archive'] },
   ],
   search: [
-    { label: '智能搜索', icon: 'search', to: '/search', activeNames: ['search', 'search-filters'] },
+    { label: '智能搜索', icon: 'search', to: '/search', activeNames: ['search'] },
     { label: '搜索历史', icon: 'clock', to: '/search/history', activeNames: ['search-history'] },
     { label: '热门搜索', icon: 'fire', to: '/search/popular', activeNames: ['search-popular'] },
   ],
