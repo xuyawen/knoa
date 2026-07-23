@@ -660,7 +660,7 @@ const sidebarCollapsed = ref(false)
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
+  width: 16px;
   height: 56px;
   border: none;
   border-right: 1px solid var(--border);
