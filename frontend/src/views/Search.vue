@@ -163,37 +163,7 @@ function scopeLabel(scope: string): string {
 
 <template>
   <div class="search-page">
-    <!-- 左侧功能导航 -->
-    <aside class="search-sidebar">
-      <div class="nav-menu">
-        <router-link
-          class="nav-item"
-          :class="{ active: section === 'search' || section === 'filters' }"
-          to="/search"
-        >
-          <Icon name="search" :size="16" />
-          <span>智能搜索</span>
-        </router-link>
-        <router-link
-          class="nav-item"
-          :class="{ active: section === 'history' }"
-          to="/search/history"
-        >
-          <Icon name="clock" :size="16" />
-          <span>搜索历史</span>
-        </router-link>
-        <router-link
-          class="nav-item"
-          :class="{ active: section === 'popular' }"
-          to="/search/popular"
-        >
-          <Icon name="fire" :size="16" />
-          <span>热门搜索</span>
-        </router-link>
-      </div>
-    </aside>
-
-    <!-- 右侧主区域：按 section 显示内容页 -->
+    <!-- 主区域：按 section 显示内容页 -->
     <main class="search-main">
       <!-- === 搜索主页 / 筛选页 === -->
       <template v-if="section === 'search' || section === 'filters'">
@@ -342,44 +312,12 @@ function scopeLabel(scope: string): string {
 <style scoped>
 .search-page {
   display: flex;
+  flex-direction: column;
   gap: 16px;
   height: 100%;
   min-height: 0;
 }
 
-/* ---- 左侧导航 ---- */
-.search-sidebar {
-  width: 220px;
-  flex-shrink: 0;
-}
-.nav-menu {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-}
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  font-size: 13.5px;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  text-decoration: none;
-  transition: all var(--dur-fast);
-}
-.nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-.nav-item.active { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
-
-/* ---- 右侧主区域 ---- */
 .search-main {
   flex: 1;
   min-width: 0;
