@@ -561,7 +561,17 @@ watch(messages, scrollToBottom, { deep: false })
             <Icon name="sparkles" :size="15" />
           </div>
 
-          <div class="msg-bubble">
+          <div class="msg-bubble" :class="{ 'has-tts': m.role !== 'user' && auth.user?.ttsEnabled }">
+            <!-- 语音播报（右上角） -->
+            <button
+              v-if="m.role !== 'user' && auth.user?.ttsEnabled"
+              class="tts-corner act-btn"
+              :class="{ on: playingId === m.id }"
+              :title="playingId === m.id ? '停止播报' : '朗读回答'"
+              @click="speak(m)"
+            >
+              <Icon :name="playingId === m.id ? 'square' : 'volume'" :size="14" />
+            </button>
             <!-- 用户附件 -->
             <div class="attach-thumbs" v-if="m.role === 'user' && m.attachments?.length">
               <template v-for="(a, i) in m.attachments" :key="i">
@@ -629,15 +639,6 @@ watch(messages, scrollToBottom, { deep: false })
               <span class="msg-actions-divider" />
               <button class="act-btn" title="复制回答" @click="copyAnswer(m)">
                 <Icon name="copy" :size="14" />
-              </button>
-              <button
-                v-if="auth.user?.ttsEnabled"
-                class="act-btn"
-                :class="{ on: playingId === m.id }"
-                :title="playingId === m.id ? '停止播报' : '朗读回答'"
-                @click="speak(m)"
-              >
-                <Icon :name="playingId === m.id ? 'square' : 'volume'" :size="14" />
               </button>
               <button class="act-btn" :class="{ on: m.feedback === 'up' }" title="有用" @click="onFeedback(m, 'up')">
                 <Icon name="thumbs-up" :size="14" />
@@ -1090,6 +1091,17 @@ watch(messages, scrollToBottom, { deep: false })
   background: var(--brand);
   color: var(--text-on-brand);
   border-radius: var(--radius-lg) 6px var(--radius-lg) var(--radius-lg);
+}
+.msg-row.ai-msg .msg-bubble.has-tts {
+  position: relative;
+  padding-right: 46px;
+}
+.tts-corner {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
 }
 
 /* 思考过程 */
