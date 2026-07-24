@@ -67,6 +67,7 @@ class SessionOut(CamelModel):
 
 
 class SessionMessageOut(CamelModel):
+    id: str
     role: str
     content: str
     citations: list[int] | None = None

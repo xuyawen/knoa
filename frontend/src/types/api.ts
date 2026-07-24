@@ -130,6 +130,7 @@ export interface ChatSession {
 }
 
 export interface SessionMessage {
+  id?: string
   role: string
   content: string
   citations?: number[] | null

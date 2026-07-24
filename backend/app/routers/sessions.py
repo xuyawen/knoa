@@ -244,6 +244,7 @@ async def get_session(
         summary=session.summary,
         messages=[
             SessionMessageOut(
+                id=str(m.id),
                 role=m.role,
                 content=m.content,
                 citations=m.citations,

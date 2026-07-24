@@ -223,6 +223,7 @@ function toChatMessage(m: SessionMessage): ChatMessage {
     attachments: m.attachments || null,
     thinkingSteps: undefined,
     feedback: null,
+    messageId: m.id || undefined,
   }
 }
 
