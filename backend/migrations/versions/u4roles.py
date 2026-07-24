@@ -51,7 +51,7 @@ def upgrade() -> None:
             sa.Column('description', sa.Text(), nullable=True),
             sa.Column('is_builtin', sa.Boolean(), nullable=False, server_default='false'),
             sa.Column('sort_order', sa.Integer(), nullable=False, server_default='0'),
-            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         )
         op.create_index('ix_roles_key', 'roles', ['key'], unique=True)
 
@@ -66,12 +66,17 @@ def upgrade() -> None:
         )
 
     # 3) app_user 增加 role_id 列（先可空，回填后再置 NOT NULL）
+    #    同步建外键 + 命名索引，与模型 (ForeignKey("roles.id"), index=True) 对齐，
+    #    否则 `alembic check` 会报角色表/索引漂移。
     cols = [c['name'] for c in insp.get_columns('app_user')]
     if 'role_id' not in cols:
         op.add_column(
             'app_user',
             sa.Column('role_id', postgresql.UUID(as_uuid=True), nullable=True),
         )
+        op.create_foreign_key('app_user_role_id_fkey', 'app_user', 'roles',
+                              ['role_id'], ['id'])
+        op.create_index('ix_app_user_role_id', 'app_user', ['role_id'])
 
     # 4) 写入内置角色（幂等：key 冲突跳过）
     for key, rid in BUILTIN.items():
