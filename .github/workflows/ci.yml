@@ -79,11 +79,14 @@ jobs:
       - name: Import app (catch import-time errors)
         run: uv run python -c "from app.main import app; print('app import ok:', app.title)"
 
-      # P1-13：代码质量 / 依赖安全扫描（非阻塞，仅报告不阻断流水线）
-      - name: Lint (ruff, non-blocking)
-        continue-on-error: true
+      # 代码质量门禁：ruff 走项目 ruff.toml（当前锁定 pyflakes/F 规则），
+      # 作为**阻塞**关卡——任何未定义名 / 未使用导入都会让流水线失败，
+      # 防止此类硬错误合入主干。
+      - name: Lint (ruff, blocking)
         run: uvx ruff@latest check app
 
+      # 依赖安全扫描：仍保持非阻塞（continue-on-error）——仅出报告 + 每周看，
+      # 不阻断正常发布（偶有传递依赖的 advisory 需人工研判是否真受影响）。
       - name: Dependency audit (pip-audit, non-blocking)
         continue-on-error: true
         run: uv run --with pip-audit pip-audit

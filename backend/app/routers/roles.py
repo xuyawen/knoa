@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rbac import PERMISSION_KEYS
-from app.core.security import get_current_user, require_permission
+from app.core.security import require_permission
 from app.core.rbac import Perm
 from app.db import Role, RolePermission, User
 from app.deps import get_db

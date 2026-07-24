@@ -33,11 +33,13 @@ from app.core.security import (
     require_permission,
 )
 from app.core.rbac import Perm
+from app.core.ratelimit import rate_limit
 from app.db import DocChunk, Document, DocumentTask, KBPermission, KnowledgeBase, User
 from app.deps import get_db, get_embedder, get_llm, get_es
 from app.models.common import PaginatedOut
 from app.models.knowledge import (
     AIReviewOut,
+    CamelModel,
     DocumentDetailOut,
     DocumentOut,
     DocumentUploadIn,
@@ -53,6 +55,46 @@ from app.models.knowledge import (
 from app.models.operation_log import record_operation
 
 logger = logging.getLogger(__name__)
+
+
+class KBMemberOut(CamelModel):
+    userId: str
+    username: str
+    displayName: str | None = None
+    level: str
+
+
+class KBMemberItem(CamelModel):
+    userId: str
+    level: str  # view | edit | admin
+
+
+class KBMembersUpdate(CamelModel):
+    members: list[KBMemberItem]
+
+
+async def _kb_members(db: AsyncSession, kb_id: str) -> list[dict]:
+    """汇总某 KB 的成员（含用户名/显示名/级别）。"""
+    perms = (
+        await db.execute(select(KBPermission).where(KBPermission.kb_id == kb_id))
+    ).scalars().all()
+    members: list[dict] = []
+    for p in perms:
+        u = (
+            await db.execute(select(User).where(User.id == p.user_id))
+        ).scalar_one_or_none()
+        if u is None:
+            continue
+        members.append(
+            KBMemberOut(
+                userId=str(u.id),
+                username=u.username,
+                displayName=u.display_name,
+                level=p.level,
+            ).model_dump(by_alias=True)
+        )
+    return members
+
 
 router = APIRouter()
 
@@ -399,6 +441,7 @@ async def upload_document(
     payload: DocumentUploadIn,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_kb_access("edit")),
+    _rl: None = Depends(rate_limit(20, 60, "upload")),  # 每用户 60s 内最多 20 次上传
 ):
     """上传单篇文档（.md / .txt / .docx / .pdf）—— 方案 A（延迟摄入）。
 
@@ -929,6 +972,53 @@ async def update_knowledge_base(
         id=kb.id, name=kb.name, icon=kb.icon, description=kb.description,
         tags=kb.tags or [], category=kb.category,
     )
+
+
+@router.get("/knowledge-bases/{kb_id}/members", response_model=dict)
+async def list_kb_members(
+    kb_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_kb_access("admin")),
+):
+    """列出某知识库的成员及权限级别（库 admin 或全局 admin 可见）。"""
+    return {"members": await _kb_members(db, kb_id)}
+
+
+@router.put("/knowledge-bases/{kb_id}/members", response_model=dict)
+async def set_kb_members(
+    kb_id: str,
+    payload: KBMembersUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_kb_access("admin")),
+):
+    """全量设置某 KB 的成员（覆盖式）。库 admin 或全局 admin 可操作。
+
+    - 同一用户按最高级别去重；级别须为 view/edit/admin。
+    - 所有 userId 必须存在；至少需保留一名 admin，避免库被锁死无人可管。
+    """
+    seen: dict[uuid.UUID, str] = {}
+    for m in payload.members:
+        try:
+            uid = uuid.UUID(m.userId)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"非法的 userId: {m.userId}")
+        if m.level not in LEVEL_ORDER:
+            raise HTTPException(status_code=400, detail=f"非法的权限级别: {m.level}")
+        if uid not in seen or LEVEL_ORDER[m.level] > LEVEL_ORDER[seen[uid]]:
+            seen[uid] = m.level
+    for uid in seen:
+        u = (
+            await db.execute(select(User).where(User.id == uid))
+        ).scalar_one_or_none()
+        if u is None:
+            raise HTTPException(status_code=400, detail=f"用户不存在: {uid}")
+    if not any(lv == "admin" for lv in seen.values()):
+        raise HTTPException(status_code=400, detail="知识库至少需保留一名 admin 成员")
+    await db.execute(delete(KBPermission).where(KBPermission.kb_id == kb_id))
+    for uid, lv in seen.items():
+        db.add(KBPermission(kb_id=kb_id, user_id=uid, level=lv))
+    await db.commit()
+    return {"members": await _kb_members(db, kb_id)}
 
 
 @router.delete("/knowledge-bases/{kb_id}", status_code=204)

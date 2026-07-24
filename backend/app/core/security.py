@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.rbac import PERMISSION_KEYS
-from app.db import KBPermission, KnowledgeBase, Role, RolePermission, User
+from app.db import KBPermission, KnowledgeBase, RolePermission, User
 from app.deps import get_db, get_redis
 
 logger = logging.getLogger("knoa.security")

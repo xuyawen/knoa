@@ -16,6 +16,7 @@ from app.core.security import (
     require_permission,
 )
 from app.core.rbac import Perm
+from app.core.ratelimit import rate_limit
 from app.core.store.redis_store import RedisStore
 from app.config import settings
 from app.db import User
@@ -37,6 +38,7 @@ async def ask(
     redis: RedisStore = Depends(get_redis),
     user: User = Depends(get_current_user),
     _: User = Depends(require_permission(Perm.AI_QA)),
+    _rl: None = Depends(rate_limit(10, 60, "ask")),  # 每用户 60s 内最多 10 次问答
 ):
     # 显式取 rid（sse-starlette 在独立 task 跑生成器，contextvars 可能不传播）
     rid = getattr(request.state, "request_id", "-")
