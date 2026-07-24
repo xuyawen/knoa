@@ -1,4 +1,14 @@
-import type { Paginated, TokenOut, UserCreate, UserOut, UserUpdate } from '@/types/api'
+import type {
+  Paginated,
+  RoleCreate,
+  RoleOut,
+  RolePermissions,
+  RoleUpdate,
+  TokenOut,
+  UserCreate,
+  UserOut,
+  UserUpdate,
+} from '@/types/api'
 import { authHeaders } from './http'
 
 const HTTP_MSG: Record<number, string> = {
@@ -106,4 +116,55 @@ export async function changePassword(oldPassword: string, newPassword: string): 
     body: JSON.stringify({ oldPassword, newPassword }),
   })
   if (!resp.ok) await throwHttpError(resp)
+}
+
+/* ── 角色管理（仅用户管理员） ── */
+
+/** 角色列表（含权限集合）。 */
+export async function getRoles(): Promise<RoleOut[]> {
+  const resp = await fetch('/api/roles', { headers: authHeaders() })
+  if (!resp.ok) await throwHttpError(resp)
+  return resp.json()
+}
+
+/** 新建自定义角色。 */
+export async function createRole(payload: RoleCreate): Promise<RoleOut> {
+  const resp = await fetch('/api/roles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) await throwHttpError(resp)
+  return resp.json()
+}
+
+/** 编辑角色名称/描述。 */
+export async function updateRole(id: string, payload: RoleUpdate): Promise<RoleOut> {
+  const resp = await fetch(`/api/roles/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) await throwHttpError(resp)
+  return resp.json()
+}
+
+/** 设置某角色的权限集合（全量覆盖）。 */
+export async function setRolePermissions(id: string, payload: RolePermissions): Promise<RoleOut> {
+  const resp = await fetch(`/api/roles/${id}/permissions`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) await throwHttpError(resp)
+  return resp.json()
+}
+
+/** 删除自定义角色。 */
+export async function deleteRole(id: string): Promise<void> {
+  const resp = await fetch(`/api/roles/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+  if (!resp.ok && resp.status !== 204) await throwHttpError(resp)
 }

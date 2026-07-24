@@ -9,7 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_user, require_roles
+from app.core.security import get_current_user, require_permission
+from app.core.rbac import Perm
 from app.db import Department, Document
 from app.deps import get_db
 from app.models.department import (
@@ -78,7 +79,7 @@ async def list_departments(
 async def create_department(
     payload: DepartmentCreateIn,
     db: AsyncSession = Depends(get_db),
-    _: Department = Depends(require_roles("admin")),
+    _: Department = Depends(require_permission(Perm.SYS_SETTINGS)),
 ):
     parent_id = None
     if payload.parent_id:
@@ -103,7 +104,7 @@ async def update_department(
     dept_id: str,
     payload: DepartmentUpdateIn,
     db: AsyncSession = Depends(get_db),
-    _: Department = Depends(require_roles("admin")),
+    _: Department = Depends(require_permission(Perm.SYS_SETTINGS)),
 ):
     d = await db.scalar(select(Department).where(Department.id == uuid.UUID(dept_id)))
     if d is None:
@@ -147,7 +148,7 @@ async def update_department(
 async def delete_department(
     dept_id: str,
     db: AsyncSession = Depends(get_db),
-    _: Department = Depends(require_roles("admin")),
+    _: Department = Depends(require_permission(Perm.SYS_SETTINGS)),
 ):
     d = await db.scalar(select(Department).where(Department.id == uuid.UUID(dept_id)))
     if d is None:

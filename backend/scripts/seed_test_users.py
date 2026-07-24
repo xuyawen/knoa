@@ -11,8 +11,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select, func
-from app.database import AsyncSessionLocal
-from app.db import User
+from app.database import AsyncSessionLocal, _seed_roles
+from app.db import Role, User
 
 
 # 10 个测试账号：覆盖 admin/editor/viewer、启用/停用、
@@ -119,6 +119,12 @@ async def main() -> None:
     created = 0
     skipped = 0
     async with AsyncSessionLocal() as session:
+        # 确保内置角色已存在（首启可能尚未经应用 lifespan 播种）
+        await _seed_roles()
+        roles = {
+            r.key: r.id
+            for r in (await session.execute(select(Role))).scalars().all()
+        }
         for u in SEED_USERS:
             exists = await session.scalar(
                 select(func.count()).select_from(User).where(User.username == u["username"])
@@ -127,12 +133,17 @@ async def main() -> None:
                 skipped += 1
                 print(f"[skip] {u['username']} 已存在")
                 continue
+            role_key = u.get("role", "viewer")
+            role_id = roles.get(role_key)
+            if role_id is None:
+                print(f"[warn] {u['username']} 角色 {role_key} 不存在，跳过")
+                continue
             session.add(
                 User(
                     username=u["username"],
                     password_hash=User.hash_password(PASSWORD),
                     display_name=u.get("display_name"),
-                    role=u.get("role", "viewer"),
+                    role_id=role_id,
                     is_active=u.get("is_active", True),
                     preferred_model=u.get("preferred_model"),
                     tts_enabled=u.get("tts_enabled", False),
@@ -142,7 +153,7 @@ async def main() -> None:
                 )
             )
             created += 1
-            print(f"[add ] {u['username']} ({u['role']}, active={u.get('is_active', True)})")
+            print(f"[add ] {u['username']} ({role_key}, active={u.get('is_active', True)})")
         await session.commit()
 
     print(f"\n完成：新增 {created} 个，跳过 {skipped} 个。统一密码：{PASSWORD}")

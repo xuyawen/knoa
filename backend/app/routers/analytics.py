@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import Document, OperationLog, User
+from app.db import Document, OperationLog, Role, User
 from app.deps import get_db
 from app.core.security import get_current_user
 
@@ -195,7 +195,10 @@ async def user_stats(
     ) or 0
 
     by_role = (await db.execute(
-        select(User.role, func.count()).group_by(User.role).order_by(func.count().desc())
+        select(Role.key, func.count())
+        .join(Role, Role.id == User.role_id)
+        .group_by(Role.key)
+        .order_by(func.count().desc())
     )).all()
     by_status = (await db.execute(
         select(User.is_active, func.count()).group_by(User.is_active).order_by(func.count().desc())

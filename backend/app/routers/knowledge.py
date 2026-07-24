@@ -30,8 +30,9 @@ from app.core.security import (
     get_kb_permission_level,
     LEVEL_ORDER,
     require_kb_access,
-    require_roles,
+    require_permission,
 )
+from app.core.rbac import Perm
 from app.db import DocChunk, Document, DocumentTask, KBPermission, KnowledgeBase, User
 from app.deps import get_db, get_embedder, get_llm, get_es
 from app.models.common import PaginatedOut
@@ -213,7 +214,7 @@ async def get_knowledge_bases(
 async def create_knowledge_base(
     payload: KBCreateIn,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_roles("admin", "editor")),
+    user: User = Depends(require_permission(Perm.DOC_UPLOAD)),
 ):
     """新建知识库。创建者自动获得该库的 admin 级库级权限（隔离起点）。"""
     kb_id = f"kb_{uuid.uuid4().hex[:8]}"
@@ -947,7 +948,7 @@ async def delete_knowledge_base(
 async def reorder_knowledge_bases(
     payload: KBReorderIn,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    _: User = Depends(require_permission(Perm.SYS_SETTINGS)),
 ):
     """拖拽排序：前端传回当前列表的完整 id 顺序，后端按数组下标赋 order。
 
@@ -967,7 +968,7 @@ async def reorder_knowledge_bases(
 async def batch_delete_knowledge_bases(
     payload: KBBatchDeleteIn,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    _: User = Depends(require_permission(Perm.SYS_SETTINGS)),
 ):
     """批量删除知识库：对每个 id 走与单删相同的级联清理。"""
     for kb_id in payload.ids:

@@ -12,7 +12,8 @@ from app.db import Announcement, User, UserAnnouncementRead
 from app.deps import get_db
 from app.models.announcement import AnnouncementOut
 from app.models.common import PaginatedOut
-from app.core.security import get_current_user, require_roles
+from app.core.security import get_current_user, require_permission
+from app.core.rbac import Perm
 
 router = APIRouter()
 
@@ -99,7 +100,7 @@ async def mark_announcement_read(
 async def create_announcement(
     payload: AnnouncementCreate,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(require_roles("admin")),
+    _: None = Depends(require_permission(Perm.SYS_SETTINGS)),
 ):
     a = Announcement(
         id=uuid.uuid4(),
@@ -119,7 +120,7 @@ async def update_announcement(
     ann_id: str,
     payload: AnnouncementUpdate,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(require_roles("admin")),
+    _: None = Depends(require_permission(Perm.SYS_SETTINGS)),
 ):
     a = await db.scalar(select(Announcement).where(Announcement.id == ann_id))
     if a is None:
@@ -141,7 +142,7 @@ async def update_announcement(
 async def delete_announcement(
     ann_id: str,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(require_roles("admin")),
+    _: None = Depends(require_permission(Perm.SYS_SETTINGS)),
 ):
     a = await db.scalar(select(Announcement).where(Announcement.id == ann_id))
     if a is None:

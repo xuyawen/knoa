@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 权限管理（对应架构图 #7）：真实用户/角色管理 + 后端固定 RBAC 策略参考矩阵。
+// 用户与角色管理（对应架构图 #7）：真实用户/角色管理 + 角色权限参考矩阵。
+// 角色从服务端动态加载，用户表单的角色选择亦来自该列表（支持自定义角色）。
 import { ref, computed, onMounted, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
@@ -8,17 +9,36 @@ import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
-import { getUserList, createUser, updateUser, deleteUser } from '@/api/auth'
-import type { Paginated, UserOut, UserCreate, UserUpdate } from '@/types/api'
+import { getRoles, getUserList, createUser, updateUser, deleteUser } from '@/api/auth'
+import type { Paginated, RoleOut, UserOut, UserCreate, UserUpdate } from '@/types/api'
+import { PERMISSIONS } from '@/types/api'
 
 const auth = useAuthStore()
 const toast = useToastStore()
+
+/* ---------- 角色列表（动态，用于下拉与矩阵） ---------- */
+const roles = ref<RoleOut[]>([])
+async function loadRoles() {
+  try {
+    roles.value = await getRoles()
+  } catch (e: any) {
+    toast.error(`加载角色失败：${e?.message || e}`)
+  }
+}
+const roleNameMap = computed<Record<string, string>>(() => {
+  const m: Record<string, string> = {}
+  for (const r of roles.value) m[r.key] = r.name
+  return m
+})
+function roleLabel(key: string) {
+  return roleNameMap.value[key] || key
+}
 
 /* ---------- 用户列表（服务端分页） ---------- */
 const usersData = ref<Paginated<UserOut> | null>(null)
 const loading = ref(false)
 const searchQuery = ref('')
-const roleFilter = ref<'all' | 'admin' | 'editor' | 'viewer'>('all')
+const roleFilter = ref<string>('all')
 const currentPage = ref(1)
 const pageSize = ref(20)
 
@@ -40,7 +60,10 @@ async function loadUsers(resetPage = false) {
   }
 }
 
-onMounted(() => loadUsers())
+onMounted(() => {
+  loadRoles()
+  loadUsers()
+})
 
 const pagedUsers = computed(() => usersData.value?.items ?? [])
 const totalUsers = computed(() => usersData.value?.total ?? 0)
@@ -70,17 +93,17 @@ watch([roleFilter, pageSize], () => loadUsers(true))
 function roleClass(r: string) {
   return r === 'admin' ? 'role-admin' : r === 'editor' ? 'role-editor' : 'role-viewer'
 }
-const ROLE_LABEL: Record<string, string> = { admin: '管理员', editor: '编辑者', viewer: '访客' }
 
 /* ---------- 新建 / 编辑 ---------- */
 const showModal = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
-const form = ref({ username: '', displayName: '', role: 'viewer', password: '', isActive: true, email: '', department: '', employeeId: '' })
+const form = ref({ username: '', displayName: '', roleId: '', password: '', isActive: true, email: '', department: '', employeeId: '' })
 
 function openCreate() {
   editingId.value = null
-  form.value = { username: '', displayName: '', role: 'viewer', password: '', isActive: true, email: '', department: '', employeeId: '' }
+  const def = roles.value[0]?.id ?? ''
+  form.value = { username: '', displayName: '', roleId: def, password: '', isActive: true, email: '', department: '', employeeId: '' }
   showModal.value = true
 }
 function openEdit(u: UserOut) {
@@ -88,7 +111,7 @@ function openEdit(u: UserOut) {
   form.value = {
     username: u.username,
     displayName: u.displayName || '',
-    role: u.role,
+    roleId: u.roleId,
     password: '',
     isActive: u.isActive,
     email: u.email || '',
@@ -103,6 +126,10 @@ async function save() {
     toast.warning('用户名必填')
     return
   }
+  if (!form.value.roleId) {
+    toast.warning('请选择角色')
+    return
+  }
   if (!editingId.value && !form.value.password) {
     toast.warning('请设置初始密码')
     return
@@ -112,7 +139,7 @@ async function save() {
     if (editingId.value) {
       const payload: UserUpdate = {
         displayName: form.value.displayName || null,
-        role: form.value.role,
+        roleId: form.value.roleId,
         isActive: form.value.isActive,
         email: form.value.email || null,
         department: form.value.department || null,
@@ -126,7 +153,7 @@ async function save() {
         username: form.value.username.trim(),
         password: form.value.password,
         displayName: form.value.displayName || null,
-        role: form.value.role,
+        roleId: form.value.roleId,
         email: form.value.email || null,
         department: form.value.department || null,
         employeeId: form.value.employeeId || null,
@@ -165,17 +192,8 @@ async function confirmDelete() {
   }
 }
 
-/* ---------- 筛选项 / 角色分段（常量） ---------- */
-const roleFilterOptions = ['all', 'admin', 'editor', 'viewer'] as const
-const roleSegOptions = ['viewer', 'editor', 'admin'] as const
-
-/* ---------- 静态 RBAC 参考矩阵（后端固定策略） ---------- */
-const modules = ['知识库查看', '文档上传', '文档编辑', '文档删除', 'AI 问答', '图谱管理', '用户管理', '系统设置']
-const roleMatrix = [
-  { name: '管理员', key: 'admin', perms: [true, true, true, true, true, true, true, true] },
-  { name: '编辑者', key: 'editor', perms: [true, true, true, false, true, true, false, false] },
-  { name: '访客', key: 'viewer', perms: [true, false, false, false, true, false, false, false] },
-]
+/* ---------- 筛选 / 矩阵 ---------- */
+const roleFilterOptions = computed(() => ['all', ...roles.value.map((r) => r.key)])
 </script>
 
 <template>
@@ -203,7 +221,7 @@ const roleMatrix = [
               class="role-tab"
               :class="{ active: roleFilter === r }"
               @click="roleFilter = r; currentPage = 1"
-            >{{ r === 'all' ? '全部' : ROLE_LABEL[r] }}</button>
+            >{{ r === 'all' ? '全部' : roleLabel(r) }}</button>
           </div>
           <button class="icon-btn" title="刷新" :disabled="loading" @click="() => loadUsers()">
             <Icon name="refresh" :size="15" :class="{ spin: loading }" />
@@ -226,7 +244,7 @@ const roleMatrix = [
             <template v-else-if="col.key === 'department'">{{ row.department || '—' }}</template>
             <template v-else-if="col.key === 'employeeId'">{{ row.employeeId || '—' }}</template>
             <template v-else-if="col.key === 'role'">
-              <span class="role-badge" :class="roleClass(row.role)">{{ ROLE_LABEL[row.role] || row.role }}</span>
+              <span class="role-badge" :class="roleClass(row.role)">{{ roleLabel(row.role) }}</span>
             </template>
             <template v-else-if="col.key === 'isActive'">
               <span class="status-badge" :class="row.isActive ? 'success' : 'danger'">{{ row.isActive ? '启用' : '停用' }}</span>
@@ -251,26 +269,27 @@ const roleMatrix = [
         />
       </section>
 
-      <!-- 角色权限矩阵（后端固定策略参考） -->
+      <!-- 角色权限矩阵（来自服务端真实角色数据，仅供参考；编辑请前往「角色管理」） -->
       <aside class="card perm-matrix">
         <h3 class="perm-h">角色权限矩阵</h3>
         <table class="mtx">
           <thead>
             <tr>
               <th>功能模块</th>
-              <th v-for="r in roleMatrix" :key="r.key">{{ r.name }}</th>
+              <th v-for="r in roles" :key="r.id">{{ r.name }}<span v-if="r.isBuiltin" class="builtin-tag">内置</span></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(m, mi) in modules" :key="mi">
-              <td class="mtx-mod">{{ m }}</td>
-              <td v-for="r in roleMatrix" :key="r.key">
-                <span class="sw" :class="r.perms[mi] ? 'on' : 'off'"><span class="knob" /></span>
+            <tr v-for="p in PERMISSIONS" :key="p.key">
+              <td class="mtx-mod">{{ p.label }}</td>
+              <td v-for="r in roles" :key="r.id">
+                <span class="sw" :class="r.permissions.includes(p.key) ? 'on' : 'off'"><span class="knob" /></span>
               </td>
             </tr>
           </tbody>
         </table>
-        <p class="perm-note">矩阵为后端固定 RBAC 策略（角色→能力映射），与用户管理实时同步；具体能力由服务端强制执行。</p>
+        <p class="perm-note">矩阵为服务端角色→权限映射的实时快照；调整权限请前往「角色管理」页。</p>
+        <router-link to="/permission/roles" class="matrix-link">前往角色管理 →</router-link>
       </aside>
     </div>
 
@@ -303,15 +322,9 @@ const roleMatrix = [
       </div>
       <div class="form-row">
         <label class="form-label">角色</label>
-        <div class="seg">
-          <button
-            v-for="r in roleSegOptions"
-            :key="r"
-            class="seg-btn"
-            :class="{ active: form.role === r }"
-            @click="form.role = r"
-          >{{ ROLE_LABEL[r] }}</button>
-        </div>
+        <select v-model="form.roleId" class="form-input">
+          <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}（{{ r.key }}）</option>
+        </select>
       </div>
       <div class="form-row">
         <label class="form-label">{{ editingId ? '重置密码' : '初始密码' }}</label>
@@ -434,6 +447,14 @@ const roleMatrix = [
 .sw.off { background: var(--border-strong); }
 .sw.off .knob { transform: translateX(0); }
 .perm-note { margin: 14px 0 0; font-size: 12px; color: var(--text-tertiary); line-height: 1.6; }
+.builtin-tag {
+  display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: var(--radius-pill);
+  font-size: 10px; font-weight: 500; color: var(--accent-blue); background: var(--accent-blue-soft);
+}
+.matrix-link {
+  display: inline-block; margin-top: 12px; font-size: 13px; color: var(--brand); text-decoration: none;
+}
+.matrix-link:hover { text-decoration: underline; }
 
 /* ---- 表单 ---- */
 .form-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }

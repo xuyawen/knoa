@@ -147,6 +147,52 @@ async def _seed_departments() -> None:
         await session.commit()
 
 
+async def _seed_roles() -> None:
+    """首次启动灌入内置角色及其默认权限（幂等）。
+
+    覆盖两条路径：
+    - Alembic 迁移未完成 roles 表数据（极少数情况）；
+    - create_all 兜底建表（无迁移），此时 roles 表为空需要此处补齐。
+    重复执行靠 key 唯一约束跳过，零副作用。
+    """
+    from app.core.rbac import BUILTIN_ROLES
+    from app.db import Role, RolePermission
+
+    async with AsyncSessionLocal() as session:
+        existing = {
+            r.key: r.id
+            for r in (await session.execute(select(Role))).scalars().all()
+        }
+        for idx, (key, spec) in enumerate(BUILTIN_ROLES.items()):
+            if key in existing:
+                role_id = existing[key]
+            else:
+                role = Role(
+                    id=uuid.uuid4(),
+                    key=key,
+                    name=spec["name"],
+                    description=spec["description"],
+                    is_builtin=True,
+                    sort_order=idx,
+                )
+                session.add(role)
+                await session.flush()
+                role_id = role.id
+            # 内置角色权限全量对齐（允许用户此前在 UI 改过，这里只在缺失时补，不改既有）
+            have = {
+                p.permission_key
+                for p in (
+                    await session.execute(
+                        select(RolePermission).where(RolePermission.role_id == role_id)
+                    )
+                ).scalars().all()
+            }
+            for pk in spec["perms"]:
+                if pk not in have:
+                    session.add(RolePermission(role_id=role_id, permission_key=pk))
+        await session.commit()
+
+
 async def init_db():
     """建表：优先走 Alembic 版本化迁移；装不上/连不上时回退 create_all。
 
@@ -169,3 +215,5 @@ async def init_db():
         await _backfill_doc_fields(conn)
     # 灌入基础部门数据（幂等）
     await _seed_departments()
+    # 灌入内置角色及其默认权限（幂等）
+    await _seed_roles()

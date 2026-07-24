@@ -76,6 +76,7 @@ interface SubItem {
   icon?: string
   to: string                 // 点击跳转的路由
   activeNames: string[]      // 匹配哪些路由名时高亮（parent 与 detail 可能多个）
+  adminOnly?: boolean        // 仅管理员可见
 }
 
 const subMenus: Record<string, SubItem[]> = {
@@ -110,13 +111,15 @@ const subMenus: Record<string, SubItem[]> = {
   ],
   permission: [
     { label: '用户管理', icon: 'users', to: '/permission', activeNames: ['permission'] },
+    { label: '角色管理', icon: 'shield', to: '/permission/roles', activeNames: ['perm-roles'], adminOnly: true },
     { label: '部门管理', icon: 'team', to: '/permission/departments', activeNames: ['perm-departments'] },
   ],
 }
 
 const currentSubItems = computed<SubItem[]>(() => {
   const name = route.name as string
-  return Object.values(subMenus).find((g) => g.some((i) => i.activeNames.includes(name))) ?? []
+  const group = Object.values(subMenus).find((g) => g.some((i) => i.activeNames.includes(name))) ?? []
+  return group.filter((i) => !i.adminOnly || auth.isAdmin)
 })
 
 function isSubActive(item: SubItem): boolean {

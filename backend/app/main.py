@@ -19,7 +19,7 @@ from app.core.metrics import (
 from app.core.security import create_access_token, decode_access_token, extract_token
 from app.database import AsyncSessionLocal
 from app.deps import get_es
-from app.db import ChatSession, User
+from app.db import ChatSession, Role, User
 from app.routers import (
     analytics,
     announcements,
@@ -35,6 +35,7 @@ from app.routers import (
     memory,
     metrics,
     operations,
+    roles,
     sessions,
     sources,
     tasks,
@@ -54,6 +55,9 @@ async def lifespan(app: FastAPI):
     await init_db()
     # Phase 2: 首次启动且无任何用户时，自动创建初始管理员（幂等）
     async with AsyncSessionLocal() as session:
+        # 内置 admin 角色 id（_seed_roles 已保证存在）
+        admin_role = await session.scalar(select(Role).where(Role.key == "admin"))
+        admin_role_id = admin_role.id if admin_role else None
         admin = await session.scalar(
             select(User).where(User.username == settings.ADMIN_USERNAME)
         )
@@ -65,7 +69,7 @@ async def lifespan(app: FastAPI):
                 username=settings.ADMIN_USERNAME,
                 password_hash=User.hash_password(settings.ADMIN_PASSWORD),
                 display_name=settings.ADMIN_DISPLAY_NAME,
-                role="admin",
+                role_id=admin_role_id,
                 email=settings.ADMIN_EMAIL,
                 department=settings.ADMIN_DEPARTMENT,
                 employee_id=settings.ADMIN_EMPLOYEE_ID,
@@ -223,4 +227,5 @@ app.include_router(tasks.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
 app.include_router(operations.router, prefix="/api")
 app.include_router(announcements.router, prefix="/api")
+app.include_router(roles.router, prefix="/api")
 app.include_router(oss.router, prefix="/api")

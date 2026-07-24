@@ -130,16 +130,23 @@ class MessageFeedback(Base):
 
 
 class User(Base):
-    """系统用户（Phase 2 RBAC）。单公司内使用，角色分 admin/editor/viewer。"""
+    """系统用户（Phase 2 RBAC）。单公司内使用，角色通过 role_id 关联 roles 表。"""
     __tablename__ = "app_user"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # 全局角色：admin(管用户+全部库) | editor(建库/传文档) | viewer(仅问答)
-    role: Mapped[str] = mapped_column(String(20), default="viewer", server_default="viewer")
+    # 全局角色：外键关联 roles 表（admin/editor/viewer 为内置角色）
+    role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id"), index=True)
+    role_ref: Mapped["Role"] = relationship("Role", lazy="joined")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+    @property
+    def role(self) -> str:
+        """兼容只读别名：返回关联角色的 key（如 'admin'）。"""
+        return self.role_ref.key if self.role_ref else "viewer"
+
     # 系统设置：用户偏好的问答模型（透传给 ask→pipeline→agent→llm）；为空走默认
     preferred_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 语音播报开关：前端朗读按钮是否可用
@@ -189,6 +196,30 @@ class KBPermission(Base):
     # 库级权限：admin(管理该库) | edit(可上传/删文档) | view(仅阅读/问答)
     level: Mapped[str] = mapped_column(String(20), default="view", server_default="view")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Role(Base):
+    """全局角色定义。内置角色（is_builtin=True）不可删除，自定义角色可增删。"""
+    __tablename__ = "roles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # 角色 key（如 admin/editor/viewer/custom_xxx），全局唯一，用于代码引用
+    key: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(50))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RolePermission(Base):
+    """角色→权限关联（多对多）。permission_key 取自 app.core.rbac.PERMISSIONS。"""
+    __tablename__ = "role_permission"
+
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True
+    )
+    permission_key: Mapped[str] = mapped_column(String(50), primary_key=True)
 
 
 class Memory(Base):

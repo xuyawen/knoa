@@ -240,7 +240,8 @@ export interface UserOut {
   id: string
   username: string
   displayName: string | null
-  role: string         // admin | editor | viewer
+  role: string         // 关联角色的 key（admin | editor | viewer | ...）
+  roleId: string       // 关联角色 id（外键）
   isActive: boolean
   createdAt: string | null
   preferredModel?: string | null    // P8：偏好问答模型
@@ -260,7 +261,7 @@ export interface UserCreate {
   username: string
   password: string
   displayName?: string | null
-  role?: string       // 默认 viewer
+  roleId: string       // 关联角色 id
   email?: string | null
   department?: string | null
   employeeId?: string | null
@@ -268,13 +269,58 @@ export interface UserCreate {
 
 export interface UserUpdate {
   displayName?: string | null
-  role?: string
+  roleId?: string
   isActive?: boolean
   password?: string
   email?: string | null
   department?: string | null
   employeeId?: string | null
 }
+
+/** 角色定义（含权限集合）。 */
+export interface RoleOut {
+  id: string
+  key: string
+  name: string
+  description: string | null
+  isBuiltin: boolean
+  sortOrder: number
+  permissions: string[]
+}
+
+export interface RoleCreate {
+  name: string
+  key?: string
+  description?: string | null
+  permissions: string[]
+}
+
+export interface RoleUpdate {
+  name?: string
+  description?: string | null
+}
+
+export interface RolePermissions {
+  permissions: string[]
+}
+
+/** 权限清单（与后端 app.core.rbac.PERMISSIONS 对应）。 */
+export interface PermissionDef {
+  key: string
+  label: string
+  group: string
+}
+
+export const PERMISSIONS: PermissionDef[] = [
+  { key: 'kb_view', label: '知识库查看', group: '知识库' },
+  { key: 'doc_upload', label: '文档上传', group: '知识库' },
+  { key: 'doc_edit', label: '文档编辑', group: '知识库' },
+  { key: 'doc_delete', label: '文档删除', group: '知识库' },
+  { key: 'ai_qa', label: 'AI 问答', group: '问答' },
+  { key: 'graph_manage', label: '图谱管理', group: '知识图谱' },
+  { key: 'user_manage', label: '用户管理', group: '系统' },
+  { key: 'sys_settings', label: '系统设置', group: '系统' },
+]
 
 export type SSEEvent =
   | { event: 'thinking'; data: ThinkingStep }

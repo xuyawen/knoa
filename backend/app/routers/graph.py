@@ -18,7 +18,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_user, get_accessible_kb_ids
+from app.core.security import get_current_user, get_accessible_kb_ids, require_permission
+from app.core.rbac import Perm
 from app.db import KGEdge, KGNode, KnowledgeBase, User
 from app.deps import get_db
 
@@ -53,6 +54,7 @@ async def get_graph(
     limit: int = Query(default=500, ge=1, le=3000, description="最多返回节点数"),
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(get_current_user),
+    _perm: User = Depends(require_permission(Perm.GRAPH_MANAGE)),
 ) -> dict[str, Any]:
     """返回图谱节点/边 + 统计。node_type/biz_category/from/to 真正参与查询。"""
     # RBAC：按用户可见 KB 范围过滤，避免越权读取全公司图谱
@@ -118,6 +120,7 @@ async def graph_hot_nodes(
     limit: int = Query(default=5, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(get_current_user),
+    _perm: User = Depends(require_permission(Perm.GRAPH_MANAGE)),
 ) -> list[dict[str, Any]]:
     """热门实体 TopN：按度数（被关系边引用次数）近似热度。"""
     allowed = await get_accessible_kb_ids(db, _current)
@@ -149,6 +152,7 @@ async def graph_recent_nodes(
     limit: int = Query(default=5, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(get_current_user),
+    _perm: User = Depends(require_permission(Perm.GRAPH_MANAGE)),
 ) -> list[dict[str, Any]]:
     """最近更新实体 TopN：按 created_at 倒序。"""
     allowed = await get_accessible_kb_ids(db, _current)
@@ -169,6 +173,7 @@ async def graph_export(
     fmt: str = Query(default="json", pattern="^(json|gexf)$"),
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(get_current_user),
+    _perm: User = Depends(require_permission(Perm.GRAPH_MANAGE)),
 ) -> JSONResponse:
     """导出完整图谱 {nodes, edges}。json 直接返回；gexf 返回 GEXF XML 供 Gephi 等。"""
     allowed = await get_accessible_kb_ids(db, _current)

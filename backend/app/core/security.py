@@ -18,7 +18,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db import KBPermission, KnowledgeBase, User
+from app.core.rbac import PERMISSION_KEYS
+from app.db import KBPermission, KnowledgeBase, Role, RolePermission, User
 from app.deps import get_db, get_redis
 
 logger = logging.getLogger("knoa.security")
@@ -121,10 +122,41 @@ async def get_current_user(
 
 
 def require_roles(*roles: str) -> Callable[..., Awaitable[User]]:
-    """依赖工厂：要求当前用户角色在 roles 内，否则 403。"""
+    """依赖工厂：要求当前用户角色在 roles 内，否则 403。
+
+    仅用于内置角色的便捷判断（如「是否为 admin」）。更细的能力控制请使用
+    require_permission（基于角色→权限映射，可在 UI 配置）。
+    """
 
     async def _dep(user: User = Depends(get_current_user)) -> User:
         if user.role not in roles:
+            raise HTTPException(status_code=403, detail="权限不足")
+        return user
+
+    return _dep
+
+
+async def get_role_permissions(db: AsyncSession, role_id: uuid.UUID) -> set[str]:
+    """返回某角色拥有的全部 permission_key 集合。"""
+    rows = (
+        await db.execute(
+            select(RolePermission.permission_key).where(RolePermission.role_id == role_id)
+        )
+    ).scalars().all()
+    return set(rows)
+
+
+def require_permission(permission: str) -> Callable[..., Awaitable[User]]:
+    """依赖工厂：要求当前用户所属角色拥有指定权限，否则 403。"""
+
+    async def _dep(
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        if permission not in PERMISSION_KEYS:
+            raise HTTPException(status_code=500, detail=f"未知权限: {permission}")
+        perms = await get_role_permissions(db, user.role_id)
+        if permission not in perms:
             raise HTTPException(status_code=403, detail="权限不足")
         return user
 

@@ -13,10 +13,12 @@ from app.core.security import (
     decode_access_token,
     extract_token,
     get_current_user,
-    require_roles,
+    get_role_permissions,
+    require_permission,
     revoke_token,
 )
-from app.db import ChatSession, KBPermission, Memory, User
+from app.core.rbac import Perm
+from app.db import ChatSession, KBPermission, Memory, Role, User
 from app.deps import get_db, get_redis
 from app.models.operation_log import record_operation
 from app.config import settings
@@ -38,12 +40,22 @@ router = APIRouter()
 DUMMY_HASH = User.hash_password("knoa-timing-dummy")
 
 
+async def _resolve_role_id(db: AsyncSession, role_id: str) -> uuid.UUID:
+    """校验 role_id 是否存在，不存在则 400。"""
+    rid = uuid.UUID(role_id) if isinstance(role_id, str) else role_id
+    role = await db.scalar(select(Role).where(Role.id == rid))
+    if role is None:
+        raise HTTPException(status_code=400, detail="角色不存在")
+    return rid
+
+
 def _to_out(u: User) -> UserOut:
     return UserOut(
         id=str(u.id),
         username=u.username,
         display_name=u.display_name,
         role=u.role,
+        role_id=str(u.role_id),
         is_active=u.is_active,
         created_at=u.created_at,
         preferred_model=u.preferred_model,
@@ -162,12 +174,21 @@ async def list_users(
     role: str | None = Query(default=None),
     q: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    _: User = Depends(require_permission(Perm.USER_MANAGE)),
 ):
-    """用户列表分页，支持角色/用户名/显示名搜索过滤。仅 admin 可见。"""
+    """用户列表分页，支持角色/用户名/显示名搜索过滤。仅用户管理员可见。"""
     stmt = select(User).order_by(User.created_at)
     if role:
-        stmt = stmt.where(User.role == role)
+        # role 过滤支持角色 key（如 'admin'）或角色 id
+        role_obj = await db.scalar(
+            select(Role).where((Role.key == role) | (Role.id == role))
+        )
+        if role_obj is None:
+            return {
+                "items": [], "total": 0, "page": page, "page_size": size,
+                "pages": 1,
+            }
+        stmt = stmt.where(User.role_id == role_obj.id)
     if q:
         like = f"%{q}%"
         stmt = stmt.where(or_(User.username.ilike(like), User.display_name.ilike(like)))
@@ -186,16 +207,17 @@ async def list_users(
 async def create_user(
     payload: UserCreateIn,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles("admin")),
+    _: User = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     if await db.scalar(select(User).where(User.username == payload.username)):
         raise HTTPException(status_code=409, detail="用户名已存在")
+    role_id = await _resolve_role_id(db, payload.role_id)
     u = User(
         id=uuid.uuid4(),
         username=payload.username,
         password_hash=User.hash_password(payload.password),
         display_name=payload.display_name,
-        role=payload.role,
+        role_id=role_id,
         email=payload.email,
         department=payload.department,
         employee_id=payload.employee_id,
@@ -216,22 +238,23 @@ async def update_user(
     u = await db.scalar(select(User).where(User.id == user_id))
     if u is None:
         raise HTTPException(status_code=404, detail="用户不存在")
-    # ponytail: 本人可改自己的 display_name；改他人或改角色/状态/密码需 admin
+    # ponytail: 本人可改自己的 display_name；改他人或改角色/状态/密码需用户管理员
     is_self = u.id == current.id
-    if not is_self and current.role != "admin":
+    if not is_self and not await _is_admin(current, db):
         raise HTTPException(status_code=403, detail="无权修改其他用户")
-    privileged = payload.role is not None or payload.is_active is not None or payload.password
-    if privileged and current.role != "admin":
+    privileged = payload.role_id is not None or payload.is_active is not None or payload.password
+    if privileged and not await _is_admin(current, db):
         raise HTTPException(status_code=403, detail="无权修改该字段")
     # 保护最后一个 admin：降级或停用当前 admin 时，必须仍有其他启用 admin
-    if current.role == "admin":
-        demoting = payload.role is not None and payload.role != "admin"
+    if await _is_admin(current, db):
+        demoting = payload.role_id is not None and payload.role_id != str(u.role_id)
         disabling = payload.is_active is False
         if u.role == "admin" and (demoting or disabling):
             other_active_admins = await db.scalar(
                 select(func.count())
                 .select_from(User)
-                .where(User.role == "admin", User.is_active.is_(True), User.id != u.id)
+                .join(Role, Role.id == User.role_id)
+                .where(Role.key == "admin", User.is_active.is_(True), User.id != u.id)
             )
             if not other_active_admins:
                 raise HTTPException(status_code=400, detail="不能降级或停用最后一个管理员")
@@ -244,9 +267,9 @@ async def update_user(
         u.department = payload.department
     if payload.employee_id is not None:
         u.employee_id = payload.employee_id
-    if current.role == "admin":
-        if payload.role is not None:
-            u.role = payload.role
+    if await _is_admin(current, db):
+        if payload.role_id is not None:
+            u.role_id = await _resolve_role_id(db, payload.role_id)
         if payload.is_active is not None:
             u.is_active = payload.is_active
         if payload.password:
@@ -256,11 +279,17 @@ async def update_user(
     return _to_out(u)
 
 
+async def _is_admin(user: User, db: AsyncSession) -> bool:
+    """通过权限判断是否为用户管理员（role=admin 的内置角色拥有 user_manage）。"""
+    perms = await get_role_permissions(db, user.role_id)
+    return Perm.USER_MANAGE in perms
+
+
 @router.delete("/auth/users/{user_id}", status_code=204)
 async def delete_user(
     user_id: str,
     db: AsyncSession = Depends(get_db),
-    current: User = Depends(require_roles("admin")),
+    current: User = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     if str(current.id) == user_id:
         raise HTTPException(status_code=400, detail="不能删除自己")
@@ -271,7 +300,8 @@ async def delete_user(
         other_admins = await db.scalar(
             select(func.count())
             .select_from(User)
-            .where(User.role == "admin", User.id != u.id)
+            .join(Role, Role.id == User.role_id)
+            .where(Role.key == "admin", User.id != u.id)
         )
         if not other_admins:
             raise HTTPException(status_code=400, detail="不能删除最后一个管理员")

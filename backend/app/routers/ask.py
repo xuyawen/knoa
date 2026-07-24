@@ -13,7 +13,9 @@ from app.core.security import (
     get_accessible_kb_ids,
     get_current_user,
     get_kb_permission_level,
+    require_permission,
 )
+from app.core.rbac import Perm
 from app.core.store.redis_store import RedisStore
 from app.config import settings
 from app.db import User
@@ -34,6 +36,7 @@ async def ask(
     llm: OpenAICompatProvider = Depends(get_llm),
     redis: RedisStore = Depends(get_redis),
     user: User = Depends(get_current_user),
+    _: User = Depends(require_permission(Perm.AI_QA)),
 ):
     # 显式取 rid（sse-starlette 在独立 task 跑生成器，contextvars 可能不传播）
     rid = getattr(request.state, "request_id", "-")

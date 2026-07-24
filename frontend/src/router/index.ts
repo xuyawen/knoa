@@ -17,6 +17,7 @@ import RecordsView from '@/views/RecordsView.vue'
 import ModelConfig from '@/views/ModelConfig.vue'
 import Graph from '@/views/Graph.vue'
 import Permission from '@/views/Permission.vue'
+import RoleManage from '@/views/RoleManage.vue'
 import DepartmentView from '@/views/DepartmentView.vue'
 import Profile from '@/views/Profile.vue'
 import Settings from '@/views/Settings.vue'
@@ -63,6 +64,7 @@ const routes: RouteRecordRaw[] = [
 
       // ===== 系统管理（一个页面一个文件）=====
       { path: 'permission', name: 'permission', component: Permission, meta: { title: '系统管理', icon: 'shield' } },
+      { path: 'permission/roles', name: 'perm-roles', component: RoleManage, meta: { title: '系统管理', icon: 'shield' } },
       { path: 'permission/departments', name: 'perm-departments', component: DepartmentView, meta: { title: '系统管理', icon: 'team' } },
       { path: 'profile', name: 'profile', component: Profile, meta: { title: '个人中心', icon: 'user' } },
       { path: 'settings', name: 'settings', component: Settings, meta: { title: '系统设置', icon: 'settings' } },

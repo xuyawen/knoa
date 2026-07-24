@@ -129,15 +129,18 @@ async def _ensure_admin():
     事件，因此这里手动建好初始 admin，否则登录接口无用户可验。
     幂等：已存在用户则跳过。
     """
+    from app.db import Role
+
     async with db_mod.AsyncSessionLocal() as s:
         exists = await s.scalar(select(User).limit(1))
         if exists is None:
+            admin_role = await s.scalar(select(Role).where(Role.key == "admin"))
             admin = User(
                 id=uuid.uuid4(),
                 username=settings.ADMIN_USERNAME,
                 password_hash=User.hash_password(settings.ADMIN_PASSWORD),
                 display_name=settings.ADMIN_DISPLAY_NAME,
-                role="admin",
+                role_id=admin_role.id if admin_role else None,
             )
             s.add(admin)
             await s.commit()
