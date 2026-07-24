@@ -26,6 +26,15 @@
 
 ## 二、服务器初始化（逐步操作）
 
+> **一键脚本**：下面每一步都对应 `deploy/scripts/` 下可直接粘贴/运行的 PowerShell 脚本（在服务器上以管理员身份运行），按编号顺序执行即可：
+> 1. `01-install-docker.ps1` — 装 Docker 引擎 + 启用 Hyper-V（会重启）
+> 2. `02-configure-host.ps1` — 重启后跑：装 compose v2、配腾讯云镜像加速、放火墙、clone 代码
+> 3. `03-setup-env.ps1` — 生成强随机密钥、复制并填充 `deploy/.env` / `backend/.env`
+> 4. `04-generate-tls.ps1` — 生成自签证书（过渡期用；选 Let's Encrypt 见 Step 6-B）
+> 5. `05-deploy.ps1` — 构建并后台启动全部服务 + 健康检查
+>
+> 用法：`cd C:\knoa\deploy\scripts` 后 `.\01-install-docker.ps1`，逐号执行。纯 HTTP 可跳过 04。
+
 ### Step 1：连接服务器
 
 ```powershell
