@@ -5,7 +5,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
-from app.db import ChatMessage, MessageFeedback, User
+from app.db import ChatMessage, ChatSession, MessageFeedback, User
 from app.deps import get_db
 from app.models.knowledge import CamelModel
 
@@ -56,14 +56,27 @@ async def delete_feedback(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """取消对某条回答的反馈；需登录。"""
+    """取消对某条回答的反馈；需登录且只能取消自己的反馈。"""
     try:
         msg_id = uuid.UUID(message_id)
     except ValueError:
         raise HTTPException(400, "invalid message_id") from None
 
-    await db.execute(
-        delete(MessageFeedback).where(MessageFeedback.message_id == msg_id)
-    )
+    # 归属校验：feedback → chat_message → chat_session.user_id，防越权删他人反馈
+    row = (
+        await db.execute(
+            select(MessageFeedback, ChatSession.user_id)
+            .join(ChatMessage, ChatMessage.id == MessageFeedback.message_id)
+            .join(ChatSession, ChatSession.id == ChatMessage.session_id)
+            .where(MessageFeedback.message_id == msg_id)
+        )
+    ).first()
+    if row is None:
+        return {"ok": True}  # 幂等：原本就没有该反馈
+    fb, session_user_id = row
+    if str(user.id) != session_user_id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="无权删除他人的反馈")
+
+    await db.execute(delete(MessageFeedback).where(MessageFeedback.message_id == msg_id))
     await db.commit()
     return {"ok": True}

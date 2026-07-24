@@ -1043,7 +1043,7 @@ async def reorder_knowledge_bases(
 ):
     """拖拽排序：前端传回当前列表的完整 id 顺序，后端按数组下标赋 order。
 
-    全局排序操作无单一 kb_id，故用 require_roles 限制为全局 admin。
+    全局排序操作无单一 kb_id，故要求 SYS_SETTINGS 权限（内置 admin 拥有）。
     """
     kbs = (
         await db.execute(select(KnowledgeBase).where(KnowledgeBase.id.in_(payload.ordered_ids)))

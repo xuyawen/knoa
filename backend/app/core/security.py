@@ -60,6 +60,13 @@ def decode_access_token(token: str) -> dict:
         seg_h, seg_p, sig = token.split(".")
     except ValueError:
         raise HTTPException(status_code=401, detail="无效令牌") from None
+    # ponytail: 显式校验 header.alg，纵深防御 alg 混淆攻击（如 alg=none 伪造令牌）
+    try:
+        header = json.loads(_b64url_decode(seg_h))
+    except Exception:  # noqa: BLE001  (intentional catch-all: malformed header → 401)
+        raise HTTPException(status_code=401, detail="令牌解析失败") from None
+    if header.get("alg") != settings.JWT_ALGORITHM:
+        raise HTTPException(status_code=401, detail="不支持的签名算法") from None
     signing_input = f"{seg_h}.{seg_p}".encode()
     expected = hmac.new(settings.JWT_SECRET.encode(), signing_input, hashlib.sha256).digest()
     if not hmac.compare_digest(_b64url_encode(expected), sig):
@@ -119,21 +126,6 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="用户不存在或已停用")
     return user
-
-
-def require_roles(*roles: str) -> Callable[..., Awaitable[User]]:
-    """依赖工厂：要求当前用户角色在 roles 内，否则 403。
-
-    仅用于内置角色的便捷判断（如「是否为 admin」）。更细的能力控制请使用
-    require_permission（基于角色→权限映射，可在 UI 配置）。
-    """
-
-    async def _dep(user: User = Depends(get_current_user)) -> User:
-        if user.role not in roles:
-            raise HTTPException(status_code=403, detail="权限不足")
-        return user
-
-    return _dep
 
 
 async def get_role_permissions(db: AsyncSession, role_id: uuid.UUID) -> set[str]:
