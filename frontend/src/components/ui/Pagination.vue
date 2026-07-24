@@ -85,7 +85,7 @@ function setSize(v: string | number) {
       <CustomSelect
         :model-value="String(pageSize)"
         :options="sizeOptions"
-        width="80px"
+        width="100px"
         @update:model-value="setSize"
       />
     </div>
