@@ -2,3 +2,6 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+# vite 配置经 ts 编译可能产出的产物，不应提交
+vite.config.js
+vite.config.d.ts

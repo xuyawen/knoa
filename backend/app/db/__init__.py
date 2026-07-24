@@ -171,7 +171,9 @@ class User(Base):
         return f"pbkdf2_sha256${settings.PBKDF2_ITERATIONS}${salt}${dk.hex()}"
 
     def verify_password(self, password: str, password_hash: str | None = None) -> bool:
-        h = password_hash or self.password_hash
+        # ponytail: 显式传入 hash（如登录时用户名不存在的 dummy 校验）时不回退
+        # self.password_hash，否则未绑定调用会访问到 password 字符串的属性而 500
+        h = password_hash if password_hash is not None else getattr(self, "password_hash", None)
         try:
             _, iter_s, salt, dk = h.split("$")
             dk2 = hashlib.pbkdf2_hmac(

@@ -41,14 +41,15 @@ import type {
   KBMembersUpdate,
   MemoryItem,
 } from '@/types/api'
-import { authHeaders, TokenExpiredError } from './http'
+import { authHeaders, TokenExpiredError, throwHttpError } from './http'
+import { report } from '../lib/monitor'
 
 export async function getKnowledgeBases(
   page = 1,
   size = 20,
 ): Promise<KnowledgeBasesResponse> {
   const resp = await fetch(`/api/knowledge-bases?page=${page}&size=${size}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -63,20 +64,14 @@ export async function createKnowledgeBase(payload: {
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 列出某知识库成员（库 admin 或全局 admin）。 */
 export async function getKbMembers(kbId: string): Promise<KBMember[]> {
   const resp = await fetch(`/api/knowledge-bases/${kbId}/members`, { headers: authHeaders() })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return (await resp.json()).members
 }
 
@@ -87,20 +82,14 @@ export async function setKbMembers(kbId: string, payload: KBMembersUpdate): Prom
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return (await resp.json()).members
 }
 
 /** 列出当前用户全部长期记忆（按时间倒序）。 */
 export async function getMemories(): Promise<MemoryItem[]> {
   const resp = await fetch('/api/memories', { headers: authHeaders() })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return (await resp.json()).memories
 }
 
@@ -110,10 +99,7 @@ export async function deleteMemory(id: string): Promise<void> {
     method: 'DELETE',
     headers: authHeaders(),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
 }
 
 /** 清空当前用户全部记忆。 */
@@ -122,16 +108,13 @@ export async function clearMemories(): Promise<number> {
     method: 'DELETE',
     headers: authHeaders(),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return (await resp.json()).deleted ?? 0
 }
 
 export async function getTrending(): Promise<TrendingItem[]> {
   const resp = await fetch('/api/trending', { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -150,7 +133,7 @@ export async function searchDocs(
   if (opts?.status) params.set('status', opts.status)
   if (opts?.time) params.set('updated_after', opts.time)
   const resp = await fetch(`/api/search/docs?${params.toString()}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -171,7 +154,7 @@ export async function getDocuments(
   if (opts?.tags) params.set('tags', opts.tags)
   const qs = params.toString()
   const resp = await fetch(`/api/knowledge-bases/${kbId}/documents${qs ? `?${qs}` : ''}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -192,10 +175,7 @@ export async function uploadDocument(
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -214,10 +194,7 @@ export async function getOssSign(prefix: string, filename: string): Promise<{
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ prefix, filename }),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -226,7 +203,7 @@ export async function getDocument(kbId: string, docId: string): Promise<Document
   const resp = await fetch(`/api/knowledge-bases/${kbId}/documents/${docId}`, {
     headers: authHeaders(),
   })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -235,7 +212,7 @@ export async function getDocumentById(docId: string): Promise<DocumentDetail> {
   const resp = await fetch(`/api/documents/${docId}`, {
     headers: authHeaders(),
   })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -245,10 +222,7 @@ export async function approveDocument(kbId: string, docId: string): Promise<Docu
     method: 'POST',
     headers: authHeaders(),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -258,10 +232,7 @@ export async function rejectDocument(kbId: string, docId: string): Promise<Docum
     method: 'POST',
     headers: authHeaders(),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -271,10 +242,7 @@ export async function deleteDocument(kbId: string, docId: string): Promise<void>
     method: 'DELETE',
     headers: authHeaders(),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
 }
 
 /** AI 辅助审核文档。 */
@@ -286,17 +254,14 @@ export async function aiReviewDocument(
     method: 'POST',
     headers: authHeaders(),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 溯源详情：按 chunk 的 UUID 取原文。 */
 export async function getSourceDetail(chunkId: string): Promise<SourceDetail> {
   const resp = await fetch(`/api/sources/${chunkId}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -306,7 +271,7 @@ export async function getSessions(
   size = 20,
 ): Promise<Paginated<ChatSession>> {
   const resp = await fetch(`/api/sessions?page=${page}&size=${size}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -319,8 +284,9 @@ export async function getRecords(
   if (opts?.size) params.set('size', String(opts.size))
   if (opts?.filter) params.set('f', opts.filter)
   const qs = params.toString()
-  const resp = fetch(`/api/records${qs ? `?${qs}` : ''}`, { headers: authHeaders() })
-  return (await resp).json()
+  const resp = await fetch(`/api/records${qs ? `?${qs}` : ''}`, { headers: authHeaders() })
+  if (!resp.ok) await throwHttpError(resp)
+  return resp.json()
 }
 
 /** 新建空会话，返回 id。 */
@@ -330,14 +296,14 @@ export async function createSession(): Promise<ChatSession> {
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ title: null }),
   })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 拉取某会话的全部消息。 */
 export async function getSession(id: string): Promise<SessionDetail> {
   const resp = await fetch(`/api/sessions/${id}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -347,10 +313,7 @@ export async function deleteSession(id: string): Promise<void> {
     method: 'DELETE',
     headers: authHeaders(),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
 }
 
 /** 批量删除会话。 */
@@ -360,10 +323,7 @@ export async function batchDeleteSessions(ids: string[]): Promise<void> {
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ ids }),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
 }
 
 /** 提交/更新对某条回答的反馈（👍/👎）。 */
@@ -373,7 +333,7 @@ export async function submitFeedback(messageId: string, rating: 'up' | 'down') {
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ messageId, rating }),
   })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -387,10 +347,7 @@ export async function updateKnowledgeBase(
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -400,10 +357,7 @@ export async function deleteKnowledgeBase(id: string): Promise<void> {
     method: 'DELETE',
     headers: authHeaders(),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
 }
 
 /** 拖拽排序：传回当前完整 id 顺序，后端按下标赋 order。 */
@@ -413,10 +367,7 @@ export async function reorderKnowledgeBases(orderedIds: string[]): Promise<void>
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ orderedIds }),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
 }
 
 /** 批量删除知识库。 */
@@ -426,16 +377,13 @@ export async function batchDeleteKnowledgeBases(ids: string[]): Promise<void> {
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ ids }),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
 }
 
 /** 取消对某条回答的反馈。 */
 export async function deleteFeedback(messageId: string) {
   const resp = await fetch(`/api/feedback/${messageId}`, { method: 'DELETE', headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -449,7 +397,7 @@ export async function getGraph(kbId?: string | null, filter?: GraphFilter): Prom
   if (filter?.to) params.set('to', filter.to)
   const qs = params.toString()
   const resp = await fetch(`/api/graph${qs ? `?${qs}` : ''}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -459,7 +407,7 @@ export async function getGraphHotNodes(limit = 5, kbId?: string | null): Promise
   params.set('limit', String(limit))
   if (kbId) params.set('kb_id', kbId)
   const resp = await fetch(`/api/graph/hot-nodes?${params.toString()}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -469,7 +417,7 @@ export async function getGraphRecent(limit = 5, kbId?: string | null): Promise<G
   params.set('limit', String(limit))
   if (kbId) params.set('kb_id', kbId)
   const resp = await fetch(`/api/graph/recent?${params.toString()}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -479,7 +427,7 @@ export async function exportGraph(format: 'json' | 'gexf' = 'json', kbId?: strin
   params.set('format', format)
   if (kbId) params.set('kb_id', kbId)
   const resp = await fetch(`/api/graph/export?${params.toString()}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   const blob = await resp.blob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -542,8 +490,11 @@ export async function* streamAsk(
     })
 
     if (!resp.ok || !resp.body) {
+      // 不要把后端原始响应体回显给用户（可能含内部信息）；仅展示通用文案，
+      // 原始信息走 report() 便于排查。
       const text = await resp.text().catch(() => '')
-      yield { event: 'error', data: { message: `HTTP ${resp.status}: ${text}` } }
+      report({ type: 'ask.http_error', message: `${resp.status}: ${text}`, level: 'error' })
+      yield { event: 'error', data: { message: '请求失败，请稍后重试' } }
       return
     }
 
@@ -603,42 +554,42 @@ export async function* streamAsk(
 /** Dashboard 核心指标 + 日环比（真实数据源：operation_log / document）。 */
 export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   const resp = await fetch('/api/analytics/dashboard', { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 问答趋势（按时间桶聚合，range: today | week | month）。 */
 export async function getTrend(range: 'today' | 'week' | 'month' = 'week'): Promise<TrendResponse> {
   const resp = await fetch(`/api/analytics/trend?range=${range}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 文档分类占比（饼图数据源）。 */
 export async function getDocCategory(): Promise<DocCategory[]> {
   const resp = await fetch('/api/analytics/doc-category', { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 用户统计：活跃/总用户/新增/角色/状态/近7天趋势（用户统计分区）。 */
 export async function getUserStats(): Promise<UserStats> {
   const resp = await fetch('/api/analytics/user-stats', { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 文档统计：按 category / status 聚合（文档统计分区）。 */
 export async function getDocStats(): Promise<DocStats> {
   const resp = await fetch('/api/analytics/doc-stats', { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 操作日志分页列表（仅 admin）。 */
 export async function getOperations(page = 1, size = 20): Promise<OperationsResponse> {
   const resp = await fetch(`/api/operations?page=${page}&size=${size}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -648,7 +599,7 @@ export async function getAnnouncements(
   size = 20,
 ): Promise<Paginated<Announcement>> {
   const resp = await fetch(`/api/announcements?page=${page}&size=${size}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -659,10 +610,7 @@ export async function createAnnouncement(payload: AnnouncementCreate): Promise<A
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -676,10 +624,7 @@ export async function updateAnnouncement(
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -689,10 +634,7 @@ export async function deleteAnnouncement(id: string): Promise<void> {
     method: 'DELETE',
     headers: authHeaders(),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
 }
 
 /** 标记某公告为已读（幂等 upsert）。P8 通知中心使用。 */
@@ -701,30 +643,27 @@ export async function markAnnouncementRead(id: string): Promise<void> {
     method: 'POST',
     headers: authHeaders(),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
 }
 
 /** 热门问答榜（近 30 天 action=ask 聚合 Top 10）。 */
 export async function getHotAsk(): Promise<HotQueryItem[]> {
   const resp = await fetch('/api/analytics/hot-ask', { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 知识缺口榜（近 30 天零检索命中的提问聚合 Top 10）。 */
 export async function getKnowledgeGaps(): Promise<HotQueryItem[]> {
   const resp = await fetch('/api/analytics/knowledge-gaps', { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 读取个人系统设置（preferredModel / ttsEnabled）。P8 新增。 */
 export async function getSettings(): Promise<Settings> {
   const resp = await fetch('/api/settings', { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -735,10 +674,7 @@ export async function updateSettings(payload: SettingsUpdate): Promise<Settings>
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -749,17 +685,14 @@ export async function ttsSpeak(text: string): Promise<TtsResult> {
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ text }),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 部门树（嵌套）。P5 部门筛选使用。 */
 export async function getDepartments(): Promise<DepartmentNode[]> {
   const resp = await fetch(`/api/departments`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -770,10 +703,7 @@ export async function createDepartment(payload: DepartmentCreateIn): Promise<Dep
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -784,10 +714,7 @@ export async function updateDepartment(id: string, payload: DepartmentUpdateIn):
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -797,23 +724,20 @@ export async function deleteDepartment(id: string): Promise<void> {
     method: 'DELETE',
     headers: authHeaders(),
   })
-  if (!resp.ok && resp.status !== 204) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || `HTTP ${resp.status}`)
-  }
+  if (!resp.ok && resp.status !== 204) await throwHttpError(resp)
 }
 
 /** 某知识库文档去重标签枚举。P5 标签筛选下拉使用。 */
 export async function getDocumentTags(kbId: string): Promise<string[]> {
   const resp = await fetch(`/api/knowledge-bases/${kbId}/tags`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
 /** 轮询单个文档处理任务进度（P5 上传进度条）。 */
 export async function getDocumentTask(taskId: string): Promise<DocumentTaskOut> {
   const resp = await fetch(`/api/documents/tasks/${taskId}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }
 
@@ -824,6 +748,6 @@ export async function getDocumentTasks(
   size = 20,
 ): Promise<Paginated<DocumentTaskOut>> {
   const resp = await fetch(`/api/documents/tasks?document_id=${documentId}&page=${page}&size=${size}`, { headers: authHeaders() })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) await throwHttpError(resp)
   return resp.json()
 }

@@ -105,7 +105,11 @@ async def login_rate_limit(request: Request) -> None:
             raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
     except HTTPException:
         raise
-    except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, skip rate limit if redis unavailable)
+    except Exception:  # noqa: BLE001  (intentional catch-all)
+        # ponytail: 生产环境 Redis 是硬依赖，限流组件不可用即拒绝登录，
+        # 避免暴力破解窗口；非生产放行以便本地调试
+        if settings.APP_ENV == "production":
+            raise HTTPException(status_code=503, detail="登录服务暂不可用") from None
         logger.warning("login rate limit skipped (redis unavailable)")
 
 

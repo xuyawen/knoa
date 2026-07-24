@@ -117,6 +117,7 @@ const subMenus: Record<string, SubItem[]> = {
   profile: [
     { label: '个人资料', icon: 'user', to: '/profile', activeNames: ['profile'] },
     { label: '记忆管理', icon: 'brain-circuit', to: '/memories', activeNames: ['memories'] },
+    { label: '系统设置', icon: 'settings', to: '/settings', activeNames: ['settings'] },
   ],
 }
 

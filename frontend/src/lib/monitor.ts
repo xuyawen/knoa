@@ -20,8 +20,12 @@ function send(ev: MonitorEvent): void {
   const payload = {
     ...ev,
     ts: Date.now(),
-    url: location.href,
+    // 脱敏：去掉 URL 查询串（可能含 token / redirect 等敏感参数），并裁切过长堆栈
+    url: location.href.split('?')[0],
     ua: navigator.userAgent,
+  }
+  if (typeof payload.stack === 'string' && payload.stack.length > 1500) {
+    payload.stack = payload.stack.slice(0, 1500) + '…'
   }
   try {
     const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' })

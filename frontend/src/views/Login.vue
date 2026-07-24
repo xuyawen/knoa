@@ -12,7 +12,7 @@ const auth = useAuthStore()
 const router = useRouter()
 const toast = useToastStore()
 
-const form = ref({ username: '', password: '', remember: true })
+const form = ref({ username: '', password: '' })
 const loading = ref(false)
 
 async function handleLogin() {
@@ -102,30 +102,11 @@ async function handleLogin() {
             />
           </div>
 
-          <div class="options-row">
-            <label class="remember">
-              <input type="checkbox" v-model="form.remember" class="checkbox-input" />
-              <span class="checkbox-check"><Icon name="check" :size="10" /></span>
-              <span class="remember-text">记住我</span>
-            </label>
-            <a href="#" class="forgot-link">忘记密码？</a>
-          </div>
-
           <button type="submit" class="btn-login" :disabled="loading">
             {{ loading ? '登录中...' : '登 录' }}
           </button>
         </form>
 
-        <div class="sso-divider">
-          <span class="line" />
-          <span class="divider-text">其他登录方式</span>
-          <span class="line" />
-        </div>
-
-        <div class="sso-row">
-          <button type="button" class="sso-btn">企业微信</button>
-          <button type="button" class="sso-btn">钉钉</button>
-        </div>
       </div>
 
       <p class="footer-note">企业智能知识库系统 · 内部系统 仅供授权人员使用</p>
@@ -430,63 +411,6 @@ async function handleLogin() {
   box-shadow: 0 0 0 3px rgba(1, 77, 178, 0.12);
 }
 
-.options-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.remember {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.checkbox-input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.checkbox-check {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  background: #014db2;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s ease, border-color 0.2s ease;
-  border: 1px solid #014db2;
-}
-
-.checkbox-input:not(:checked) + .checkbox-check {
-  background: #fff;
-  border-color: #e5e7eb;
-  color: transparent;
-}
-
-.remember-text {
-  font-size: 13px;
-  font-weight: 400;
-  color: #6b7280;
-}
-
-.forgot-link {
-  font-size: 13px;
-  font-weight: 500;
-  color: #014db2;
-  text-decoration: none;
-}
-
-.forgot-link:hover {
-  text-decoration: underline;
-}
-
 .btn-login {
   width: 100%;
   height: 48px;
@@ -509,51 +433,6 @@ async function handleLogin() {
 .btn-login:disabled {
   opacity: 0.7;
   cursor: not-allowed;
-}
-
-.sso-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: auto;
-  margin-top: 20px;
-}
-
-.line {
-  flex: 1;
-  height: 1px;
-  background: #eaeaea;
-}
-
-.divider-text {
-  font-size: 12px;
-  font-weight: 400;
-  color: #9ca3af;
-  white-space: nowrap;
-}
-
-.sso-row {
-  display: flex;
-  gap: 12px;
-  margin-top: 20px;
-}
-
-.sso-btn {
-  flex: 1;
-  height: 44px;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
-  background: #fff;
-  color: #0a1628;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease;
-}
-
-.sso-btn:hover {
-  border-color: #014db2;
-  background: #f8fafd;
 }
 
 .footer-note {

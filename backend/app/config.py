@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "dev-change-me"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 1440   # 24h
-    PBKDF2_ITERATIONS: int = 100_000
+    PBKDF2_ITERATIONS: int = 600_000  # OWASP 2023 对 PBKDF2-HMAC-SHA256 的最低建议值
     # 初始管理员（首次启动、且无任何用户时自动创建；生产请改 .env）
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "admin123"
@@ -183,6 +183,15 @@ def validate_production_settings() -> None:
         errors.append(
             "DATABASE_URL 仍使用默认弱口令 'knoa:knoa' 且指向远程主机，"
             "生产环境必须设置强密码"
+        )
+    # 携带凭据（HttpOnly Cookie）时 CORS 不能用通配符，否则任意源都能
+    # 借当前用户会话发起跨站请求并读取响应，造成凭据/数据泄露。
+    if settings.CORS_ALLOW_CREDENTIALS and "*" in [
+        o.strip() for o in settings.CORS_ORIGINS.split(",")
+    ]:
+        errors.append(
+            "CORS_ALLOW_CREDENTIALS=True 时 CORS_ORIGINS 不能包含 '*'（会向任意源泄露凭据），"
+            "生产环境必须显式列出受信前端源"
         )
     if errors:
         raise RuntimeError(

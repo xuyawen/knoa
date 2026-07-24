@@ -16,7 +16,12 @@ from app.core.metrics import (
     normalize_path,
     record,
 )
-from app.core.security import create_access_token, decode_access_token, extract_token
+from app.core.security import (
+    create_access_token,
+    decode_access_token,
+    extract_token,
+    is_token_revoked,
+)
 from app.database import AsyncSessionLocal
 from app.deps import get_es
 from app.db import ChatSession, Role, User
@@ -124,7 +129,16 @@ async def lifespan(app: FastAPI):
         pass
 
 
-app = FastAPI(title="知海 Knoa API", version="0.1.0", lifespan=lifespan)
+# ponytail: 生产环境关闭 API 文档与 OpenAPI schema，避免向匿名暴露完整攻击面
+_docs_disabled = settings.APP_ENV == "production"
+app = FastAPI(
+    title="知海 Knoa API",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url=None if _docs_disabled else "/docs",
+    redoc_url=None if _docs_disabled else "/redoc",
+    openapi_url=None if _docs_disabled else "/openapi.json",
+)
 setup_logging()
 logger = logging.getLogger("knoa")
 
@@ -159,9 +173,14 @@ async def sliding_session(request: Request, call_next):
             # 仅当剩余有效期不足总寿命的 30% 时才重签，
             # 避免每次请求都换新 token（token churn + 多标签页竞态）。
             if remaining < total * SLIDING_REFRESH_RATIO:
-                new_token = create_access_token(
-                    payload["sub"], payload["username"], payload["role"]
-                )
+                # ponytail: 重签前必须校验吊销黑名单，否则 logout 后临近过期的
+                # 旧 token 仍可换发全新未吊销 token，使 logout 实质失效
+                if await is_token_revoked(payload.get("jti", "")):
+                    new_token = None
+                else:
+                    new_token = create_access_token(
+                        payload["sub"], payload["username"], payload["role"]
+                    )
         except Exception:  # noqa: BLE001  (intentional catch-all: don't reissue token on decode failure, route handles 401)
             # 令牌无效/已过期：不重新签发，交由路由自身按原逻辑 401。
             new_token = None

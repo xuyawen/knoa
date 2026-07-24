@@ -1,6 +1,7 @@
 import { defineStore, acceptHMRUpdate } from 'pinia'
 import { ref } from 'vue'
 import { getKnowledgeBases, getTrending } from '@/api'
+import { report } from '@/lib/monitor'
 import type { KnowledgeBase, HealthItem, TrendingItem } from '@/types/api'
 
 export const useKnowledgeStore = defineStore('knowledge', () => {
@@ -21,8 +22,8 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
       health.value = kbResp.health
       trending.value = trendResp
       loaded.value = true
-    } catch (e) {
-      console.error('Failed to load knowledge data:', e)
+    } catch {
+      report({ type: 'knowledge.load_error', level: 'error' })
     }
   }
 

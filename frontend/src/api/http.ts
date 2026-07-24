@@ -1,22 +1,39 @@
-// 统一的鉴权头：从 localStorage 读取 token，注入到所有 API 请求。
-const TOKEN_KEY = 'knoa_token'
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
-}
-
-export function setToken(token: string | null) {
-  if (token) localStorage.setItem(TOKEN_KEY, token)
-  else localStorage.removeItem(TOKEN_KEY)
-}
-
-// 前端可观测：非 401 的接口异常上报后端 /api/events（401 由 token 失效逻辑单独处理）
-import { report } from '../lib/monitor'
-
 // 鉴权统一走 HttpOnly Cookie（由浏览器自动随请求携带，JS 读不到，防 XSS 窃取）。
 // 因此这里不再注入 Authorization 头；跨域时 fetch 需 credentials:'include'（见 trackedFetch）。
+import { report } from '../lib/monitor'
+
 export function authHeaders(): Record<string, string> {
   return {}
+}
+
+// 统一的 HTTP 错误转换：把后端非 2xx 响应转成「用户友好」的 Error。
+// 关键：5xx 不把后端原始内部错误回显给用户（可能含栈/路径），统一兜底文案；
+// 4xx 优先沿用后端返回的业务文案（detail），"HTTP xxx" 这类无意义文案用映射覆盖。
+const HTTP_MSG: Record<number, string> = {
+  400: '请求参数有误',
+  401: '登录状态已失效，请重新登录',
+  403: '无权限执行此操作',
+  404: '请求的资源不存在',
+  413: '上传内容过大',
+  422: '输入信息格式有误，请检查',
+  429: '操作过于频繁，请稍后再试',
+  500: '服务器繁忙，请稍后再试',
+  502: '服务暂时不可用，请稍后再试',
+  503: '服务正在维护中，请稍后再试',
+}
+
+export async function throwHttpError(resp: Response, fallback?: string): Promise<never> {
+  const defaultMsg = HTTP_MSG[resp.status] || fallback || `请求失败(${resp.status})`
+  let detail = ''
+  try {
+    const body = (await resp.json().catch(() => null)) as { detail?: unknown } | null
+    if (typeof body?.detail === 'string') detail = body.detail
+  } catch {
+    /* 非 JSON 响应，忽略 */
+  }
+  // 后端若回显了 "HTTP xxx" 这类无意义文案，用友好映射覆盖
+  if (/^HTTP \d+$/.test(detail)) detail = ''
+  throw new Error(detail || defaultMsg)
 }
 
 // ── 统一 token 失效拦截 ──

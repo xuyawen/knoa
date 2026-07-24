@@ -457,7 +457,8 @@ async def upload_document(
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
 
-    filename = payload.filename or "untitled"
+    # 文件名清洗：去除路径分隔符，防止 object key 逃逸到意外目录（存储层另有 `..` 兜底）
+    filename = (payload.filename or "untitled").replace("\\", "/").split("/")[-1] or "untitled"
 
     # 1) 还原原始字节：三种来源
     #    a) file_url：前端已直传到 OSS，后端按 URL 回抓字节（仅存 URL，不落本地存储）

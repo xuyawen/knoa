@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 文档管理 — 按 640(3).png 截图 1:1 还原，接真实文档生命周期。
 // scope 由路由决定（mine/public/department/archive）。
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import AppModal from '@/components/ui/AppModal.vue'
@@ -325,6 +325,9 @@ function onDocClickOutside(e: MouseEvent) {
   const el = document.getElementById('dept-filter-wrap')
   if (el && !el.contains(e.target as Node)) deptPopoverOpen.value = false
 }
+
+// 组件卸载时移除全局点击监听，避免 popover 打开时切走页面残留监听导致内存泄漏 / 报错
+onBeforeUnmount(() => document.removeEventListener('click', onDocClickOutside))
 
 /* ---------- P5：部门 / 标签 数据 ---------- */
 async function loadDepartments() {

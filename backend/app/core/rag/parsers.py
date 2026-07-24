@@ -51,6 +51,12 @@ def parse_docx(filename: str, data: bytes) -> ParseResult:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             names = zf.namelist()
+            # ponytail: 防 zip bomb / 海量条目撑爆内存——限制条目数与单条目解压后大小
+            if len(names) > 10_000:
+                raise UnsupportedFormatError("文档条目数过多，疑似恶意压缩包，已拒绝解析")
+            for info in zf.infolist():
+                if info.file_size > 50 * 1024 * 1024:
+                    raise UnsupportedFormatError("文档内单文件过大，疑似压缩炸弹，已拒绝解析")
             if "word/document.xml" in names:
                 target = "word/document.xml"
             else:
@@ -58,7 +64,7 @@ def parse_docx(filename: str, data: bytes) -> ParseResult:
             if target is None:
                 raise UnsupportedFormatError("不是合法的 .docx（找不到 document.xml）")
             xml_data = zf.read(target)
-            # 防御 zip bomb：解压后正文超阈值直接拒绝，避免恶意 docx 撑爆内存
+            # 二次兜底：解压后正文超阈值直接拒绝
             if len(xml_data) > 50 * 1024 * 1024:
                 raise UnsupportedFormatError("文档内容过大，疑似压缩炸弹，已拒绝解析")
     except zipfile.BadZipFile as e:
@@ -83,8 +89,17 @@ def parse_pdf(filename: str, data: bytes) -> ParseResult:
             "请在部署环境执行 `pip install pypdf` 后重试。"
         ) from None
     reader = PdfReader(io.BytesIO(data))
-    pages = [page.extract_text() or "" for page in reader.pages]
-    return ParseResult("\n".join(pages), "pdf")
+    # ponytail: 防恶意 PDF 撑爆内存——限制页数
+    if len(reader.pages) > 500:
+        raise UnsupportedFormatError("PDF 页数过多，已拒绝解析")
+    MAX_PDF_TEXT = 50 * 1024 * 1024
+    texts: list[str] = []
+    for page in reader.pages:
+        texts.append(page.extract_text() or "")
+    text = "\n".join(texts)
+    if len(text) > MAX_PDF_TEXT:
+        raise UnsupportedFormatError("PDF 文本内容过大，已拒绝解析")
+    return ParseResult(text, "pdf")
 
 
 _PARSERS = {

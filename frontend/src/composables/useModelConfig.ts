@@ -34,9 +34,8 @@ async function load(): Promise<void> {
     if (s.preferredModel != null) state.preferredModel = s.preferredModel
     if (s.modelPrefs) Object.assign(state.prefs, s.modelPrefs)
     state.loaded = true
-  } catch (e) {
-    // 加载失败不阻塞 UI，回落默认值
-    console.warn('[useModelConfig] load failed, using defaults', e)
+  } catch {
+    // 加载失败不阻塞 UI，回落默认值（不打印，避免生产环境控制台噪音）
   }
 }
 

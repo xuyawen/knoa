@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import Document, OperationLog, Role, User
 from app.deps import get_db
-from app.core.security import get_current_user
+from app.core.rbac import Perm
+from app.core.security import require_permission
 
 router = APIRouter()
 
@@ -51,7 +52,7 @@ async def _distinct_users(db: AsyncSession, start: datetime, end: datetime | Non
 @router.get("/analytics/dashboard")
 async def dashboard(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     t_start, t_end = _today_range()
     y_start, y_end = _yesterday_range()
@@ -94,7 +95,7 @@ async def dashboard(
 async def trend(
     period: str = Query("week", alias="range", pattern="^(today|week|month)$"),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     """按时间桶聚合问答次数（真实数据源：OperationLog.action='ask'）。"""
     now = datetime.now(timezone.utc)
@@ -136,7 +137,7 @@ async def trend(
 @router.get("/analytics/doc-category")
 async def doc_category(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     """按 category 分组统计文档数（饼图数据源，替代前端硬编码饼图）。"""
     rows = (await db.execute(
@@ -149,13 +150,12 @@ async def doc_category(
 
 @router.get("/analytics/user-stats")
 async def user_stats(
+    current: User = Depends(require_permission(Perm.USER_MANAGE)),
     db: AsyncSession = Depends(get_db),
-    current: User = Depends(get_current_user),
 ):
     """用户统计：活跃数 / 总用户 / 新增 / 角色分布 / 状态分布 / 近7天趋势。
 
-    活跃用户/趋势来自 operation_log（所有登录用户可见）；
-    总用户/角色/状态/新增来自用户表（仅 admin 可见，非 admin 返回 null/空数组）。
+    需 user_manage 权限（聚合全公司用户信息，含角色/状态分布）。
     """
     now = datetime.now(timezone.utc)
     t_start, _ = _today_range()
@@ -176,17 +176,6 @@ async def user_stats(
             )
         ) or 0
         active_trend.append({"date": day_start.astimezone().strftime("%m-%d"), "count": cnt})
-
-    if current.role != "admin":
-        return {
-            "activeUsers": active_users,
-            "totalUsers": None,
-            "newUsers30": None,
-            "byRole": [],
-            "byStatus": [],
-            "recentNew": [],
-            "activeTrend": active_trend,
-        }
 
     total_users = await db.scalar(select(func.count()).select_from(User)) or 0
     cutoff = now - timedelta(days=30)
@@ -230,7 +219,7 @@ async def user_stats(
 @router.get("/analytics/doc-stats")
 async def doc_stats(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     """文档统计：按 category / status / type 聚合 + 近7天新增趋势（文档统计分区真实数据源）。"""
     by_cat = (await db.execute(
@@ -286,7 +275,7 @@ def _window(days: int) -> datetime:
 @router.get("/analytics/hot-ask")
 async def hot_ask(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     """热门问答榜：近 30 天 action=ask 的提问按文本聚合，取 Top 10。"""
     cutoff = _window(30)
@@ -308,7 +297,7 @@ async def hot_ask(
 @router.get("/analytics/knowledge-gaps")
 async def knowledge_gaps(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     """知识缺口榜：近 30 天 action∈(ask,search) 且检索命中数为 0 的提问，
     按文本聚合取 Top 10，提示运营该补哪些文档。"""

@@ -4,16 +4,20 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import Trending
+from app.db import Trending, User
 from app.deps import get_db, get_redis
 from app.models.knowledge import TrendingItemOut
+from app.core.security import get_current_user
 from redis.exceptions import RedisError
 
 router = APIRouter()
 
 
 @router.get("/trending", response_model=list[TrendingItemOut])
-async def get_trending(db: AsyncSession = Depends(get_db)):  # noqa: B008  (FastAPI 鉴权依赖惯用法)
+async def get_trending(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
     # 优先从 Redis sorted set 读今日实时数据
     redis = get_redis()
     try:
