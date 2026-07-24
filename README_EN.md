@@ -1,8 +1,8 @@
 # Zhihai Knoa · Backend Service
 
-> A **Retrieval-Augmented Generation (RAG) knowledge-base backend** for cross-border e-commerce operations teams. It delivers grounded, citation-backed answers over an organization's own knowledge base and live web search, with multi-turn conversations, long-term memory, knowledge-graph reasoning, and multimodal understanding. This document covers the backend service only and intentionally excludes any frontend implementation details.
+> An enterprise-grade **Retrieval-Augmented Generation (RAG) knowledge-base backend**. It delivers grounded, citation-backed answers over an organization's own knowledge base and live web search, with multi-turn conversations, long-term memory, knowledge-graph reasoning, and multimodal understanding. This document covers the backend service only and intentionally excludes any frontend implementation details.
 
-The Knoa backend is an asynchronous, horizontally-scalable FastAPI service that unifies large language models (LLM / Embedding), vector retrieval, keyword retrieval, a knowledge graph, long-term memory, and fine-grained role-based access control (RBAC) behind a single question-answering and knowledge-management API. It targets real-world cross-border operations on marketplaces such as Amazon.com (US) — compliance, advertising, logistics, product selection, and customer service — giving operators an AI assistant that is traceable, auditable, and governable.
+The Knoa backend is an asynchronous, horizontally-scalable FastAPI service that unifies large language models (LLM / Embedding), vector retrieval, keyword retrieval, a knowledge graph, long-term memory, and fine-grained role-based access control (RBAC) behind a single, **domain-agnostic** question-answering and knowledge-management API. It serves an organization's knowledge accumulation, retrieval, and intelligent-QA needs: private knowledge from any industry can be onboarded to build an AI assistant over the organization's own corpus that is traceable, auditable, and governable.
 
 ---
 
@@ -269,7 +269,7 @@ Backend configuration is fully environment-driven (`Settings(BaseSettings)` in `
 
 ## Covered Business Scenarios
 
-The system is seeded with real cross-border e-commerce (Amazon.com US) operations knowledge across five business domains, with roughly 70 real policy and operations documents:
+The system ships with a cross-border e-commerce (Amazon.com US) operations corpus as an **out-of-the-box example** — five domains, roughly 70 real policy and operations documents — so teams can experience the full capability immediately. In production this seed is simply swapped for the organization's own private knowledge:
 
 - **Compliance**: CE / FDA / UL / PSE / ASTM certification requirements, category-approval qualifications, trademark and patent infringement checks, labeling and warning-language standards.
 - **Advertising**: ACOS optimization, SP / SB / SD campaign structure, negative-keyword strategy, new-launch cold-start budget, competitor ad analysis.
@@ -279,7 +279,7 @@ The system is seeded with real cross-border e-commerce (Amazon.com US) operation
 
 **Capability mapping**:
 
-- Compliance咨询 / ad optimization / logistics math → RAG retrieval + citation; pure numeric computation takes the greeting fast path (no retrieval).
+- Compliance queries / ad optimization / logistics math → RAG retrieval + citation; pure numeric computation takes the greeting fast path (no retrieval).
 - "Relationship / impact between A and B" complex questions → `complex` intent triggers graph multi-hop reasoning.
 - Exchange rates / stock prices / weather / latest policies → web-search fast path (can be toggled off by the user, degrading to KB retrieval).
 - Product images / screenshots → vision-LLM OCR and understanding.
