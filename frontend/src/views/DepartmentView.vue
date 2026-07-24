@@ -6,6 +6,7 @@ import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
+import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import {
@@ -78,11 +79,11 @@ function fmtTime(s?: string) {
 const showModal = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
-const form = ref({ name: '', parentId: null as string | null, description: '', sortOrder: 0 })
+const form = ref({ name: '', parentId: '', description: '', sortOrder: 0 })
 
 /** 扁平选项列表（用于父级下拉），排除自己及后代（编辑时）。 */
-const parentOptions = computed<{ label: string; value: string | null }[]>(() => {
-  const opts: { label: string; value: string | null }[] = [{ label: '（无/顶级）', value: null }]
+const parentOptions = computed(() => {
+  const opts = [{ label: '（无/顶级）', value: '' }]
   function walk(nodes: DepartmentNode[]) {
     for (const n of nodes) {
       if (editingId.value && n.id === editingId.value) continue
@@ -96,14 +97,14 @@ const parentOptions = computed<{ label: string; value: string | null }[]>(() => 
 
 function openCreate() {
   editingId.value = null
-  form.value = { name: '', parentId: null, description: '', sortOrder: 0 }
+  form.value = { name: '', parentId: '', description: '', sortOrder: 0 }
   showModal.value = true
 }
 function openEdit(d: FlatDept) {
   editingId.value = d.id
   form.value = {
     name: d.name,
-    parentId: d.parentId,
+    parentId: d.parentId || '',
     description: d.description || '',
     sortOrder: d.sortOrder,
   }
@@ -117,10 +118,11 @@ async function save() {
   }
   saving.value = true
   try {
+    const pid = form.value.parentId || null
     if (editingId.value) {
       await updateDepartment(editingId.value, {
         name: form.value.name || undefined,
-        parentId: form.value.parentId,
+        parentId: pid,
         description: form.value.description || undefined,
         sortOrder: form.value.sortOrder,
       })
@@ -128,7 +130,7 @@ async function save() {
     } else {
       await createDepartment({
         name: form.value.name.trim(),
-        parentId: form.value.parentId,
+        parentId: pid,
         description: form.value.description || undefined,
         sortOrder: form.value.sortOrder,
       })
@@ -228,11 +230,7 @@ async function confirmDelete() {
       </div>
       <div class="form-row">
         <label class="form-label">上级部门</label>
-        <select v-model="form.parentId" class="form-select">
-          <option v-for="opt in parentOptions" :key="String(opt.value ?? '_top')" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
+        <CustomSelect v-model="form.parentId" :options="parentOptions" />
       </div>
       <div class="form-row">
         <label class="form-label">描述</label>
@@ -328,9 +326,4 @@ async function confirmDelete() {
   font-size: 13px; background: var(--bg-surface); color: var(--text-primary); transition: all var(--dur-fast);
 }
 .form-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
-.form-select {
-  width: 100%; height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-md);
-  font-size: 13px; background: var(--bg-surface); color: var(--text-primary); transition: all var(--dur-fast);
-}
-.form-select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 </style>

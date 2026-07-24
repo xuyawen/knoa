@@ -7,6 +7,7 @@ import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
+import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { getRoles, getUserList, createUser, updateUser, deleteUser } from '@/api/auth'
@@ -191,7 +192,14 @@ async function confirmDelete() {
   }
 }
 
-/* ---------- 筛选 / 矩阵 ---------- */
+/* ---------- 筛选 / 下拉选项 ---------- */
+const roleFilterOptions = computed(() => [
+  { label: '全部角色', value: 'all' },
+  ...roles.value.map((r) => ({ label: r.name, value: r.key })),
+])
+const roleSelectOptions = computed(() =>
+  roles.value.map((r) => ({ label: `${r.name}（${r.key}）`, value: r.id })),
+)
 </script>
 
 <template>
@@ -212,10 +220,7 @@ async function confirmDelete() {
             <input v-model="searchQuery" type="text" placeholder="搜索用户名 / 显示名" class="search-input" />
             <button v-if="searchQuery" class="search-clear" @click="clearSearch"><Icon name="close" :size="12" /></button>
           </div>
-          <select v-model="roleFilter" class="role-select" @change="currentPage = 1">
-            <option value="all">全部角色</option>
-            <option v-for="r in roles" :key="r.id" :value="r.key">{{ r.name }}</option>
-          </select>
+          <CustomSelect v-model="roleFilter" :options="roleFilterOptions" width="140px" @update:model-value="currentPage = 1" />
           <button class="icon-btn" title="刷新" :disabled="loading" @click="() => loadUsers()">
             <Icon name="refresh" :size="15" :class="{ spin: loading }" />
           </button>
@@ -292,9 +297,7 @@ async function confirmDelete() {
       </div>
       <div class="form-row">
         <label class="form-label">角色</label>
-        <select v-model="form.roleId" class="form-input">
-          <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}（{{ r.key }}）</option>
-        </select>
+        <CustomSelect v-model="form.roleId" :options="roleSelectOptions" />
       </div>
       <div class="form-row">
         <label class="form-label">{{ editingId ? '重置密码' : '初始密码' }}</label>
@@ -361,15 +364,6 @@ async function confirmDelete() {
   border-radius: 50%; color: var(--text-tertiary); cursor: pointer; background: transparent;
 }
 .search-clear:hover { background: var(--bg-hover); }
-.role-select {
-  height: 34px; padding: 0 28px 0 10px;
-  border: 1px solid var(--border); border-radius: var(--radius-md);
-  font-size: 13px; color: var(--text-primary); background: var(--bg-surface);
-  appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 8px center; cursor: pointer;
-  transition: all var(--dur-fast);
-}
-.role-select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 .icon-btn:disabled { opacity: 0.5; cursor: default; }
 .spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
