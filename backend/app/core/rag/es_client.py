@@ -74,7 +74,7 @@ class ESClient:
                 )
                 return None
             return resp.json() if resp.content else {}
-        except Exception as e:  # 网络不可达 / 超时 / JSON 解析失败 等
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: ES is optional, swallow all errors to degrade gracefully to None)
             logger.warning("[es] %s %s request failed: %s", method, path, e)
             return None
 

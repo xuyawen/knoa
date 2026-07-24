@@ -1,6 +1,6 @@
 """建表 + 写入 KB 元数据 + 种子 trending 数据。可执行: python -m app.data.seed"""
 import asyncio
-from datetime import date
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -38,7 +38,7 @@ async def main():
         await db.flush()
 
         # 种子 trending (写入今天)
-        today = date.today()
+        today = datetime.now(timezone.utc).date()
         existing_trending = await db.scalar(
             select(Trending).where(Trending.date == today)
         )

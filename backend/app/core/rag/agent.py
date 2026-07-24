@@ -345,7 +345,7 @@ class AgenticRAGAgent:
                 if label in text:
                     return label
             return None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort fallback to heuristic intent)
             logger.warning("intent classify failed (fallback heuristic): %s", e)
             return None
 
@@ -420,7 +420,7 @@ class AgenticRAGAgent:
             if not _should_skip_retrieval(question):
                 try:
                     await self.redis.incr_trending(question)
-                except Exception:
+                except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, don't fail request if trending counter update fails)
                     pass
 
             # ── Mem0 长期记忆：召回该用户的相关记忆，注入后续所有 prompt ──
@@ -429,7 +429,7 @@ class AgenticRAGAgent:
                     self._memories = await self.memory.retrieve(
                         self.user_id, question, self.db, settings.MEMORY_TOP_K
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, skip memory injection if retrieve fails)
                     logger.warning("memory retrieve failed (skip inject): %s", e)
                     self._memories = []
 
@@ -486,7 +486,7 @@ class AgenticRAGAgent:
                                 existing_ids.add(c["chunk_id"])
                         if mh_chunks:
                             yield {"event": "sources", "data": self._format_sources(mh_chunks)}
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, skip graph enrichment if it fails)
                     logger.warning("graph retrieve/multihop failed (skip inject): %s", e)
 
             # ── 构造共享状态 + 选择入口节点（LangGraph 的 start 边）──
@@ -568,7 +568,7 @@ class AgenticRAGAgent:
                 "data": {"messageId": str(assistant_msg.id), "citations": citations, "sessionId": str(session.id)},
             }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: top-level guard, convert any answer-stream error into an SSE error event)
             record_ask_trace(
                 latency=time.perf_counter() - t0,
                 retrieved=retrieved,
@@ -867,7 +867,7 @@ class AgenticRAGAgent:
                     temperature=self._gen_temperature, top_p=self._gen_top_p,
                     max_tokens=self._gen_max_tokens,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, fallback friendly reply if final chat fails)
                 st.final_answer_text = "好的，收到！"
             yield {"event": "delta", "data": {"content": st.final_answer_text}}
         st.next = "__end__"
@@ -994,7 +994,7 @@ class AgenticRAGAgent:
                 memories = await self.memory.extract(self.llm, question, answer)
                 if memories:
                     await self.memory.save(self.user_id, memories, s)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: background memory-save task, log and skip on failure)
             logger.warning("memory save failed (skipped): %s", e)
 
     async def _load_session_history(self, session) -> "tuple[list[dict], str | None]":
@@ -1134,7 +1134,7 @@ class AgenticRAGAgent:
                 ]
                 try:
                     new_summary = (await self.llm.chat(prompt, temperature=0.2)).strip()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, skip summary if LLM fails)
                     logger.warning("roll summary llm failed (skip): %s", e)
                     return
                 if not new_summary:
@@ -1145,7 +1145,7 @@ class AgenticRAGAgent:
                 sess.summary = new_summary
                 sess.summarized_count = window_start
                 await s.commit()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: background summary task, log and skip on failure)
             logger.warning("roll summary failed (skipped): %s", e)
 
     @staticmethod
@@ -1184,7 +1184,7 @@ class AgenticRAGAgent:
             try:
                 sid = uuid.UUID(session_id)
             except (ValueError, AttributeError, TypeError):
-                raise HTTPException(status_code=400, detail="无效的会话 ID")
+                raise HTTPException(status_code=400, detail="无效的会话 ID") from None
             result = await self.db.execute(select(ChatSession).where(ChatSession.id == sid))
             s = result.scalar_one_or_none()
             if s:

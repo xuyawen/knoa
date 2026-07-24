@@ -58,9 +58,9 @@ class OpenAICompatProvider:
                 params["top_p"] = top_p
             params["messages"] = self._normalize_messages(messages)
             stream = await self.client.chat.completions.create(**params)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: convert any API failure to ValueError)
             self._diag_messages("stream_chat", messages)
-            raise ValueError(f"LLM API 请求失败: {e}")
+            raise ValueError(f"LLM API 请求失败: {e}") from e
 
         async for chunk in stream:
             if not chunk.choices:
@@ -95,9 +95,9 @@ class OpenAICompatProvider:
         params["messages"] = self._normalize_messages(messages)
         try:
             response = await self.client.chat.completions.create(**params)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: convert any API failure to ValueError)
             self._diag_messages("chat", messages)
-            raise ValueError(f"LLM API 请求失败: {e}")
+            raise ValueError(f"LLM API 请求失败: {e}") from e
         msg = response.choices[0].message
         # 只返回真正的回答 content，丢弃 reasoning_content（推理过程不对外暴露）
         return (getattr(msg, "content", "") or "").strip()
@@ -141,9 +141,9 @@ class OpenAICompatProvider:
                 temperature=temperature or 0.2,  # agent 决策用更低温度，更确定
                 max_tokens=self.max_tokens,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: convert any API failure to ValueError)
             self._diag_messages("tool_call", augmented)
-            raise ValueError(f"LLM API 请求失败: {e}")
+            raise ValueError(f"LLM API 请求失败: {e}") from e
         msg = response.choices[0].message
         content = (getattr(msg, "content", "") or "").strip()
 

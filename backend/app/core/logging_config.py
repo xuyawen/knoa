@@ -31,7 +31,7 @@ def setup_logging(level: str | None = None) -> None:
         try:
             from app.config import settings
             level = settings.LOG_LEVEL or "INFO"
-        except Exception:
+        except Exception:  # noqa: BLE001  (intentional catch-all: best-effort default log level if settings unavailable)
             level = "INFO"
     # pytest 自己管 logging handler，test 环境下不抢（force=False），
     # 仅复用已有配置；非 test 才 force 接管单一 root handler。
@@ -40,7 +40,7 @@ def setup_logging(level: str | None = None) -> None:
         from app.config import settings as _s
         if getattr(_s, "APP_ENV", "") == "test":
             force = False
-    except Exception:
+    except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, assume non-test if settings unavailable)
         pass
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(

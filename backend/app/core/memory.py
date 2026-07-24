@@ -126,7 +126,7 @@ class MemoryStore:
                 ],
                 temperature=0.0,
             )
-        except Exception as e:  # LLM 不可用（沙箱 / 断网）→ 跳过，不影响回答
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: LLM unavailable (sandbox/offline) → skip, never block main answer)
             logger.warning("memory extract skipped (llm failed): %s", e)
             return []
         items = _extract_json_array(raw)
@@ -172,7 +172,7 @@ class MemoryStore:
         # 避免多条新记忆命中同一条旧记忆时互相覆盖、丢内容（保第一条更新，
         # 后续命中的改为新建一行，两条记忆都保留）。
         consumed: set[int] = set()
-        for m, emb in zip(memories, new_embs):
+        for m, emb in zip(memories, new_embs, strict=True):
             # 找一个最相似的旧记忆（已在本轮被覆盖的旧记忆不再参与匹配）
             best_idx, best_sim = -1, -1.0
             for i, r in enumerate(rows):

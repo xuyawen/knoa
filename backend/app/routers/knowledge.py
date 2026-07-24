@@ -321,8 +321,8 @@ async def list_documents(
     if department_id:
         try:
             base = base.where(Document.department_id == uuid.UUID(department_id))
-        except Exception:
-            raise HTTPException(status_code=400, detail="department_id 非法")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="department_id 非法") from None
     if tags:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
         if tag_list:
@@ -471,14 +471,14 @@ async def upload_document(
             source_path = normalize_url(payload.file_url)  # SSRF 校验：必须是本 OSS 桶地址
             raw = await fetch_url_bytes(source_path, max_bytes=settings.OSS_MAX_SIZE or 100 * 1024 * 1024)
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"file_url 非法：{e}")
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"从 OSS 拉取文件失败：{e}")
+            raise HTTPException(status_code=400, detail=f"file_url 非法：{e}") from e
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: convert any OSS fetch failure to 502)
+            raise HTTPException(status_code=502, detail=f"从 OSS 拉取文件失败：{e}") from e
     elif payload.content_b64:
         try:
             raw = base64.b64decode(payload.content_b64, validate=True)
-        except Exception:
-            raise HTTPException(status_code=422, detail="content_b64 不是合法 base64")
+        except Exception:  # noqa: BLE001  (intentional catch-all: return 422 if content_b64 not valid base64)
+            raise HTTPException(status_code=422, detail="content_b64 不是合法 base64") from None
     elif payload.content is not None:
         raw = payload.content.encode("utf-8")
     else:
@@ -505,7 +505,7 @@ async def upload_document(
         if store is not None and object_key:
             try:
                 await store.delete(object_key)
-            except Exception:
+            except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, ignore cleanup delete errors)
                 pass
 
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -515,13 +515,13 @@ async def upload_document(
             parsed = parse_document(filename, raw)
         except UnsupportedFormatError as e:
             await _cleanup()
-            raise HTTPException(status_code=415, detail=str(e))
+            raise HTTPException(status_code=415, detail=str(e)) from e
     elif ext in IMAGE_EXTS | AUDIO_EXTS | VIDEO_EXTS:
         try:
             parsed = await parse_multimodal(filename, raw, get_llm())
         except UnsupportedFormatError as e:
             await _cleanup()
-            raise HTTPException(status_code=415, detail=str(e))
+            raise HTTPException(status_code=415, detail=str(e)) from e
     else:
         await _cleanup()
         raise HTTPException(
@@ -557,8 +557,8 @@ async def upload_document(
     if payload.department_id:
         try:
             doc.department_id = uuid.UUID(payload.department_id)
-        except Exception:
-            raise HTTPException(status_code=400, detail="department_id 非法")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="department_id 非法") from None
     db.add(doc)
     # 先 flush 让 doc.id 生成，否则 task.document_id 会拿到 None（FK 落空）
     await db.flush()
@@ -751,7 +751,7 @@ async def _ingest_document_background(kb_id: str, doc_id: str, user_id: str) -> 
                 task.current_step = "完成"
                 task.completed_at = datetime.now(timezone.utc)
             await db.commit()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: background ingest task, log and skip on failure)
             logger.warning("background ingest failed kb=%s doc=%s: %s", kb_id, doc_id, e)
             if task is not None:
                 task.status = "failed"
@@ -863,7 +863,7 @@ async def delete_document(
     store = get_object_store()
     try:
         await store.delete(doc.source_path)
-    except Exception:
+    except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, ignore object-store delete error)
         pass
 
     # 7) 删文档本身
@@ -921,7 +921,7 @@ async def _delete_kb_cascade(db: AsyncSession, kb_id: str) -> None:
         # 删图谱节点（按 chunk_id 归属），连接失败静默跳过
         try:
             await GraphStore().delete_by_doc(db, kb_id, chunk_ids)
-        except Exception:
+        except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, ignore graph delete failure)
             pass
         # 先清 DocumentTask，再清 DocChunk，最后删 Document，避免 FK 冲突
         await db.execute(delete(DocumentTask).where(DocumentTask.document_id == doc.id))
@@ -930,12 +930,12 @@ async def _delete_kb_cascade(db: AsyncSession, kb_id: str) -> None:
         # 删 ES 索引，连接失败静默跳过
         try:
             await get_es().delete_by_doc(kb_id, str(doc.id))
-        except Exception:
+        except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, ignore ES delete failure)
             pass
         # 删对象存储原始文件，缺失不阻断删除
         try:
             await store.delete(doc.source_path)
-        except Exception:
+        except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, ignore object-store delete error)
             pass
         await db.delete(doc)
     # 清库级权限
@@ -1001,7 +1001,7 @@ async def set_kb_members(
         try:
             uid = uuid.UUID(m.userId)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"非法的 userId: {m.userId}")
+            raise HTTPException(status_code=400, detail=f"非法的 userId: {m.userId}") from None
         if m.level not in LEVEL_ORDER:
             raise HTTPException(status_code=400, detail=f"非法的权限级别: {m.level}")
         if uid not in seen or LEVEL_ORDER[m.level] > LEVEL_ORDER[seen[uid]]:

@@ -27,7 +27,7 @@ async def create_feedback(
     try:
         msg_id = uuid.UUID(payload.message_id)
     except ValueError:
-        raise HTTPException(400, "invalid message_id")
+        raise HTTPException(400, "invalid message_id") from None
 
     msg = (
         await db.execute(select(ChatMessage).where(ChatMessage.id == msg_id))
@@ -60,7 +60,7 @@ async def delete_feedback(
     try:
         msg_id = uuid.UUID(message_id)
     except ValueError:
-        raise HTTPException(400, "invalid message_id")
+        raise HTTPException(400, "invalid message_id") from None
 
     await db.execute(
         delete(MessageFeedback).where(MessageFeedback.message_id == msg_id)

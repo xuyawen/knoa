@@ -35,7 +35,7 @@ async def oss_sign(
     try:
         sign = build_sign(payload.prefix, payload.filename, payload.expire_seconds)
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     return {
         "accessKeyId": sign.access_key_id,
         "policy": sign.policy,

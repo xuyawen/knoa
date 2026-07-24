@@ -63,23 +63,23 @@ class WebSearcher:
                     return await self._search_tavily(query, max_results)
                 if provider == "ddg":
                     return await self._search_ddg(query, max_results)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, try next provider / return empty on failure)
                 logger.warning("web_search provider=%s failed: %s", provider, e)
             return []
         # auto：原有优先级降级逻辑
         if settings.BOCHA_API_KEY:
             try:
                 return await self._search_bocha(query, max_results)
-            except Exception as e:  # BoCha 失败降级到 Tavily / DDG，保证联网能力可用
+            except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, BoCha failure falls back to Tavily/DDG)
                 logger.warning("BoCha search failed, fallback: %s", e)
         if settings.TAVILY_API_KEY:
             try:
                 return await self._search_tavily(query, max_results)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, Tavily failure falls back to DDG)
                 logger.warning("Tavily search failed, fallback to DDG: %s", e)
         try:
             return await self._search_ddg(query, max_results)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, return empty if all web search fails)
             logger.warning("DDG search failed: %s", e)
             return []
 

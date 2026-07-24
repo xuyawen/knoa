@@ -105,7 +105,7 @@ async def login_rate_limit(request: Request) -> None:
             raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
     except HTTPException:
         raise
-    except Exception:
+    except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, skip rate limit if redis unavailable)
         logger.warning("login rate limit skipped (redis unavailable)")
 
 
@@ -137,7 +137,7 @@ async def logout(request: Request, response: Response):
             if jti:
                 ttl = int(payload.get("exp", 0)) - int(time.time())
                 await revoke_token(jti, ttl)
-        except Exception:
+        except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, skip server-side revoke if token undecodable)
             pass
     return {"detail": "已退出登录"}
 

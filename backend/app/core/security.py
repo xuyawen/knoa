@@ -59,15 +59,15 @@ def decode_access_token(token: str) -> dict:
     try:
         seg_h, seg_p, sig = token.split(".")
     except ValueError:
-        raise HTTPException(status_code=401, detail="无效令牌")
+        raise HTTPException(status_code=401, detail="无效令牌") from None
     signing_input = f"{seg_h}.{seg_p}".encode()
     expected = hmac.new(settings.JWT_SECRET.encode(), signing_input, hashlib.sha256).digest()
     if not hmac.compare_digest(_b64url_encode(expected), sig):
         raise HTTPException(status_code=401, detail="令牌签名无效")
     try:
         payload = json.loads(_b64url_decode(seg_p))
-    except Exception:
-        raise HTTPException(status_code=401, detail="令牌解析失败")
+    except Exception:  # noqa: BLE001  (intentional catch-all: any token payload parse failure → 401)
+        raise HTTPException(status_code=401, detail="令牌解析失败") from None
     if payload.get("exp", 0) < int(time.time()):
         raise HTTPException(status_code=401, detail="令牌已过期")
     return payload
@@ -77,7 +77,7 @@ async def revoke_token(jti: str, ttl: int) -> None:
     """注销时把 jti 加入 Redis 黑名单，TTL=剩余有效期；Redis 不可用时静默降级。"""
     try:
         await get_redis().redis.set(f"knoa:revoked:{jti}", "1", ex=max(int(ttl), 1))
-    except Exception:
+    except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, degrade silently if redis unavailable)
         logger.warning("revoke token failed (redis unavailable?)")
 
 
@@ -87,7 +87,7 @@ async def is_token_revoked(jti: str) -> bool:
         return False
     try:
         return await get_redis().redis.exists(f"knoa:revoked:{jti}") == 1
-    except Exception:
+    except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, treat as not revoked if redis unavailable)
         return False
 
 

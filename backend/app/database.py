@@ -206,7 +206,7 @@ async def init_db():
     try:
         await _run_alembic_upgrade()
         logger.info("init_db: alembic upgrade head done")
-    except Exception as e:          # alembic 缺失 / 库未 stamp / 连接失败等
+    except Exception as e:          # noqa: BLE001  (intentional catch-all: best-effort, fallback to create_all if alembic/migration unavailable)
         logger.warning("init_db: alembic unavailable, fallback create_all: %s", e)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

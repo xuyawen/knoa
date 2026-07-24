@@ -46,7 +46,7 @@ class Reranker:
 
                 self._ce = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
                 logger.info("reranker: cross-encoder loaded")
-            except Exception as e:  # 无依赖 / 无网络 → 回退规则重排
+            except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, fallback to lexical-semantic reranker if cross-encoder unavailable)
                 logger.info("reranker: cross-encoder unavailable (%s), fallback lexical-semantic", e)
                 self._ce = None
         return self._ce
@@ -63,9 +63,9 @@ class Reranker:
             try:
                 pairs = [(question, c.get("content", "")) for c in candidates]
                 scores = [float(s) for s in ce.predict(pairs)]
-                ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
+                ranked = sorted(zip(candidates, scores, strict=True), key=lambda x: x[1], reverse=True)
                 return [c for c, _ in ranked][:top_k]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, fallback to lexical-semantic if cross-encoder predict fails)
                 logger.warning("reranker: cross-encoder predict failed (%s), fallback", e)
 
         # ---- 回退：lexical-semantic 规则重排 ----

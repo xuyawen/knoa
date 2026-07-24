@@ -68,7 +68,7 @@ async def delete_memory(
     try:
         mid = uuid.UUID(memory_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="非法的记忆 ID")
+        raise HTTPException(status_code=400, detail="非法的记忆 ID") from None
     row = (
         await db.execute(select(Memory).where(Memory.id == mid))
     ).scalar_one_or_none()

@@ -81,7 +81,7 @@ class DocumentIngester:
                     return
                 await self._graph.extract(kb_id, doc.title, chunk_infos, s)
                 await s.commit()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: background graph extract task, log and skip on failure)
             logger.warning("background graph extract failed (kb=%s doc=%s): %s", kb_id, doc_id, e)
 
     async def ingest_dir(self, kb_id: str, dir_path: Path, db: AsyncSession):

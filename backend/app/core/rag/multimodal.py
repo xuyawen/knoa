@@ -65,7 +65,7 @@ async def parse_image(filename: str, data: bytes, llm) -> ParseResult:
     try:
         async for chunk in llm.stream_chat(messages, temperature=0.2, max_tokens=1200):
             parts.append(chunk)
-    except Exception as e:  # 视觉调用失败不阻塞上传，降级占位
+    except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, degrade to placeholder if vision call fails)
         logger.warning("image vision parse failed (fallback placeholder): %s", e)
         return ParseResult(f"[图片 {filename}：视觉描述生成失败，仅记录元信息]", "image")
     text = "".join(parts).strip()
@@ -91,7 +91,7 @@ async def _transcribe(filename: str, data: bytes) -> str | None:
             model=model, file=(filename, io.BytesIO(data))
         )
         return (getattr(res, "text", None) or "").strip() or None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, fallback to None if STT transcription fails)
         logger.warning("STT transcription failed (fallback placeholder): %s", e)
         return None
 

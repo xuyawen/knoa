@@ -58,7 +58,7 @@ async def create_role(
     try:
         validate_permissions(payload.permissions)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     key = payload.key
     if not key:
@@ -120,7 +120,7 @@ async def set_role_permissions(
     try:
         validate_permissions(payload.permissions)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     await db.execute(
         RolePermission.__table__.delete().where(RolePermission.role_id == role.id)

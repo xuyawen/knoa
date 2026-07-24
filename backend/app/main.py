@@ -104,14 +104,14 @@ async def lifespan(app: FastAPI):
     # 统一关闭 ES 单例（httpx 连接池），避免连接泄漏（P1-1）
     try:
         await get_es().aclose()
-    except Exception:
+    except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, ignore ES close errors during shutdown)
         pass
     # 统一关闭 Redis 连接（main 启动期创建单例，此前未关闭 → 连接泄漏）
     try:
         from app.deps import get_redis
 
         await get_redis().close()
-    except Exception:
+    except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, ignore redis close errors during shutdown)
         pass
     # 统一关闭对象存储连接（S3 模式 httpx 连接池此前未关闭 → 泄漏）
     try:
@@ -120,7 +120,7 @@ async def lifespan(app: FastAPI):
         store = get_object_store()
         if hasattr(store, "aclose"):
             await store.aclose()
-    except Exception:
+    except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, ignore object-store close errors during shutdown)
         pass
 
 
@@ -162,7 +162,7 @@ async def sliding_session(request: Request, call_next):
                 new_token = create_access_token(
                     payload["sub"], payload["username"], payload["role"]
                 )
-        except Exception:
+        except Exception:  # noqa: BLE001  (intentional catch-all: don't reissue token on decode failure, route handles 401)
             # 令牌无效/已过期：不重新签发，交由路由自身按原逻辑 401。
             new_token = None
     response = await call_next(request)

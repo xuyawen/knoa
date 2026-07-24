@@ -65,7 +65,7 @@ def _extract_json(text: str):
         return None
     try:
         return json.loads(text)
-    except Exception:
+    except json.JSONDecodeError:
         pass
     # 去 ```json ``` 围栏
     cleaned = re.sub(r"```(?:json)?", "", text).strip()
@@ -84,7 +84,7 @@ def _extract_json(text: str):
                 if depth == 0:
                     try:
                         return json.loads(cleaned[start : i + 1])
-                    except Exception:
+                    except json.JSONDecodeError:
                         return None
         return None
 
@@ -192,7 +192,7 @@ class GraphStore:
                 c
                 for c in await self._stream_completion(doc_title, text)
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort fallback, skip graph build on any LLM failure)
             logger.warning("graph extract LLM failed (skip graph for doc %s): %s", doc_title, e)
             return
 
@@ -234,7 +234,7 @@ class GraphStore:
         labels = [lbl for _, lbl in valid]
         try:
             embeddings = await self.embedder.embed(labels)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort fallback, skip graph if embedding fails)
             logger.warning("graph embed failed (skip graph for doc %s): %s", doc_title, e)
             return
 
@@ -391,7 +391,7 @@ class GraphStore:
         # 2) 问题向量，与节点向量做余弦，挑最相关的作为种子实体
         try:
             q_emb = await self.embedder.embed_query(question)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort fallback, skip retrieval if embed fails)
             logger.warning("graph retrieve embed failed (skip): %s", e)
             return []
 
@@ -479,7 +479,7 @@ class GraphStore:
 
         try:
             q_emb = await self.embedder.embed_query(question)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort fallback, skip reasoning if embed fails)
             logger.warning("graph multihop embed failed (skip): %s", e)
             return [], []
 

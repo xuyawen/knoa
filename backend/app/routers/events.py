@@ -87,7 +87,7 @@ async def receive_event(request: Request):
 
     try:
         payload = json.loads(raw)
-    except Exception:
+    except json.JSONDecodeError:
         return {"ok": False}
 
     if not isinstance(payload, dict):

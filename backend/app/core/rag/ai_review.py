@@ -78,7 +78,7 @@ async def ai_review_document(
     if chunks and content.strip():
         try:
             qvecs = np.array(await embedder.embed([c["content"] for c in chunks]), dtype=float)
-        except Exception as e:  # 嵌入不可用则跳过相似度，仅走 LLM 定性
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, skip similarity if embedding unavailable)
             qvecs = np.array([])
             logger.warning("embedding failed, skip similarity: %s", e)
         if qvecs.size:
@@ -156,7 +156,7 @@ async def ai_review_document(
         outdated_findings = parsed.get("outdated_findings") or []
         quality_notes = parsed.get("quality_notes") or []
         suggested_kb = parsed.get("suggested_kb") or None
-    except Exception as e:  # LLM 不可用 → 降级，不阻断审核流程
+    except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, degrade to manual review if LLM fails)
         logger.warning("LLM call failed, degrade to manual review: %s", e)
         verdict = "manual_review"
         summary = "AI 分析服务暂时不可用，已降级为人工复核，请人工判断。"

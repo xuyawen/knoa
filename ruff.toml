@@ -1,6 +1,9 @@
-# 轻量代码质量门禁——CI 中作为**阻塞**关卡运行（ci.yml 无 continue-on-error）。
-# 仅选 pyflakes（F）规则：抓未定义名 / 未使用导入 / 重复定义等硬错误，
-# 避免行宽、格式类噪音干扰；后续可按需扩展到 E / W / I 等。
-[lint]
-select = ["F"]
+# 代码质量门禁——CI 阻塞关卡（ci.yml 无 continue-on-error）。
+# 规则集：F(硬错误) + BLE(盲捕异常) + DTZ(显式时区,统一UTC) + B(bugbear)。
+# B008 忽略：FastAPI 的 Depends(...) 依赖注入惯用法属误报。
+# 注：ruff 0.16 要求 line-length 为顶级键（不能放在 [lint] 内）。
 line-length = 120
+
+[lint]
+select = ["F", "BLE", "DTZ", "B"]
+ignore = ["B008"]

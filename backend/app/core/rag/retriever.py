@@ -153,7 +153,7 @@ class HybridRetriever:
 
         for rank, (idx, score) in enumerate(vector_ranked):
             add_chunk(idx, rank, 1.0 - float(score))
-        for rank, (idx, score) in enumerate(bm25_ranked):
+        for rank, (idx, _) in enumerate(bm25_ranked):
             if idx < len(chunks):
                 add_chunk(idx, rank, 0.0)
 

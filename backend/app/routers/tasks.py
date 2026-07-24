@@ -56,8 +56,8 @@ async def list_tasks(
     if document_id:
         try:
             stmt = stmt.where(DocumentTask.document_id == uuid.UUID(document_id))
-        except Exception:
-            raise HTTPException(status_code=400, detail="document_id 非法")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="document_id 非法") from None
     if kb_id:
         stmt = stmt.where(DocumentTask.kb_id == kb_id)
     if user.role != "admin":
@@ -84,8 +84,8 @@ async def get_task(
 ):
     try:
         tid = uuid.UUID(task_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="task_id 非法")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="task_id 非法") from None
     row = (
         await db.execute(
             select(DocumentTask, Document.title)

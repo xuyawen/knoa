@@ -25,7 +25,7 @@ async def get_source(
     try:
         UUID(chunk_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="非法的 chunk id")
+        raise HTTPException(status_code=400, detail="非法的 chunk id") from None
 
     chunk = await db.scalar(select(DocChunk).where(DocChunk.id == chunk_id))
     if chunk is None:

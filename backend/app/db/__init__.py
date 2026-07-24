@@ -178,7 +178,7 @@ class User(Base):
                 "sha256", password.encode(), bytes.fromhex(salt), int(iter_s)
             )
             return secrets.compare_digest(dk2.hex(), dk)
-        except Exception:
+        except Exception:  # noqa: BLE001  (intentional catch-all: treat invalid/unparseable password hash as auth failure)
             return False
 
 

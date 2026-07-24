@@ -61,8 +61,8 @@ def parse_docx(filename: str, data: bytes) -> ParseResult:
             # 防御 zip bomb：解压后正文超阈值直接拒绝，避免恶意 docx 撑爆内存
             if len(xml_data) > 50 * 1024 * 1024:
                 raise UnsupportedFormatError("文档内容过大，疑似压缩炸弹，已拒绝解析")
-    except zipfile.BadZipFile:
-        raise UnsupportedFormatError("文件不是 zip 包，无法当作 .docx 解析")
+    except zipfile.BadZipFile as e:
+        raise UnsupportedFormatError("文件不是 zip 包，无法当作 .docx 解析") from e
 
     ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
     root = ET.fromstring(xml_data)
@@ -81,7 +81,7 @@ def parse_pdf(filename: str, data: bytes) -> ParseResult:
         raise UnsupportedFormatError(
             "PDF 解析需要 pypdf（纯 Python）。当前环境未安装；"
             "请在部署环境执行 `pip install pypdf` 后重试。"
-        )
+        ) from None
     reader = PdfReader(io.BytesIO(data))
     pages = [page.extract_text() or "" for page in reader.pages]
     return ParseResult("\n".join(pages), "pdf")

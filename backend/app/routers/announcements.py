@@ -77,7 +77,7 @@ async def mark_announcement_read(
     try:
         ann_uuid = uuid.UUID(ann_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="公告 ID 格式错误")
+        raise HTTPException(status_code=400, detail="公告 ID 格式错误") from None
     exists = await db.scalar(
         select(Announcement).where(Announcement.id == ann_uuid)
     )
