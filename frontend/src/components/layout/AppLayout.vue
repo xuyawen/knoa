@@ -82,10 +82,10 @@ interface SubItem {
 const subMenus: Record<string, SubItem[]> = {
   dashboard: [
     { label: '数据总览', icon: 'grid', to: '/dashboard', activeNames: ['dashboard'] },
-    { label: '访问分析', icon: 'chart', to: '/dashboard/analytics', activeNames: ['dash-analytics'] },
     { label: '文档统计', icon: 'doc', to: '/dashboard/docs', activeNames: ['dash-docs'] },
-    { label: '用户统计', icon: 'users', to: '/dashboard/users', activeNames: ['dash-users'] },
     { label: '热门内容', icon: 'fire', to: '/dashboard/popular', activeNames: ['dash-popular'] },
+    { label: '访问分析', icon: 'chart', to: '/dashboard/analytics', activeNames: ['dash-analytics'] },
+    { label: '用户统计', icon: 'users', to: '/dashboard/users', activeNames: ['dash-users'] },
     { label: '系统公告', icon: 'bell', to: '/dashboard/announcements', activeNames: ['dash-announcements'] },
   ],
   documents: [
