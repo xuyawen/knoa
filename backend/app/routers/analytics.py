@@ -196,6 +196,7 @@ async def user_stats(
 
     by_role = (await db.execute(
         select(Role.key, func.count())
+        .select_from(User)
         .join(Role, Role.id == User.role_id)
         .group_by(Role.key)
         .order_by(func.count().desc())
