@@ -61,10 +61,12 @@ class FakeEmbedder:
     def __init__(self, *args, **kwargs):
         self.dim = DIM
 
-    async def embed(self, texts, batch_size: int = 10):
+    # dimensions 为真实 EmbeddingModel 新增的自定义维度参数；桩需与之对齐，
+    # 否则 ingest/ask 调用会抛 TypeError（同 FakeLLM 的 model 参数对齐逻辑）。
+    async def embed(self, texts, batch_size: int = 10, **kwargs):
         return [_fake_vec(t) for t in texts]
 
-    async def embed_query(self, text: str):
+    async def embed_query(self, text: str, **kwargs):
         return _fake_vec(text)
 
 

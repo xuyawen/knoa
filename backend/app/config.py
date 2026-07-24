@@ -5,11 +5,13 @@ class Settings(BaseSettings):
     # 数据库
     DATABASE_URL: str = "postgresql+asyncpg://knoa:knoa@localhost:5432/knoa"
     REDIS_URL: str = "redis://localhost:6379/0"
-    # Embedding (OpenAI-compatible API)
-    EMBEDDING_BASE_URL: str = "https://api.openai.com/v1"
+    # Embedding (OpenAI 兼容 API；现用阿里云百炼 text-embedding-v4，走 DashScope 兼容端点)
+    EMBEDDING_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     EMBEDDING_API_KEY: str = ""
-    EMBEDDING_MODEL: str = "text-embedding-3-small"
-    EMBEDDING_DIM: int = 1536
+    EMBEDDING_MODEL: str = "text-embedding-v4"
+    # v4 默认 1024 维；可选 64/128/256/512/768/1024/1536/2048。
+    # 改维度时须同步改下方 _KNOWN_EMBEDDING_DIMS 并重新摄入全部文档/记忆（不同维度向量空间不同）。
+    EMBEDDING_DIM: int = 1024
     # LLM (M3 启用)
     LLM_BASE_URL: str = "https://api.deepseek.com/v1"
     LLM_API_KEY: str = ""
@@ -132,6 +134,9 @@ class Settings(BaseSettings):
 # 用于生产启动期维度一致性校验（避免 EMBEDDING_DIM 与模型实际维度错配
 # 导致 pgvector 检索因维度不符全过滤空、直接失效）。
 _KNOWN_EMBEDDING_DIMS: dict[str, int] = {
+    # text-embedding-v4（阿里云百炼 Qwen3-Embedding）维度可配，1024 为默认值；
+    # 若改用 1536/2048 等，须同步把这里改为对应值，否则生产校验会因维度不符拦截启动。
+    "text-embedding-v4": 1024,
     "text-embedding-3-small": 1536,
     "text-embedding-3-large": 3072,
     "text-embedding-ada-002": 1536,

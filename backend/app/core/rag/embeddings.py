@@ -19,13 +19,19 @@ class EmbeddingModel:
         all_embeddings = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
-            resp = await self.client.embeddings.create(model=self.model, input=batch)
+            # dimensions 仅 v3/v4 等支持自定义维度的模型生效；显式传维度，
+            # 确保返回向量长度 == settings.EMBEDDING_DIM（与库内向量一致，否则检索维度错配全空）。
+            resp = await self.client.embeddings.create(
+                model=self.model, input=batch, dimensions=self.dim
+            )
             all_embeddings.extend(d.embedding for d in sorted(resp.data, key=lambda x: x.index))
         return all_embeddings
 
     async def embed_query(self, text: str) -> list[float]:
         """编码查询文本"""
-        resp = await self.client.embeddings.create(model=self.model, input=text)
+        resp = await self.client.embeddings.create(
+            model=self.model, input=text, dimensions=self.dim
+        )
         data = resp.data
         if not data:
             raise ValueError(f"embedding 服务返回空结果 (input={text[:50]!r})")
