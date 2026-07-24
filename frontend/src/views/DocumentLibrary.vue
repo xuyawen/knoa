@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 文档管理 — 按 640(3).png 截图 1:1 还原，接真实文档生命周期。
-// section 由路由决定（mine/public/department/archive）。
+// scope 由路由决定（mine/public/department/archive）。
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
@@ -141,8 +141,8 @@ async function saveMembers() {
   }
 }
 
-const props = defineProps<{ section?: string }>()
-const section = computed(() => props.section ?? 'mine')
+const props = defineProps<{ scope?: string }>()
+const scope = computed(() => props.scope ?? 'mine')
 
 const selectedKb = ref<string>('')
 const docs = ref<DocumentItem[]>([])
@@ -247,10 +247,10 @@ const aiReviewLoading = ref(false)
 // ponytail: 所有过滤下推后端，前端不再做客户端过滤（旧 scopedDocs 已删）。
 function buildQuery(): Record<string, string | number | boolean> {
   const q: Record<string, string | number | boolean> = { page: currentPage.value, size: pageSize.value }
-  if (section.value === 'mine') q.mine = true
-  else if (section.value === 'public') q.scope = 'public'
-  else if (section.value === 'department') q.scope = 'department'
-  else if (section.value === 'archive') q.status = '已拒绝'
+  if (scope.value === 'mine') q.mine = true
+  else if (scope.value === 'public') q.scope = 'public'
+  else if (scope.value === 'department') q.scope = 'department'
+  else if (scope.value === 'archive') q.status = '已拒绝'
   if (filterScope.value) q.scope = filterScope.value
   if (filterType.value) q.type = filterType.value
   if (filterStatus.value) q.status = filterStatus.value
@@ -301,7 +301,7 @@ watch(selectedKb, async () => {
   await loadDocs()
 })
 
-watch(section, async () => {
+watch(scope, async () => {
   currentPage.value = 1
   await loadDocs()
 })
@@ -643,7 +643,7 @@ async function confirmBatchDelete() {
 <template>
   <div class="docs-page">
     <!-- 分区说明横幅 -->
-    <div v-if="section === 'archive'" class="scope-banner warn">
+    <div v-if="scope === 'archive'" class="scope-banner warn">
       <Icon name="archive" :size="14" />
       <span>文档归档：仅展示状态为「已拒绝」的文档。</span>
     </div>
