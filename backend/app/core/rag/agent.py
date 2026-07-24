@@ -802,7 +802,7 @@ class AgenticRAGAgent:
                     "请基于以上对话上下文及来源资料回答用户问题。"
                     "引用时使用 [1] [2] 标注编号；若某条标记为联网来源可注明「据联网信息」；"
                     "确实无来源覆盖时再如实说明。"
-                    + self._concise_suffix(),
+                    + self._concise_suffix()
                 ),
             })
         else:

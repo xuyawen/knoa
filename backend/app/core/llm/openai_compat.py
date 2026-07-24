@@ -4,9 +4,13 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
+import logging
+
 from openai import AsyncOpenAI
 
 from app.core.llm.base import LLMConfig, ToolCallResult
+
+logger = logging.getLogger("knoa.llm")
 
 try:
     from langsmith import traceable
@@ -52,8 +56,10 @@ class OpenAICompatProvider:
             }
             if top_p is not None:
                 params["top_p"] = top_p
+            params["messages"] = self._normalize_messages(messages)
             stream = await self.client.chat.completions.create(**params)
         except Exception as e:
+            self._diag_messages("stream_chat", messages)
             raise ValueError(f"LLM API 请求失败: {e}")
 
         async for chunk in stream:
@@ -85,7 +91,12 @@ class OpenAICompatProvider:
         }
         if top_p is not None:
             params["top_p"] = top_p
-        response = await self.client.chat.completions.create(**params)
+        params["messages"] = self._normalize_messages(messages)
+        try:
+            response = await self.client.chat.completions.create(**params)
+        except Exception as e:
+            self._diag_messages("chat", messages)
+            raise ValueError(f"LLM API 请求失败: {e}")
         msg = response.choices[0].message
         # 只返回真正的回答 content，丢弃 reasoning_content（推理过程不对外暴露）
         return (getattr(msg, "content", "") or "").strip()
@@ -122,12 +133,16 @@ class OpenAICompatProvider:
         else:
             augmented.insert(0, {"role": "system", "content": decision})
 
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=augmented,
-            temperature=temperature or 0.2,  # agent 决策用更低温度，更确定
-            max_tokens=self.max_tokens,
-        )
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=self._normalize_messages(augmented),
+                temperature=temperature or 0.2,  # agent 决策用更低温度，更确定
+                max_tokens=self.max_tokens,
+            )
+        except Exception as e:
+            self._diag_messages("tool_call", augmented)
+            raise ValueError(f"LLM API 请求失败: {e}")
         msg = response.choices[0].message
         content = (getattr(msg, "content", "") or "").strip()
 
@@ -145,6 +160,42 @@ class OpenAICompatProvider:
         name = parsed.get("action") or parsed.get("name") or "direct_answer"
         args = {k: v for k, v in parsed.items() if k not in ("action", "name")}
         return ToolCallResult(name=name, arguments=args, raw_text=raw_text)
+
+    @staticmethod
+    def _normalize_messages(messages: list) -> list:
+        """防御：把误写成 tuple 的 content 归一化为 str。
+
+        手误（如拼接末尾多一个逗号）会让 `("text",)` 成为单元素 tuple，
+        而非字符串。上游会把 content 当列表遍历，对 str 元素调 .get() 报
+        'str' object has no attribute 'get'。这里在发送前兜底修复。
+        """
+        cleaned = []
+        for m in messages:
+            if not isinstance(m, dict):
+                continue
+            c = m.get("content")
+            if isinstance(c, tuple):
+                c = c[0] if len(c) == 1 else "".join(x for x in c if isinstance(x, str))
+            cleaned.append({**m, "content": c})
+        return cleaned
+
+    @staticmethod
+    def _diag_messages(caller: str, messages: list) -> None:
+        """出错时打印 messages 结构，定位 'str' object has no attribute 'get' 等。"""
+        diag = []
+        for i, m in enumerate(messages):
+            if isinstance(m, dict):
+                c = m.get("content")
+                entry = {"i": i, "role": m.get("role"), "ctype": type(c).__name__}
+                if isinstance(c, list):
+                    entry["elems"] = [type(x).__name__ for x in c]
+                    entry["has_str_elem"] = any(not isinstance(x, dict) for x in c)
+                if isinstance(c, (tuple, list)):
+                    entry["content_repr"] = repr(c)[:400]
+                diag.append(entry)
+            else:
+                diag.append({"i": i, "not_dict": type(m).__name__, "value": repr(m)[:120]})
+        logger.warning("[diag:%s] messages=%s", caller, diag)
 
     @staticmethod
     def _build_decision_prompt(tools: list[dict]) -> str:
