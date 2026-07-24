@@ -45,6 +45,15 @@ const sourceCount = ref(Number(ls('sourceCount', '5')))
 const topKOptions = [3, 5, 8, 10].map(v => ({ value: v, label: `${v} 条` }))
 const sourceOptions = [3, 5, 8, 10].map(v => ({ value: v, label: `${v} 条` }))
 
+// 联网搜索 provider：auto 走后端 env 优先级降级，其余显式指定单一服务
+const webProvider = ref(ls('webProvider', 'auto'))
+const webProviderOptions = [
+  { value: 'auto', label: '自动（按可用密钥优先级）' },
+  { value: 'bocha', label: 'BoCha 博查（中文检索质量最佳）' },
+  { value: 'tavily', label: 'Tavily（LLM 检索专用）' },
+  { value: 'ddg', label: 'DuckDuckGo（无需密钥兜底）' },
+]
+
 // ════════════════════════════════════════
 // Section 3 — 回答风格
 // ════════════════════════════════════════
@@ -73,6 +82,7 @@ function saveAll() {
     topK: String(retrievalTopK.value),
     webSearch: String(webSearchEnabled.value),
     sourceCount: String(sourceCount.value),
+    webProvider: webProvider.value,
     systemPrompt: systemPrompt.value,
     showThinking: String(showThinking.value),
     conciseMode: String(conciseMode.value),
@@ -91,6 +101,7 @@ function resetDefaults() {
   retrievalTopK.value = 5
   webSearchEnabled.value = true
   sourceCount.value = 5
+  webProvider.value = 'auto'
   systemPrompt.value = ''
   showThinking.value = true
   conciseMode.value = false
@@ -140,7 +151,6 @@ function resetDefaults() {
                 <span class="cfg-range-val">{{ topP.toFixed(2) }}</span>
               </div>
               <span class="cfg-note">核采样阈值，与 Temperature 二选一调参即可。推荐保持 0.9 左右</span>
-              <span class="cfg-badge pending">需后端支持</span>
             </div>
           </div>
 
@@ -170,7 +180,6 @@ function resetDefaults() {
             <div class="cfg-control">
               <CustomSelect v-model.number="retrievalTopK" :options="topKOptions" />
               <span class="cfg-note">每次检索从知识库召回的文档片段数量。越多覆盖面越广但噪声也越多</span>
-              <span class="cfg-badge pending">需后端支持</span>
             </div>
           </div>
 
@@ -187,7 +196,14 @@ function resetDefaults() {
                 <span class="toggle-knob" />
               </button>
               <span class="cfg-note">{{ webSearchEnabled ? '已开启：实时信息（汇率/股价/新闻）会优先联网搜索' : '已关闭：仅使用知识库内文档回答' }}</span>
-              <span class="cfg-badge pending">需后端支持</span>
+            </div>
+          </div>
+
+          <div class="cfg-row">
+            <label class="cfg-label">搜索服务</label>
+            <div class="cfg-control">
+              <CustomSelect v-model="webProvider" :options="webProviderOptions" />
+              <span class="cfg-note">指定联网搜索服务商；选「自动」则按后端可用密钥优先级降级</span>
             </div>
           </div>
 
@@ -196,7 +212,6 @@ function resetDefaults() {
             <div class="cfg-control">
               <CustomSelect v-model.number="sourceCount" :options="sourceOptions" />
               <span class="cfg-note">回答下方展示的参考来源条数上限</span>
-              <span class="cfg-badge pending">需后端支持</span>
             </div>
           </div>
         </div>
@@ -389,7 +404,7 @@ function resetDefaults() {
 .cfg-label {
   width: 110px;
   flex-shrink: 0;
-  padding-top: 7px;
+  padding-top: 2px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);

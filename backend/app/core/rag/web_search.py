@@ -49,8 +49,24 @@ class WebSearcher:
     async def aclose(self):
         await self._client.aclose()
 
-    async def search(self, query: str, max_results: int = 5) -> list[dict]:
-        """返回联网检索结果（统一结构）。provider 依优先级尝试，异常逐级降级，全失败返回空列表。"""
+    async def search(self, query: str, max_results: int = 5, provider: str | None = None) -> list[dict]:
+        """返回联网检索结果（统一结构）。
+
+        provider: 'auto'(默认，按 env 优先级 BoCha→Tavily→DDG 逐级降级)
+                  或显式指定 'bocha' | 'tavily' | 'ddg'（指定 provider 失败不再降级，返回空列表）
+        """
+        if provider and provider != "auto":
+            try:
+                if provider == "bocha" and settings.BOCHA_API_KEY:
+                    return await self._search_bocha(query, max_results)
+                if provider == "tavily" and settings.TAVILY_API_KEY:
+                    return await self._search_tavily(query, max_results)
+                if provider == "ddg":
+                    return await self._search_ddg(query, max_results)
+            except Exception as e:
+                logger.warning("web_search provider=%s failed: %s", provider, e)
+            return []
+        # auto：原有优先级降级逻辑
         if settings.BOCHA_API_KEY:
             try:
                 return await self._search_bocha(query, max_results)

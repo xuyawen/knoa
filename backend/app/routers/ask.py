@@ -112,6 +112,9 @@ async def ask(
                 web_search=req.web_search,
                 system_prompt=req.system_prompt,
                 concise_mode=req.concise_mode,
+                max_tokens=req.max_tokens,
+                source_count=req.source_count,
+                web_provider=req.web_provider,
             ):
                 # 客户端断开（用户点了「停止」）→ 优雅退出，不再继续烧 LLM 算力
                 if await request.is_disconnected():

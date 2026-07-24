@@ -39,7 +39,9 @@ class AskRequest(CamelModel):
     top_p: float | None = None            # 核采样阈值
     max_tokens: int | None = None         # 单次最大生成长度
     top_k: int | None = None              # 知识库检索召回数量
+    source_count: int | None = None       # 最终引用来源数上限
     web_search: bool | None = None        # 是否允许联网搜索
+    web_provider: str | None = None       # 联网搜索 provider：auto/bocha/tavily/ddg
     system_prompt: str | None = None      # 追加到系统 Prompt 的自定义人设指令
     concise_mode: bool | None = None      # 简洁模式：回答更精炼
 

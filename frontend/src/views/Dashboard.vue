@@ -169,18 +169,31 @@ const activityLog = computed<Array<{ time: string; user: string; type: string; c
 )
 
 // 相关文档点击预览（与文档审核页一致）
+const showPreview = ref(false)
 const previewDoc = ref<DocumentDetail | null>(null)
 const previewLoading = ref(false)
+function handleDocPreview(row: { docId: string | null; file: string }) {
+  if (row.docId) {
+    openPreview(row.docId)
+  }
+}
 async function openPreview(docId: string) {
-  previewLoading.value = true
+  showPreview.value = false
   previewDoc.value = null
+  previewLoading.value = true
   try {
-    previewDoc.value = await getDocumentById(docId)
+    const result = await getDocumentById(docId)
+    previewDoc.value = result
+    showPreview.value = true
   } catch (e: any) {
     useToastStore().error(`加载文档失败：${e?.message || e}`)
   } finally {
     previewLoading.value = false
   }
+}
+function closePreview() {
+  showPreview.value = false
+  previewDoc.value = null
 }
 function fmtTime(iso: string): string {
   const d = new Date(iso)
@@ -533,7 +546,7 @@ onMounted(() => {
             </template>
             <template v-else-if="col.key === 'content'">{{ row.content }}</template>
             <template v-else-if="col.key === 'file'">
-              <span v-if="row.file" class="doc-link" @click="row.docId && openPreview(row.docId)">{{ row.file }}</span>
+              <span v-if="row.file" class="doc-link" @click.stop="handleDocPreview(row)">{{ row.file }}</span>
               <span v-else class="na">—</span>
             </template>
           </template>
@@ -828,12 +841,13 @@ onMounted(() => {
 
     <!-- ====== 系统公告（真实：getAnnouncements 列表 + admin 管理）====== -->
     <template v-else>
-      <div v-if="auth.isAdmin" class="ann-toolbar">
-        <button class="btn btn-primary btn-sm" @click="openCreateAnn">
-          <Icon name="plus" :size="14" /> 新建公告
-        </button>
-      </div>
-      <div v-if="announcements.length" class="ann-list">
+      <div class="ann-panel card">
+        <div v-if="auth.isAdmin" class="ann-toolbar">
+          <button class="btn btn-primary btn-sm" @click="openCreateAnn">
+            <Icon name="plus" :size="14" /> 新建公告
+          </button>
+        </div>
+        <div v-if="announcements.length" class="ann-list">
         <div v-for="a in announcements" :key="a.id" class="ann-card card" :class="'lv-' + a.level">
           <div class="ann-head">
             <Icon :name="a.pinned ? 'pin' : 'bell'" :size="15" class="ann-ic" />
@@ -853,6 +867,7 @@ onMounted(() => {
         </div>
       </div>
       <div v-else class="empty-hint">暂无系统公告</div>
+      </div>
 
       <!-- 公告编辑弹框 -->
       <AppModal :show="showAnnModal" :title="editingAnn ? '编辑公告' : '新建公告'" wide @close="showAnnModal = false">
@@ -906,19 +921,21 @@ onMounted(() => {
         @confirm="confirmDeleteAnn"
       />
 
-      <AppModal :show="!!previewDoc" :title="previewDoc?.title || '文档预览'" wide @close="previewDoc = null">
-        <div v-if="previewLoading" class="modal-hint">加载中…</div>
-        <template v-else-if="previewDoc">
-          <div class="preview-meta">
-            <span class="type-text">{{ previewDoc.type }}</span>
-            <span class="col-time">{{ previewDoc.updatedAt?.slice(0, 16) || '' }}</span>
-            <span class="status-badge mini" :class="'status-' + (previewDoc.status || '')">{{ previewDoc.status }}</span>
-            <span v-if="previewDoc.originalFilename" class="doc-file-name">{{ previewDoc.originalFilename }}</span>
-          </div>
-          <pre class="preview-body">{{ previewDoc.contentMd || '（无内容）' }}</pre>
-        </template>
-      </AppModal>
     </template>
+
+    <!-- 文档预览弹窗：常驻渲染，跨分区可用（相关文档入口在 overview 操作记录） -->
+    <AppModal :show="showPreview" :title="previewDoc?.title || '文档预览'" wide @close="closePreview">
+      <div v-if="previewLoading" class="modal-hint">加载中…</div>
+      <template v-else-if="previewDoc">
+        <div class="preview-meta">
+          <span class="type-text">{{ previewDoc.type }}</span>
+          <span class="col-time">{{ previewDoc.updatedAt?.slice(0, 16) || '' }}</span>
+          <span class="status-badge mini" :class="'status-' + (previewDoc.status || '')">{{ previewDoc.status }}</span>
+          <span v-if="previewDoc.originalFilename" class="doc-file-name">{{ previewDoc.originalFilename }}</span>
+        </div>
+        <pre class="preview-body">{{ previewDoc.contentMd || '（无内容）' }}</pre>
+      </template>
+    </AppModal>
   </div>
 </template>
 
@@ -1107,7 +1124,8 @@ onMounted(() => {
 }
 
 /* ---- 公告管理 ---- */
-.ann-toolbar { display:flex; justify-content:flex-end; }
+.ann-panel { padding: 20px; }
+.ann-toolbar { display:flex; justify-content:flex-end;margin-bottom: 10px; }
 .ann-list { display:flex; flex-direction:column; gap:12px; }
 .ann-card { padding:16px 18px; border-left:3px solid var(--brand); }
 .ann-card.lv-warning { border-left-color:var(--warning); }

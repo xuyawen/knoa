@@ -41,6 +41,8 @@ function readModelConfig(): Record<string, unknown> {
   const topP = get('topP'); if (topP) cfg.topP = Number(topP)
   const maxT = get('maxTokens'); if (maxT) cfg.maxTokens = Number(maxT)
   const topK = get('topK'); if (topK) cfg.topK = Number(topK)
+  const sc = get('sourceCount'); if (sc) cfg.sourceCount = Number(sc)
+  const wp = get('webProvider'); if (wp) cfg.webProvider = wp
   const ws = get('webSearch'); if (ws !== null) cfg.webSearch = ws === 'true'
   const sp = get('systemPrompt'); if (sp) cfg.systemPrompt = sp
   const cm = get('conciseMode'); if (cm !== null) cfg.conciseMode = cm === 'true'

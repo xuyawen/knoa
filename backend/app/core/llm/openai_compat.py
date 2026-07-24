@@ -81,13 +81,14 @@ class OpenAICompatProvider:
         temperature: float | None = None,
         model: str | None = None,
         top_p: float | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         """非流式调用"""
         params: dict[str, Any] = {
             "model": model or self.model,
             "messages": messages,
             "temperature": temperature or self.default_temperature,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens or self.max_tokens,
         }
         if top_p is not None:
             params["top_p"] = top_p

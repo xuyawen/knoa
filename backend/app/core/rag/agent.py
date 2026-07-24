@@ -313,10 +313,13 @@ class AgenticRAGAgent:
         # 模型配置（前端 ModelConfig 下发，单次请求内有效）
         self._gen_temperature: float | None = None
         self._gen_top_p: float | None = None
+        self._gen_max_tokens: int | None = None
         self._top_k: int | None = None
         self._web_search_enabled: bool | None = None
         self._custom_system_prompt: str | None = None
         self._concise_mode: bool | None = None
+        self._source_count: int | None = None
+        self._web_provider: str | None = None
 
     async def _classify_intent(self, question: str) -> "str | None":
         """LLM 意图分类（greeting/web_search/simple/complex）。
@@ -371,6 +374,9 @@ class AgenticRAGAgent:
         web_search: "bool | None" = None,
         system_prompt: "str | None" = None,
         concise_mode: "bool | None" = None,
+        max_tokens: "int | None" = None,
+        source_count: "int | None" = None,
+        web_provider: "str | None" = None,
     ) -> AsyncIterator[dict]:
         """主入口：返回 SSE 兼容的事件流。
 
@@ -380,10 +386,13 @@ class AgenticRAGAgent:
         self._model_override = model
         self._gen_temperature = temperature
         self._gen_top_p = top_p
+        self._gen_max_tokens = max_tokens
         self._top_k = top_k
         self._web_search_enabled = web_search
         self._custom_system_prompt = system_prompt
         self._concise_mode = concise_mode
+        self._source_count = source_count
+        self._web_provider = web_provider
         t0 = time.perf_counter()
         intent = "simple"
         retrieved = 0
@@ -761,7 +770,7 @@ class AgenticRAGAgent:
         query = st.route_result.arguments.get("query", st.question) if st.route_result else st.question
         searcher = WebSearcher()
         try:
-            web = await searcher.search(query, max_results=5)
+            web = await searcher.search(query, max_results=self._source_count or 5, provider=self._web_provider)
         finally:
             await searcher.aclose()
         if web:
@@ -789,6 +798,11 @@ class AgenticRAGAgent:
         """
         # 基于 st.messages 追加「来源 + 回答指令」，不丢弃已有消息
         final_messages = list(st.messages)  # 浅拷贝：system + history + user(含图)
+        # 按「引用来源数」上限裁剪（ModelConfig 的 sourceCount），保证最终引用条数受控；
+        # 重新发射 sources 事件，前端用最终裁剪后的列表替换展示
+        if self._source_count and len(st.all_sources) > self._source_count:
+            st.all_sources = st.all_sources[: self._source_count]
+            yield {"event": "sources", "data": self._format_sources(st.all_sources)}
         if st.all_sources:
             ctx = self._sources_to_context(st.all_sources)
             if st.graph_reasoning:
@@ -821,6 +835,8 @@ class AgenticRAGAgent:
             gen_args["temperature"] = self._gen_temperature
         if self._gen_top_p is not None:
             gen_args["top_p"] = self._gen_top_p
+        if self._gen_max_tokens is not None:
+            gen_args["max_tokens"] = self._gen_max_tokens
         async for delta in self.llm.stream_chat(final_messages, **gen_args):
             full_answer += delta
             yield {"event": "delta", "data": {"content": delta}}
@@ -849,6 +865,7 @@ class AgenticRAGAgent:
                 st.final_answer_text = await self.llm.chat(
                     quick_msgs, model=self._model_override,
                     temperature=self._gen_temperature, top_p=self._gen_top_p,
+                    max_tokens=self._gen_max_tokens,
                 )
             except Exception:
                 st.final_answer_text = "好的，收到！"
@@ -881,6 +898,7 @@ class AgenticRAGAgent:
         async for delta in self.llm.stream_chat(
             quick_messages, model=self._model_override,
             temperature=self._gen_temperature, top_p=self._gen_top_p,
+            max_tokens=self._gen_max_tokens,
         ):
             full_answer += delta
             yield {"event": "delta", "data": {"content": delta}}
