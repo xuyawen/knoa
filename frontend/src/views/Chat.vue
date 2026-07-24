@@ -57,7 +57,16 @@ load()
 const playingId = ref<string | null>(null)
 let audioEl: HTMLAudioElement | null = null
 async function speak(m: ChatMessage) {
-  if (!m.content || playingId.value) return
+  if (!m.content) return
+  // 若当前正在播放同一条 → 停止播报（toggle off）
+  if (playingId.value === m.id) {
+    stopSpeak()
+    return
+  }
+  // 正在播放其他消息 → 先停旧再播新
+  if (playingId.value && audioEl) {
+    stopSpeak()
+  }
   playingId.value = m.id
   try {
     const { audio, contentType } = await ttsSpeak(m.content)
@@ -65,9 +74,14 @@ async function speak(m: ChatMessage) {
     audioEl.onended = () => { playingId.value = null; audioEl = null }
     await audioEl.play()
   } catch (e) {
-    playingId.value = null
+    playingId.value = null; audioEl = null
     toast.error(e instanceof Error ? e.message : '语音播报失败')
   }
+}
+
+function stopSpeak() {
+  if (audioEl) { audioEl.pause(); audioEl = null }
+  playingId.value = null
 }
 
 // 从「问答记录」打开某会话：载入消息并切回对话视图
@@ -620,10 +634,10 @@ watch(messages, scrollToBottom, { deep: false })
                 v-if="auth.user?.ttsEnabled"
                 class="act-btn"
                 :class="{ on: playingId === m.id }"
-                :title="playingId === m.id ? '播报中…' : '朗读回答'"
+                :title="playingId === m.id ? '停止播报' : '朗读回答'"
                 @click="speak(m)"
               >
-                <Icon :name="playingId === m.id ? 'loader' : 'volume'" :size="14" :class="{ spin: playingId === m.id }" />
+                <Icon :name="playingId === m.id ? 'square' : 'volume'" :size="14" />
               </button>
               <button class="act-btn" :class="{ on: m.feedback === 'up' }" title="有用" @click="onFeedback(m, 'up')">
                 <Icon name="thumbs-up" :size="14" />
