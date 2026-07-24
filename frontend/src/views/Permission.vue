@@ -192,7 +192,6 @@ async function confirmDelete() {
 }
 
 /* ---------- 筛选 / 矩阵 ---------- */
-const roleFilterOptions = computed(() => ['all', ...roles.value.map((r) => r.key)])
 </script>
 
 <template>
@@ -213,15 +212,10 @@ const roleFilterOptions = computed(() => ['all', ...roles.value.map((r) => r.key
             <input v-model="searchQuery" type="text" placeholder="搜索用户名 / 显示名" class="search-input" />
             <button v-if="searchQuery" class="search-clear" @click="clearSearch"><Icon name="close" :size="12" /></button>
           </div>
-          <div class="role-tabs">
-            <button
-              v-for="r in roleFilterOptions"
-              :key="r"
-              class="role-tab"
-              :class="{ active: roleFilter === r }"
-              @click="roleFilter = r; currentPage = 1"
-            >{{ r === 'all' ? '全部' : roleLabel(r) }}</button>
-          </div>
+          <select v-model="roleFilter" class="role-select" @change="currentPage = 1">
+            <option value="all">全部角色</option>
+            <option v-for="r in roles" :key="r.id" :value="r.key">{{ r.name }}</option>
+          </select>
           <button class="icon-btn" title="刷新" :disabled="loading" @click="() => loadUsers()">
             <Icon name="refresh" :size="15" :class="{ spin: loading }" />
           </button>
@@ -367,13 +361,15 @@ const roleFilterOptions = computed(() => ['all', ...roles.value.map((r) => r.key
   border-radius: 50%; color: var(--text-tertiary); cursor: pointer; background: transparent;
 }
 .search-clear:hover { background: var(--bg-hover); }
-.role-tabs { display: inline-flex; gap: 4px; }
-.role-tab {
-  padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);
-  font-size: 12px; color: var(--text-secondary); background: var(--bg-surface); cursor: pointer; transition: all var(--dur-fast);
+.role-select {
+  height: 34px; padding: 0 28px 0 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  font-size: 13px; color: var(--text-primary); background: var(--bg-surface);
+  appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center; cursor: pointer;
+  transition: all var(--dur-fast);
 }
-.role-tab:hover { border-color: var(--brand); }
-.role-tab.active { background: var(--brand); color: var(--text-on-brand); border-color: var(--brand); }
+.role-select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 .icon-btn:disabled { opacity: 0.5; cursor: default; }
 .spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
