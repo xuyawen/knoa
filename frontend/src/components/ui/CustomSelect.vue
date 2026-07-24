@@ -27,7 +27,7 @@ const open = ref(false)
 const flipUp = ref(false)
 const root = ref<HTMLElement>()
 const panel = ref<HTMLElement>()
-const panelStyle = ref({ top: '0px', left: '0px' })
+const panelStyle = ref({ top: '0px', left: '0px', width: '0px' })
 
 const currentLabel = computed(() => {
   const opt = props.options.find((o) => o.value === props.modelValue)
@@ -42,9 +42,9 @@ function measure() {
   const shouldFlip = ph > below && rect.top > below
   flipUp.value = shouldFlip
   if (shouldFlip) {
-    panelStyle.value = { top: `${rect.top + window.scrollY - ph - 4}px`, left: `${rect.left + window.scrollX}px` }
+    panelStyle.value = { top: `${rect.top + window.scrollY - ph - 4}px`, left: `${rect.left + window.scrollX}px`, width: `${rect.width}px` }
   } else {
-    panelStyle.value = { top: `${rect.bottom + window.scrollY + 4}px`, left: `${rect.left + window.scrollX}px` }
+    panelStyle.value = { top: `${rect.bottom + window.scrollY + 4}px`, left: `${rect.left + window.scrollX}px`, width: `${rect.width}px` }
   }
 }
 
@@ -157,7 +157,7 @@ onBeforeUnmount(() => {
 .c-select-panel {
   position: fixed;
   z-index: 9999;
-  width: 100%;
+  /* width 由 JS panelStyle 动态设置（跟随触发器） */
   max-height: 260px;
   overflow-y: auto;
   background: var(--bg-surface-2);
