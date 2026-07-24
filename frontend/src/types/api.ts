@@ -387,15 +387,17 @@ export interface HotQueryItem {
   count: number
 }
 
-/** 系统设置（个人偏好）。P8 新增。 */
+/** 系统设置（个人偏好）。P8 新增；模型配置偏好(modelPrefs)服务端真值，前端不再用 localStorage。 */
 export interface Settings {
-  preferredModel: string | null   // 偏好问答模型；null=使用系统默认
-  ttsEnabled: boolean             // 是否启用语音播报
+  preferredModel: string | null        // 偏好问答模型；null=使用系统默认
+  ttsEnabled: boolean                   // 是否启用语音播报
+  modelPrefs: Record<string, unknown>  // 模型配置偏好（温度/TopP/最大长度/TopK/联网/来源数/provider/人设/思考/简洁）
 }
 
 export interface SettingsUpdate {
   preferredModel?: string | null
   ttsEnabled?: boolean
+  modelPrefs?: Record<string, unknown>
 }
 
 /** 语音合成结果：base64 音频 + MIME 类型，前端拼 data URI 播放。P8 新增。 */

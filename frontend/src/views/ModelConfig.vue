@@ -1,26 +1,21 @@
 <script setup lang="ts">
 // 模型配置 — 独立页面（遵循「一个页面一个文件」原则）。
-// 本地偏好持久化（localStorage）；部分参数标注「需后端支持」，待后端接口对接后实时生效。
-import { ref, computed } from 'vue'
+// 配置真值在服务端（/api/settings 的 modelPrefs + preferredModel），前端不再用 localStorage。
+import { ref, computed, onMounted } from 'vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useToastStore } from '@/stores/toast'
+import { useModelConfig, DEFAULT_MODEL_PREFS } from '@/composables/useModelConfig'
 
 const toast = useToastStore()
-
-const KEY = 'knoa.model'
-
-// ── 读取持久化 ──
-function ls(key: string, fallback: string): string {
-  return localStorage.getItem(`${KEY}.${key}`) || fallback
-}
+const { state, load, save } = useModelConfig()
 
 // ════════════════════════════════════════
 // Section 1 — 生成参数
 // ════════════════════════════════════════
-const modelName = ref(ls('name', 'agnes-2.0-flash'))
-const temperature = ref(Number(ls('temp', '0.3')))
-const topP = ref(Number(ls('topP', '0.9')))
-const maxTokens = ref(Number(ls('maxTokens', '2000')))
+const modelName = ref('agnes-2.0-flash')
+const temperature = ref(Number(DEFAULT_MODEL_PREFS.temp))
+const topP = ref(Number(DEFAULT_MODEL_PREFS.topP))
+const maxTokens = ref(Number(DEFAULT_MODEL_PREFS.maxTokens))
 
 const modelOptions = [
   { value: 'agnes-2.0-flash', label: 'agnes-2.0-flash（快速，适合日常问答）' },
@@ -38,15 +33,15 @@ const tokenOptions = [
 // ════════════════════════════════════════
 // Section 2 — 检索策略
 // ════════════════════════════════════════
-const retrievalTopK = ref(Number(ls('topK', '5')))
-const webSearchEnabled = ref(ls('webSearch', 'true') === 'true')
-const sourceCount = ref(Number(ls('sourceCount', '5')))
+const retrievalTopK = ref(Number(DEFAULT_MODEL_PREFS.topK))
+const webSearchEnabled = ref(DEFAULT_MODEL_PREFS.webSearch as boolean)
+const sourceCount = ref(Number(DEFAULT_MODEL_PREFS.sourceCount))
 
 const topKOptions = [3, 5, 8, 10].map(v => ({ value: v, label: `${v} 条` }))
 const sourceOptions = [3, 5, 8, 10].map(v => ({ value: v, label: `${v} 条` }))
 
 // 联网搜索 provider：auto 走后端 env 优先级降级，其余显式指定单一服务
-const webProvider = ref(ls('webProvider', 'auto'))
+const webProvider = ref(DEFAULT_MODEL_PREFS.webProvider as string)
 const webProviderOptions = [
   { value: 'auto', label: '自动（按可用密钥优先级）' },
   { value: 'bocha', label: 'BoCha 博查（中文检索质量最佳）' },
@@ -57,9 +52,9 @@ const webProviderOptions = [
 // ════════════════════════════════════════
 // Section 3 — 回答风格
 // ════════════════════════════════════════
-const systemPrompt = ref(ls('systemPrompt', ''))
-const showThinking = ref(ls('showThinking', 'true') === 'true')
-const conciseMode = ref(ls('conciseMode', 'false') === 'false') // default verbose
+const systemPrompt = ref(DEFAULT_MODEL_PREFS.systemPrompt as string)
+const showThinking = ref(DEFAULT_MODEL_PREFS.showThinking as boolean)
+const conciseMode = ref(DEFAULT_MODEL_PREFS.conciseMode as boolean) // default verbose
 
 const promptPlaceholder = `可选：自定义 AI 人设或回答风格指令。
 示例：
@@ -70,27 +65,41 @@ const promptPlaceholder = `可选：自定义 AI 人设或回答风格指令。
 留空则使用系统默认 Prompt。`
 const charCount = computed(() => systemPrompt.value.length)
 
+// 从服务端加载已保存配置，填充表单（单一真值在服务端）
+onMounted(async () => {
+  await load()
+  if (state.preferredModel) modelName.value = state.preferredModel
+  temperature.value = Number(state.prefs.temp)
+  topP.value = Number(state.prefs.topP)
+  maxTokens.value = Number(state.prefs.maxTokens)
+  retrievalTopK.value = Number(state.prefs.topK)
+  webSearchEnabled.value = Boolean(state.prefs.webSearch)
+  sourceCount.value = Number(state.prefs.sourceCount)
+  webProvider.value = String(state.prefs.webProvider)
+  systemPrompt.value = String(state.prefs.systemPrompt ?? '')
+  showThinking.value = Boolean(state.prefs.showThinking)
+  conciseMode.value = Boolean(state.prefs.conciseMode)
+})
+
 // ════════════════════════════════════════
 // 保存
 // ════════════════════════════════════════
 function saveAll() {
-  const map: Record<string, string> = {
-    name: modelName.value,
-    temp: String(temperature.value),
-    topP: String(topP.value),
-    maxTokens: String(maxTokens.value),
-    topK: String(retrievalTopK.value),
-    webSearch: String(webSearchEnabled.value),
-    sourceCount: String(sourceCount.value),
+  const modelPrefs = {
+    temp: temperature.value,
+    topP: topP.value,
+    maxTokens: maxTokens.value,
+    topK: retrievalTopK.value,
+    webSearch: webSearchEnabled.value,
+    sourceCount: sourceCount.value,
     webProvider: webProvider.value,
     systemPrompt: systemPrompt.value,
-    showThinking: String(showThinking.value),
-    conciseMode: String(conciseMode.value),
+    showThinking: showThinking.value,
+    conciseMode: conciseMode.value,
   }
-  for (const [k, v] of Object.entries(map)) {
-    localStorage.setItem(`${KEY}.${k}`, v)
-  }
-  toast.success('模型配置已保存')
+  save(modelName.value, modelPrefs)
+    .then(() => toast.success('模型配置已保存'))
+    .catch((e: unknown) => toast.error(e instanceof Error ? e.message : '保存失败，请重试'))
 }
 
 function resetDefaults() {

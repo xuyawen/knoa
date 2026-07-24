@@ -144,6 +144,9 @@ class User(Base):
     preferred_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 语音播报开关：前端朗读按钮是否可用
     tts_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # 模型配置偏好（温度/TopP/最大长度/TopK/联网/来源数/provider/人设/思考/简洁）。
+    # ponytail: 服务端真值，前端不再存 localStorage；name(模型选择)走 preferred_model 列。
+    model_prefs: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict, server_default="{}")
     # 用户档案字段（用户管理界面维护）
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     department: Mapped[str | None] = mapped_column(String(100), nullable=True)

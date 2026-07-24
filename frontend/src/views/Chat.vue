@@ -28,29 +28,30 @@ import type {
   DocumentDetail,
 } from '@/types/api'
 import { uploadToOss } from '@/utils/oss'
+import { useModelConfig } from '@/composables/useModelConfig'
 
-// 读取 ModelConfig 页持久化的模型配置（localStorage: knoa.model.*），
+// 读取模型配置（单一真值在 /api/settings 服务端，经 useModelConfig 单例缓存）。
 // 拼成后端 AskRequest 接受的字段随每次问答下发。空值不传，走后端默认。
 function readModelConfig(): Record<string, unknown> {
-  const K = 'knoa.model'
-  const get = (k: string) => localStorage.getItem(`${K}.${k}`)
   const cfg: Record<string, unknown> = {}
-  const name = get('name')
-  if (name) cfg.model = name
-  const temp = get('temp'); if (temp) cfg.temperature = Number(temp)
-  const topP = get('topP'); if (topP) cfg.topP = Number(topP)
-  const maxT = get('maxTokens'); if (maxT) cfg.maxTokens = Number(maxT)
-  const topK = get('topK'); if (topK) cfg.topK = Number(topK)
-  const sc = get('sourceCount'); if (sc) cfg.sourceCount = Number(sc)
-  const wp = get('webProvider'); if (wp) cfg.webProvider = wp
-  const ws = get('webSearch'); if (ws !== null) cfg.webSearch = ws === 'true'
-  const sp = get('systemPrompt'); if (sp) cfg.systemPrompt = sp
-  const cm = get('conciseMode'); if (cm !== null) cfg.conciseMode = cm === 'true'
+  if (state.preferredModel) cfg.model = state.preferredModel
+  if (state.prefs.temp != null) cfg.temperature = Number(state.prefs.temp)
+  if (state.prefs.topP != null) cfg.topP = Number(state.prefs.topP)
+  if (state.prefs.maxTokens != null) cfg.maxTokens = Number(state.prefs.maxTokens)
+  if (state.prefs.topK != null) cfg.topK = Number(state.prefs.topK)
+  if (state.prefs.sourceCount != null) cfg.sourceCount = Number(state.prefs.sourceCount)
+  if (state.prefs.webProvider != null) cfg.webProvider = state.prefs.webProvider
+  if (state.prefs.webSearch != null) cfg.webSearch = Boolean(state.prefs.webSearch)
+  if (state.prefs.systemPrompt) cfg.systemPrompt = state.prefs.systemPrompt
+  if (state.prefs.conciseMode != null) cfg.conciseMode = Boolean(state.prefs.conciseMode)
   return cfg
 }
 
 const toast = useToastStore()
 const auth = useAuthStore()
+// 模型配置单一真值在服务端；单例加载一次，与 ModelConfig 页共享
+const { state, load } = useModelConfig()
+load()
 
 // 语音播报（P8）：朗读某条 AI 回答
 const playingId = ref<string | null>(null)
