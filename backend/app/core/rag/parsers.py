@@ -58,6 +58,9 @@ def parse_docx(filename: str, data: bytes) -> ParseResult:
             if target is None:
                 raise UnsupportedFormatError("不是合法的 .docx（找不到 document.xml）")
             xml_data = zf.read(target)
+            # 防御 zip bomb：解压后正文超阈值直接拒绝，避免恶意 docx 撑爆内存
+            if len(xml_data) > 50 * 1024 * 1024:
+                raise UnsupportedFormatError("文档内容过大，疑似压缩炸弹，已拒绝解析")
     except zipfile.BadZipFile:
         raise UnsupportedFormatError("文件不是 zip 包，无法当作 .docx 解析")
 

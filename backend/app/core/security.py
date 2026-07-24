@@ -8,7 +8,9 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import time
+import uuid
 from typing import Awaitable, Callable
 
 from fastapi import Depends, HTTPException, Request
@@ -17,7 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import KBPermission, KnowledgeBase, User
-from app.deps import get_db
+from app.deps import get_db, get_redis
+
+logger = logging.getLogger("knoa.security")
 
 # 权限级别排序，数值越大权限越高
 LEVEL_ORDER = {"view": 1, "edit": 2, "admin": 3}
@@ -39,6 +43,7 @@ def create_access_token(sub: str, username: str, role: str) -> str:
         "sub": sub,
         "username": username,
         "role": role,
+        "jti": uuid.uuid4().hex,
         "iat": now,
         "exp": now + settings.JWT_EXPIRE_MINUTES * 60,
     }
@@ -67,6 +72,24 @@ def decode_access_token(token: str) -> dict:
     return payload
 
 
+async def revoke_token(jti: str, ttl: int) -> None:
+    """注销时把 jti 加入 Redis 黑名单，TTL=剩余有效期；Redis 不可用时静默降级。"""
+    try:
+        await get_redis().redis.set(f"knoa:revoked:{jti}", "1", ex=max(int(ttl), 1))
+    except Exception:
+        logger.warning("revoke token failed (redis unavailable?)")
+
+
+async def is_token_revoked(jti: str) -> bool:
+    """检查 jti 是否已被注销；无法连 Redis 时视为未吊销，保证可用性。"""
+    if not jti:
+        return False
+    try:
+        return await get_redis().redis.exists(f"knoa:revoked:{jti}") == 1
+    except Exception:
+        return False
+
+
 def extract_token(request: Request) -> str | None:
     """从 HttpOnly Cookie 或 Authorization 头取令牌（Cookie 优先，防 XSS 窃取）。
 
@@ -89,6 +112,8 @@ async def get_current_user(
     if not token:
         raise HTTPException(status_code=401, detail="未提供认证令牌")
     payload = decode_access_token(token)
+    if await is_token_revoked(payload.get("jti", "")):
+        raise HTTPException(status_code=401, detail="令牌已吊销")
     user = await db.scalar(select(User).where(User.id == payload["sub"]))
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="用户不存在或已停用")

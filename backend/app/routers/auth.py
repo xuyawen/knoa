@@ -1,17 +1,23 @@
 """Phase 2 鉴权路由：登录、当前用户、用户管理（仅 admin）。"""
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+import logging
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
     create_access_token,
+    decode_access_token,
+    extract_token,
     get_current_user,
     require_roles,
+    revoke_token,
 )
 from app.db import ChatSession, KBPermission, Memory, User
-from app.deps import get_db
+from app.deps import get_db, get_redis
 from app.models.operation_log import record_operation
 from app.config import settings
 from app.models.auth import (
@@ -64,7 +70,34 @@ def _clear_auth_cookie(response: Response) -> None:
     response.delete_cookie(settings.COOKIE_NAME, path="/")
 
 
-@router.post("/auth/login", response_model=TokenOut)
+logger = logging.getLogger("knoa.auth")
+
+LOGIN_RATE_LIMIT = 10        # 每窗口最大登录尝试次数
+LOGIN_RATE_WINDOW = 60       # 滑动窗口大小（秒）
+
+
+async def login_rate_limit(request: Request) -> None:
+    """登录接口限流：按客户端 IP 滑动窗口限制，防暴力破解。
+
+    Redis 不可用时放行（不阻断登录），仅告警，避免限流组件自身成为单点。
+    """
+    fwd = request.headers.get("X-Forwarded-For", "")
+    client_ip = fwd.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    key = f"knoa:login:rl:{client_ip}"
+    try:
+        r = get_redis().redis
+        cnt = await r.incr(key)
+        if cnt == 1:
+            await r.expire(key, LOGIN_RATE_WINDOW)
+        if cnt > LOGIN_RATE_LIMIT:
+            raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("login rate limit skipped (redis unavailable)")
+
+
+@router.post("/auth/login", response_model=TokenOut, dependencies=[Depends(login_rate_limit)])
 async def login(payload: LoginIn, response: Response, db: AsyncSession = Depends(get_db)):
     user = await db.scalar(select(User).where(User.username == payload.username))
     # 时序侧信道防护：无论用户是否存在，都执行一次恒定耗时的 PBKDF2 校验，
@@ -81,8 +114,19 @@ async def login(payload: LoginIn, response: Response, db: AsyncSession = Depends
 
 
 @router.post("/auth/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
     _clear_auth_cookie(response)
+    # 服务端吊销：把当前 token 的 jti 加入黑名单，使其立即失效（即便 cookie 未清除）
+    raw = extract_token(request)
+    if raw:
+        try:
+            payload = decode_access_token(raw)
+            jti = payload.get("jti")
+            if jti:
+                ttl = int(payload.get("exp", 0)) - int(time.time())
+                await revoke_token(jti, ttl)
+        except Exception:
+            pass
     return {"detail": "已退出登录"}
 
 

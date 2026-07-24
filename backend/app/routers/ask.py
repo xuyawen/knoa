@@ -70,6 +70,7 @@ async def ask(
         logger.info("ask stream start", extra={"request_id": rid})
         n = 0
         src_count = 0
+        logged = None
         # 流式生成器自己持有 DB 会话，并在生成结束后才关闭 ——
         # 这样事务生命周期跟随 SSE 流，而非跟随「路由返回」（sse-starlette
         # 在后台 task 跑生成器，路由早已 return，get_db 的 finally 会提前关会话，

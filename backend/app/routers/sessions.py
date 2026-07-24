@@ -69,7 +69,7 @@ async def list_records(
         sources = r["sources"] or []
         kb_c = sum(1 for s in sources if s.get("sourceType") == "kb")
         web_c = sum(1 for s in sources if s.get("sourceType") == "web")
-        graph_c = sum(1 for s in sources if s.get("sourceType") == "graph")
+        graph_c = sum(1 for s in sources if s.get("sourceType") in ("graph", "graph-multihop"))
 
         if f == "kb" and kb_c == 0:
             continue

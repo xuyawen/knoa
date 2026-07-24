@@ -464,7 +464,7 @@ class AgenticRAGAgent:
                         # 失败（400），图谱溯源抽屉打不开 —— 这是 T1 的遗留 bug。
                         for i, g in enumerate(self._graph_chunks, len(all_sources) + 1):
                             g["id"] = i
-                        all_sources.extend(self._graph_chunks)
+                        all_sources.extend(self._format_sources(self._graph_chunks))
                         yield {"event": "sources", "data": self._format_sources(self._graph_chunks)}
                     # 8.5 complex 意图 → 图谱多跳推理，产出推理链路 + 追加沿途来源
                     if use_multihop:
@@ -482,7 +482,7 @@ class AgenticRAGAgent:
                         for c in mh_chunks:
                             if c["chunk_id"] not in existing_ids:
                                 c["id"] = len(all_sources) + 1
-                                all_sources.append(c)
+                                all_sources.append(self._format_sources([c])[0])
                                 existing_ids.add(c["chunk_id"])
                         if mh_chunks:
                             yield {"event": "sources", "data": self._format_sources(mh_chunks)}

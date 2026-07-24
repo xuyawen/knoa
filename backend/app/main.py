@@ -109,6 +109,15 @@ async def lifespan(app: FastAPI):
         await get_redis().close()
     except Exception:
         pass
+    # 统一关闭对象存储连接（S3 模式 httpx 连接池此前未关闭 → 泄漏）
+    try:
+        from app.core.storage import get_object_store
+
+        store = get_object_store()
+        if hasattr(store, "aclose"):
+            await store.aclose()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="知海 Knoa API", version="0.1.0", lifespan=lifespan)
@@ -120,7 +129,6 @@ app.add_middleware(
     allow_origins=settings.CORS_ORIGINS.split(","),
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Access-Token"],
     allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
 )
 

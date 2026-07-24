@@ -167,6 +167,18 @@ def validate_production_settings() -> None:
             f"{settings.EMBEDDING_MODEL} 的标准维度 {expected} 不一致，"
             "将导致向量维度错配、检索全空"
         )
+    # 仅当数据库指向非本地主机（真实远程生产库）且仍用默认弱口令时才拦截；
+    # localhost / 容器服务名（postgres）等本地或编排场景放宽，避免误伤开发启动。
+    from urllib.parse import urlparse
+
+    _db_host = (urlparse(settings.DATABASE_URL).hostname or "").lower()
+    if "knoa:knoa@" in settings.DATABASE_URL and _db_host not in (
+        "localhost", "127.0.0.1", "postgres", ""
+    ):
+        errors.append(
+            "DATABASE_URL 仍使用默认弱口令 'knoa:knoa' 且指向远程主机，"
+            "生产环境必须设置强密码"
+        )
     if errors:
         raise RuntimeError(
             "生产环境配置校验未通过，已阻止启动：\n- " + "\n- ".join(errors)

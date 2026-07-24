@@ -251,7 +251,6 @@ function resetDefaults() {
                 <span class="char-count">{{ charCount }} / 2000</span>
               </div>
               <span class="cfg-note">追加到系统默认 Prompt 之后，用于定制回答语气、格式约束或领域专精</span>
-              <span class="cfg-badge pending">需后端支持</span>
             </div>
           </div>
 
@@ -284,7 +283,6 @@ function resetDefaults() {
                 <span class="toggle-knob" />
               </button>
               <span class="cfg-note">{{ conciseMode ? '开启：回答更精炼，省去冗余铺垫' : '关闭：完整详细回答（默认）' }}</span>
-              <span class="cfg-badge pending">需后端支持</span>
             </div>
           </div>
         </div>
