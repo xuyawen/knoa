@@ -11,7 +11,6 @@ import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { getRoles, getUserList, createUser, updateUser, deleteUser } from '@/api/auth'
 import type { Paginated, RoleOut, UserOut, UserCreate, UserUpdate } from '@/types/api'
-import { PERMISSIONS } from '@/types/api'
 
 const auth = useAuthStore()
 const toast = useToastStore()
@@ -268,29 +267,6 @@ const roleFilterOptions = computed(() => ['all', ...roles.value.map((r) => r.key
           @update:page-size="loadUsers(true)"
         />
       </section>
-
-      <!-- 角色权限矩阵（来自服务端真实角色数据，仅供参考；编辑请前往「角色管理」） -->
-      <aside class="card perm-matrix">
-        <h3 class="perm-h">角色权限矩阵</h3>
-        <table class="mtx">
-          <thead>
-            <tr>
-              <th>功能模块</th>
-              <th v-for="r in roles" :key="r.id">{{ r.name }}<span v-if="r.isBuiltin" class="builtin-tag">内置</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="p in PERMISSIONS" :key="p.key">
-              <td class="mtx-mod">{{ p.label }}</td>
-              <td v-for="r in roles" :key="r.id">
-                <span class="sw" :class="r.permissions.includes(p.key) ? 'on' : 'off'"><span class="knob" /></span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p class="perm-note">矩阵为服务端角色→权限映射的实时快照；调整权限请前往「角色管理」页。</p>
-        <router-link to="/permission/roles" class="matrix-link">前往角色管理 →</router-link>
-      </aside>
     </div>
 
     <!-- 新建 / 编辑弹窗 -->
@@ -368,10 +344,7 @@ const roleFilterOptions = computed(() => ['all', ...roles.value.map((r) => r.key
 .flex { display: flex; }
 .items-center { align-items: center; }
 .perm-body {
-  display: grid;
-  grid-template-columns: 1fr 360px;
-  gap: 16px;
-  align-items: start;
+  display: block;
 }
 .perm-users { padding: 20px; }
 .perm-h { margin: 0 0 14px; font-size: 15px; font-weight: 600; color: var(--text-primary); }
@@ -433,29 +406,6 @@ const roleFilterOptions = computed(() => ['all', ...roles.value.map((r) => r.key
 }
 .action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
-/* ---- 矩阵 ---- */
-.perm-matrix { padding: 20px; }
-.mtx { width: 100%; border-collapse: collapse; font-size: 13px; }
-.mtx th { text-align: left; padding: 10px 14px; color: var(--text-tertiary); font-weight: 500; border-bottom: 1px solid var(--border); }
-.mtx td { padding: 11px 14px; border-bottom: 1px solid var(--border); }
-.mtx tr:last-child td { border-bottom: none; }
-.mtx-mod { color: var(--text-secondary); }
-.sw { display: inline-flex; align-items: center; width: 38px; height: 22px; border-radius: var(--radius-pill); padding: 2px; transition: background var(--dur-fast); }
-.sw .knob { width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform var(--dur-fast); }
-.sw.on { background: var(--brand); }
-.sw.on .knob { transform: translateX(16px); }
-.sw.off { background: var(--border-strong); }
-.sw.off .knob { transform: translateX(0); }
-.perm-note { margin: 14px 0 0; font-size: 12px; color: var(--text-tertiary); line-height: 1.6; }
-.builtin-tag {
-  display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: var(--radius-pill);
-  font-size: 10px; font-weight: 500; color: var(--accent-blue); background: var(--accent-blue-soft);
-}
-.matrix-link {
-  display: inline-block; margin-top: 12px; font-size: 13px; color: var(--brand); text-decoration: none;
-}
-.matrix-link:hover { text-decoration: underline; }
-
 /* ---- 表单 ---- */
 .form-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .form-label { width: 76px; flex-shrink: 0; font-size: 13px; color: var(--text-secondary); }
@@ -478,7 +428,4 @@ const roleFilterOptions = computed(() => ['all', ...roles.value.map((r) => r.key
 .switch input:checked + .switch-track .switch-knob { transform: translateX(16px); }
 .switch-text { font-size: 13px; color: var(--text-secondary); }
 
-@media (max-width: 1040px) {
-  .perm-body { grid-template-columns: 1fr; }
-}
 </style>
