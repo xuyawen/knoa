@@ -20,6 +20,7 @@ import Permission from '@/views/Permission.vue'
 import RoleManage from '@/views/RoleManage.vue'
 import DepartmentView from '@/views/DepartmentView.vue'
 import Profile from '@/views/Profile.vue'
+import MemoryManage from '@/views/MemoryManage.vue'
 import Settings from '@/views/Settings.vue'
 import NotFound from '@/views/NotFound.vue'
 
@@ -67,6 +68,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'permission/roles', name: 'perm-roles', component: RoleManage, meta: { title: '系统管理', icon: 'shield' } },
       { path: 'permission/departments', name: 'perm-departments', component: DepartmentView, meta: { title: '系统管理', icon: 'team' } },
       { path: 'profile', name: 'profile', component: Profile, meta: { title: '个人中心', icon: 'user' } },
+      { path: 'memories', name: 'memories', component: MemoryManage, meta: { title: '个人中心', icon: 'brain-circuit' } },
       { path: 'settings', name: 'settings', component: Settings, meta: { title: '系统设置', icon: 'settings' } },
     ],
   },

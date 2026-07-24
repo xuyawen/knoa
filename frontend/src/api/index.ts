@@ -37,6 +37,9 @@ import type {
   Paginated,
   SearchDocsResponse,
   RecordsResponse,
+  KBMember,
+  KBMembersUpdate,
+  MemoryItem,
 } from '@/types/api'
 import { authHeaders, TokenExpiredError } from './http'
 
@@ -65,6 +68,65 @@ export async function createKnowledgeBase(payload: {
     throw new Error(err.detail || `HTTP ${resp.status}`)
   }
   return resp.json()
+}
+
+/** 列出某知识库成员（库 admin 或全局 admin）。 */
+export async function getKbMembers(kbId: string): Promise<KBMember[]> {
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/members`, { headers: authHeaders() })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return (await resp.json()).members
+}
+
+/** 全量设置某知识库成员（覆盖式）。 */
+export async function setKbMembers(kbId: string, payload: KBMembersUpdate): Promise<KBMember[]> {
+  const resp = await fetch(`/api/knowledge-bases/${kbId}/members`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return (await resp.json()).members
+}
+
+/** 列出当前用户全部长期记忆（按时间倒序）。 */
+export async function getMemories(): Promise<MemoryItem[]> {
+  const resp = await fetch('/api/memories', { headers: authHeaders() })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return (await resp.json()).memories
+}
+
+/** 删除一条记忆。 */
+export async function deleteMemory(id: string): Promise<void> {
+  const resp = await fetch(`/api/memories/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+}
+
+/** 清空当前用户全部记忆。 */
+export async function clearMemories(): Promise<number> {
+  const resp = await fetch('/api/memories', {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+  return (await resp.json()).deleted ?? 0
 }
 
 export async function getTrending(): Promise<TrendingItem[]> {

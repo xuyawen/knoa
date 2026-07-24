@@ -11,6 +11,7 @@ import DataTable from '@/components/ui/DataTable.vue'
 import DepartmentTree from '@/components/DepartmentTree.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
+import { useAuthStore } from '@/stores/auth'
 import {
   getDocuments,
   uploadDocument,
@@ -23,12 +24,122 @@ import {
   getDocumentTags,
   getDocumentTask,
   getDocumentTasks,
+  getKbMembers,
+  setKbMembers,
 } from '@/api'
+import { getUserList } from '@/api/auth'
 import { uploadToOss } from '@/utils/oss'
-import type { DocumentItem, DocumentDetail, AIReview, DepartmentNode, DocumentTaskOut } from '@/types/api'
+import type {
+  DocumentItem,
+  DocumentDetail,
+  AIReview,
+  DepartmentNode,
+  DocumentTaskOut,
+  KBMember,
+  UserOut,
+} from '@/types/api'
 
 const knowledge = useKnowledgeStore()
 const toast = useToastStore()
+const auth = useAuthStore()
+
+// KB 选择器选项（严格隔离后，knowledge.bases 仅含当前用户可见的库）
+const kbOptions = computed(() =>
+  knowledge.bases.map((b) => ({ label: b.name, value: b.id })),
+)
+const selectedKbName = computed(
+  () => knowledge.bases.find((b) => b.id === selectedKb.value)?.name || '',
+)
+
+/* ---------- KB 成员管理（库级授权 / 严格隔离下的共享入口）---------- */
+const showMemberModal = ref(false)
+const memberKbId = ref('')
+const memberRows = ref<KBMember[]>([])
+const allUsers = ref<UserOut[]>([])
+const memberLoading = ref(false)
+const memberSaving = ref(false)
+const newUserId = ref<string>('')
+const newUserLevel = ref<'view' | 'edit' | 'admin'>('view')
+
+const levelOptions = [
+  { label: '可查看', value: 'view' },
+  { label: '可编辑', value: 'edit' },
+  { label: '管理员', value: 'admin' },
+]
+
+const availableUserOptions = computed(() => {
+  const used = new Set(memberRows.value.map((m) => m.userId))
+  return allUsers.value
+    .filter((u) => !used.has(u.id))
+    .map((u) => ({ label: `${u.displayName || u.username}（@${u.username}）`, value: u.id }))
+})
+
+async function openManageMembers() {
+  if (!selectedKb.value) {
+    toast.warning('请先选择知识库')
+    return
+  }
+  memberKbId.value = selectedKb.value
+  showMemberModal.value = true
+  memberLoading.value = true
+  newUserId.value = ''
+  newUserLevel.value = 'view'
+  try {
+    const [members, users] = await Promise.all([
+      getKbMembers(memberKbId.value),
+      getUserList(1, 200),
+    ])
+    memberRows.value = members
+    allUsers.value = users.items
+  } catch (e: any) {
+    toast.error(`加载成员失败：${e?.message || e}`)
+    showMemberModal.value = false
+  } finally {
+    memberLoading.value = false
+  }
+}
+
+function addMember() {
+  const u = allUsers.value.find((x) => x.id === newUserId.value)
+  if (!u) return
+  if (memberRows.value.some((m) => m.userId === u.id)) {
+    toast.warning('该用户已在成员列表中')
+    return
+  }
+  memberRows.value.push({
+    userId: u.id,
+    username: u.username,
+    displayName: u.displayName,
+    level: newUserLevel.value,
+  })
+  newUserId.value = ''
+  newUserLevel.value = 'view'
+}
+
+function removeMember(userId: string) {
+  memberRows.value = memberRows.value.filter((m) => m.userId !== userId)
+}
+
+async function saveMembers() {
+  const admins = memberRows.value.filter((m) => m.level === 'admin')
+  if (!admins.length) {
+    toast.error('至少保留一名管理员，否则知识库将无法管理')
+    return
+  }
+  memberSaving.value = true
+  try {
+    const updated = await setKbMembers(memberKbId.value, {
+      members: memberRows.value.map((m) => ({ userId: m.userId, level: m.level })),
+    })
+    memberRows.value = updated
+    toast.success('成员权限已保存')
+    showMemberModal.value = false
+  } catch (e: any) {
+    toast.error(`保存失败：${e?.message || e}`)
+  } finally {
+    memberSaving.value = false
+  }
+}
 
 const props = defineProps<{ section?: string }>()
 const section = computed(() => props.section ?? 'mine')
@@ -540,6 +651,23 @@ async function confirmBatchDelete() {
     <!-- ====== 工具栏 ====== -->
     <div class="toolbar card">
       <div class="toolbar-left">
+        <!-- KB 选择器（严格隔离后仅列当前用户可见的库） -->
+        <CustomSelect
+          v-model="selectedKb"
+          :options="kbOptions"
+          placeholder="选择知识库"
+          width="180px"
+        />
+        <button
+          v-if="auth.isAdmin && selectedKb"
+          class="btn btn-ghost btn-sm"
+          :disabled="memberLoading"
+          title="管理该知识库可访问的成员"
+          @click="openManageMembers"
+        >
+          <Icon name="users" :size="13" /> 管理成员
+        </button>
+
         <!-- 搜索 -->
         <div class="search-box">
           <Icon name="search" :size="14" class="search-icon" />
@@ -793,6 +921,45 @@ async function confirmBatchDelete() {
       @close="showBatchDelete = false"
       @confirm="confirmBatchDelete"
     />
+
+    <!-- ====== KB 成员管理（库级授权）====== -->
+    <AppModal
+      :show="showMemberModal"
+      :title="`管理成员 · ${selectedKbName}`"
+      wide
+      @close="showMemberModal = false"
+    >
+      <div v-if="memberLoading" class="modal-hint">加载中…</div>
+      <template v-else>
+        <p class="member-tip">
+          为该知识库添加成员并分配权限：<b>可查看</b>仅检索、<b>可编辑</b>可上传/删除文档、<b>管理员</b>可管理成员与库设置。至少保留一名管理员。
+        </p>
+        <div class="member-list">
+          <div v-for="m in memberRows" :key="m.userId" class="member-row">
+            <div class="member-info">
+              <span class="member-name">{{ m.displayName || m.username }}</span>
+              <span class="member-uname">@{{ m.username }}</span>
+            </div>
+            <CustomSelect v-model="m.level" :options="levelOptions" width="110px" />
+            <button class="action-btn" title="移除成员" @click="removeMember(m.userId)">
+              <Icon name="close" :size="15" />
+            </button>
+          </div>
+          <div v-if="!memberRows.length" class="member-empty">暂无成员，请在下方添加。</div>
+        </div>
+        <div class="member-add">
+          <CustomSelect v-model="newUserId" :options="availableUserOptions" placeholder="选择用户" width="220px" />
+          <CustomSelect v-model="newUserLevel" :options="levelOptions" width="110px" />
+          <button class="btn btn-primary btn-sm" :disabled="!newUserId" @click="addMember">添加</button>
+        </div>
+      </template>
+      <template #foot>
+        <button class="btn btn-ghost btn-sm" @click="showMemberModal = false">取消</button>
+        <button class="btn btn-primary btn-sm" :disabled="memberSaving" @click="saveMembers">
+          <span v-if="memberSaving" class="spinner sm"></span> 保存
+        </button>
+      </template>
+    </AppModal>
   </div>
 </template>
 
@@ -1229,4 +1396,23 @@ async function confirmBatchDelete() {
 .ai-sim { color: var(--brand); font-weight: 600; margin-right: 8px; }
 .ai-doc { font-weight: 500; color: var(--text-primary); }
 .ai-snippet { margin: 4px 0 0; color: var(--text-tertiary); font-size: 12px; }
+
+/* ===== KB 成员管理弹窗 ===== */
+.member-tip { margin: 0 0 14px; color: var(--text-tertiary); font-size: 12.5px; line-height: 1.6; }
+.member-tip b { color: var(--text-secondary); }
+.member-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.member-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.member-name { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.member-uname { font-size: 12px; color: var(--text-tertiary); }
+.member-empty { padding: 14px; text-align: center; color: var(--text-tertiary); font-size: 13px; background: var(--bg-soft); border: 1px dashed var(--border); border-radius: var(--radius-md); }
+.member-add { display: flex; align-items: center; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
 </style>

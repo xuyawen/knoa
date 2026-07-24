@@ -114,6 +114,10 @@ const subMenus: Record<string, SubItem[]> = {
     { label: '角色管理', icon: 'shield', to: '/permission/roles', activeNames: ['perm-roles'], adminOnly: true },
     { label: '部门管理', icon: 'team', to: '/permission/departments', activeNames: ['perm-departments'] },
   ],
+  profile: [
+    { label: '个人资料', icon: 'user', to: '/profile', activeNames: ['profile'] },
+    { label: '记忆管理', icon: 'brain-circuit', to: '/memories', activeNames: ['memories'] },
+  ],
 }
 
 const currentSubItems = computed<SubItem[]>(() => {

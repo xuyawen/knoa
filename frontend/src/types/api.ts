@@ -10,6 +10,27 @@ export interface KnowledgeBase {
   category?: string | null
 }
 
+/** 知识库成员（库级权限）。 */
+export interface KBMember {
+  userId: string
+  username: string
+  displayName: string | null
+  level: 'view' | 'edit' | 'admin'
+}
+
+/** 全量设置知识库成员（覆盖式）。 */
+export interface KBMembersUpdate {
+  members: { userId: string; level: 'view' | 'edit' | 'admin' }[]
+}
+
+/** 长期记忆条目（个人记忆管理页）。 */
+export interface MemoryItem {
+  id: string
+  content: string
+  type: string | null
+  createdAt: string | null
+}
+
 export interface KBCreate {
   name: string
   icon?: string | null
