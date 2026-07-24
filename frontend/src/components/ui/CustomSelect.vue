@@ -27,6 +27,7 @@ const open = ref(false)
 const flipUp = ref(false)
 const root = ref<HTMLElement>()
 const panel = ref<HTMLElement>()
+const panelStyle = ref({ top: '0px', left: '0px' })
 
 const currentLabel = computed(() => {
   const opt = props.options.find((o) => o.value === props.modelValue)
@@ -36,9 +37,15 @@ const currentLabel = computed(() => {
 function measure() {
   if (!root.value || !panel.value) return
   const rect = root.value.getBoundingClientRect()
-  const ph = panel.value.getBoundingClientRect().height
-  const below = window.innerHeight - rect.bottom
-  flipUp.value = ph > below && rect.top > below
+  const ph = panel.value.scrollHeight
+  const below = window.innerHeight - rect.bottom - 4
+  const shouldFlip = ph > below && rect.top > below
+  flipUp.value = shouldFlip
+  if (shouldFlip) {
+    panelStyle.value = { top: `${rect.top + window.scrollY - ph - 4}px`, left: `${rect.left + window.scrollX}px` }
+  } else {
+    panelStyle.value = { top: `${rect.bottom + window.scrollY + 4}px`, left: `${rect.left + window.scrollX}px` }
+  }
 }
 
 function toggle() {
@@ -65,14 +72,19 @@ function onClickOutside(e: MouseEvent) {
 function onResize() {
   if (open.value) measure()
 }
+function onScroll() {
+  if (open.value) measure()
+}
 
 onMounted(() => {
   document.addEventListener('click', onClickOutside)
   window.addEventListener('resize', onResize)
+  window.addEventListener('scroll', onScroll, true)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', onClickOutside)
   window.removeEventListener('resize', onResize)
+  window.removeEventListener('scroll', onScroll, true)
 })
 </script>
 
@@ -83,7 +95,7 @@ onBeforeUnmount(() => {
       <Icon name="chevron-down" :size="12" class="c-select-arrow" />
     </button>
     <Transition :name="flipUp ? 'c-drop-up' : 'c-drop'">
-      <div v-if="open" ref="panel" class="c-select-panel" :class="{ up: flipUp }">
+      <div v-if="open" ref="panel" class="c-select-panel" :class="{ up: flipUp }" :style="panelStyle">
         <div
           v-for="opt in options"
           :key="opt.value"
@@ -143,10 +155,8 @@ onBeforeUnmount(() => {
 
 /* ---- 下拉面板 ---- */
 .c-select-panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 100;
+  position: fixed;
+  z-index: 9999;
   width: 100%;
   max-height: 260px;
   overflow-y: auto;
@@ -157,8 +167,7 @@ onBeforeUnmount(() => {
   padding: 4px;
 }
 .c-select-panel.up {
-  top: auto;
-  bottom: calc(100% + 4px);
+  /* top/left 由 JS panelStyle 动态计算 */
 }
 .c-select-opt {
   padding: 8px 12px;
