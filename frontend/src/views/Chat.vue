@@ -30,6 +30,17 @@ import type {
 import { uploadToOss } from '@/utils/oss'
 import { useModelConfig } from '@/composables/useModelConfig'
 
+/** 生成唯一 ID（兼容非安全上下文 HTTP 下 crypto.randomUUID 不可用） */
+function genId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  // Fallback: RFC 4122 v4 UUID（足够用于前端消息 ID）
+  return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c =>
+    ((+c) ^ (crypto?.getRandomValues(new Uint8Array(1))[0] & (15 >> (+c / 4)))).toString(16)
+  )
+}
+
 // 读取模型配置（单一真值在 /api/settings 服务端，经 useModelConfig 单例缓存）。
 // 拼成后端 AskRequest 接受的字段随每次问答下发。空值不传，走后端默认。
 function readModelConfig(): Record<string, unknown> {
@@ -215,7 +226,7 @@ function formatSize(bytes: number): string {
 
 function toChatMessage(m: SessionMessage): ChatMessage {
   return {
-    id: crypto.randomUUID(),
+    id: genId(),
     role: m.role === 'assistant' ? 'assistant' : 'user',
     content: m.content,
     citations: m.citations || undefined,
@@ -340,14 +351,14 @@ async function send() {
   }
 
   const userMsg: ChatMessage = {
-    id: crypto.randomUUID(),
+    id: genId(),
     role: 'user',
     content: text,
     attachments: attached.value.length ? [...attached.value] : null,
     feedback: null,
   }
   const aiMsg: ChatMessage = {
-    id: crypto.randomUUID(),
+    id: genId(),
     role: 'assistant',
     content: '',
     thinkingSteps: [],
