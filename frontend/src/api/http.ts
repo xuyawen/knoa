@@ -124,8 +124,9 @@ async function trackedFetch(
   inFlight.add(ctrl)
   try {
     const resp = await _nativeFetch(input, mergedInit)
-    // 登录接口本身会返回 401（账号密码错误），那不是 token 失效，不拦截
-    if (resp.status === 401 && !reqUrl(input).includes('/api/auth/login')) {
+    // 登录接口本身会返回 401（账号密码错误），以及 /api/auth/me 在首次访问时
+    // 也会返回 401（本来就没登录，不是 token 过期），都不拦截
+    if (resp.status === 401 && !reqUrl(input).includes('/api/auth/login') && !reqUrl(input).includes('/api/auth/me')) {
       triggerTokenExpired()
       throw new TokenExpiredError()
     }
