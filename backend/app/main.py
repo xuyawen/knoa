@@ -1,13 +1,32 @@
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+# LangSmith 追踪开关必须显式注入 os.environ。
+# pydantic BaseSettings(env_file=".env") 只把 .env 的值填进 settings 对象，
+# 不会写 os.environ；而 langsmith SDK 仅靠 os.environ 读取 LANGSMITH_TRACING。
+# 不先 load_dotenv()，tracing 实际永不开启，后台收不到任何 trace。
+# 放在所有 app.* 导入之前，确保 langsmith 在任意 @traceable 被 import 前
+# 就能读到开关。
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, update
 
 from app.config import settings, validate_production_settings
+
+# 兜底：即便启动目录异常导致上面的 load_dotenv 未命中 .env，也把 settings 中
+# 已确认的 LangSmith 配置显式写入 os.environ（langsmith 只读 os.environ）。
+for _ls_key in ("LANGSMITH_TRACING", "LANGSMITH_API_KEY", "LANGSMITH_PROJECT", "LANGSMITH_ENDPOINT"):
+    _ls_val = getattr(settings, _ls_key, "")
+    if _ls_val and not os.environ.get(_ls_key):
+        os.environ[_ls_key] = str(_ls_val)
 from app.core.logging_config import request_id_var, setup_logging
 from app.core.metrics import (
     dec_active,
