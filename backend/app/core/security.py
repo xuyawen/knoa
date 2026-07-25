@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.rbac import PERMISSION_KEYS
+from app.core.rbac import PERMISSION_KEYS, Perm
 from app.db import KBPermission, KnowledgeBase, RolePermission, User
 from app.deps import get_db, get_redis
 
@@ -138,6 +138,16 @@ async def get_role_permissions(db: AsyncSession, role_id: uuid.UUID) -> set[str]
     return set(rows)
 
 
+async def _is_kb_super_admin(db: AsyncSession, user: User) -> bool:
+    """内置 admin 角色（拥有 user_manage 权限）隐式拥有全部知识库的 admin 级权限。
+
+    RBAC 重构后 User.role 字符串列已废弃，改用 role_id → 角色权限集合判定，
+    与 routers/auth.py 的 _is_admin 保持一致。
+    """
+    perms = await get_role_permissions(db, user.role_id)
+    return Perm.USER_MANAGE in perms
+
+
 def require_permission(permission: str) -> Callable[..., Awaitable[User]]:
     """依赖工厂：要求当前用户所属角色拥有指定权限，否则 403。"""
 
@@ -160,11 +170,11 @@ async def get_kb_permission_level(
 ) -> str | None:
     """返回用户对某 KB 的最高权限级别；None 表示无权限。
 
-    - admin 角色隐式拥有全部 KB 的 admin 级。
+    - admin 角色（_is_kb_super_admin）隐式拥有全部 KB 的 admin 级。
     - 若 KB 完全没有任何权限记录（遗留种子库），视为对全体已登录用户开放 view。
     - 若 KB 已有权限记录但当前用户不在其中，则返回 None（严格隔离）。
     """
-    if user.role == "admin":
+    if await _is_kb_super_admin(db, user):
         return "admin"
     rows = (
         await db.execute(
@@ -181,7 +191,8 @@ async def get_kb_permission_level(
     )
     if any_perm is None:
         # 遗留开放库（无任何权限记录）：对全体已登录用户开放，按角色授予
-        return "edit" if user.role in ("admin", "editor") else "view"
+        perms = await get_role_permissions(db, user.role_id)
+        return "edit" if Perm.DOC_EDIT in perms else "view"
     return None         # 严格库，当前用户未被授权
 
 
@@ -209,7 +220,7 @@ async def get_accessible_kb_ids(db: AsyncSession, user: User) -> list[str]:
       严格隔离库（已有他人权限记录但自己不在其中）不可见。
     语义与 get_kb_permission_level 的「遗留开放库」规则保持一致。
     """
-    if user.role == "admin":
+    if await _is_kb_super_admin(db, user):
         rows = (await db.execute(select(KnowledgeBase.id))).scalars().all()
         return [str(x) for x in rows]
     all_kb_ids = [
