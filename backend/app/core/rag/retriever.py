@@ -83,6 +83,7 @@ class HybridRetriever:
         return list(result.scalars().all())
 
     @traceable(name="retrieve", tags=["retrieval"])
+    @traceable(name="retrieve", run_type="retriever", tags=["retrieval"])
     async def retrieve(self, question: str, kb_id: str | None = None, top_k: int = 5) -> list[dict]:
         query_vec = np.array(await self.embedder.embed_query(question))
 
