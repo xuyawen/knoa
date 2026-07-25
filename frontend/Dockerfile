@@ -2,6 +2,9 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
+# 国内 npm 源，避免 registry.npmjs.org 出网受限（构建失败）
+ENV npm_config_registry=https://registry.npmmirror.com
+
 # 优先用 lock 文件做确定性安装
 COPY package.json package-lock.json ./
 RUN npm ci

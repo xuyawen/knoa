@@ -16,13 +16,19 @@ services:
     image: postgres:16-alpine          # alpine 镜像比默认镜像小 ~200MB
     container_name: knoa-postgres
     # 低内存调优：shared_buffers 默认 128MB 对 2G 机器偏大，降到 64MB
-    command: >
-      postgres
-      -c shared_buffers=64MB
-      -c work_mem=4MB
-      -c maintenance_work_mem=32MB
-      -c effective_cache_size=256MB
-      -c random_page_cost=1.1           # SSD，鼓励索引扫描
+    # 注意：不能用 `command: >` 折叠语法带行内 `#` 注释——compose 会把行内 `#` 当成非法参数。
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=64MB"
+      - "-c"
+      - "work_mem=4MB"
+      - "-c"
+      - "maintenance_work_mem=32MB"
+      - "-c"
+      - "effective_cache_size=256MB"
+      - "-c"
+      - "random_page_cost=1.1"
     environment:
       POSTGRES_USER: knoa
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-knoa}
