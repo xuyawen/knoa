@@ -32,10 +32,6 @@ RUN uv sync --index-url https://pypi.tuna.tsinghua.edu.cn/simple/
 # 上传目录需可写（compose 挂载同名卷，777 仅兜底，生产应改属主）
 RUN mkdir -p app/data/uploads && chmod 777 app/data/uploads
 
-# uv 缓存目录重定向到 appuser 可写路径（默认 HOME=/home/appuser 无写权会启动失败）
-RUN mkdir -p /app/.uv-cache && chown appuser:appgroup /app/.uv-cache
-ENV UV_CACHE_DIR=/app/.uv-cache
-
 EXPOSE 8000
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -45,6 +41,12 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 RUN groupadd --system appgroup \
     && useradd --system --gid appgroup appuser \
     && chown -R appuser:appgroup /app
+
+# uv 缓存目录重定向到 appuser 可写路径（默认 HOME=/home/appuser 无写权会启动失败）
+# 必须在创建 appuser/appgroup 之后执行 chown，否则报 invalid user
+RUN mkdir -p /app/.uv-cache && chown appuser:appgroup /app/.uv-cache
+ENV UV_CACHE_DIR=/app/.uv-cache
+
 USER appuser
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
