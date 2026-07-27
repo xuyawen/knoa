@@ -10,9 +10,12 @@ from app.core.rag.pipeline import RAGPipeline
 from app.core.rag.es_retriever import ESRetriever
 from app.core.rag.retriever import HybridRetriever
 from app.core.security import (
+    ScopeContext,
+    compute_visible_dept_ids,
     get_accessible_kb_ids,
     get_current_user,
     get_kb_permission_level,
+    is_super_admin,
     require_permission,
 )
 from app.core.rbac import Perm
@@ -64,12 +67,24 @@ async def ask(
             level = await get_kb_permission_level(perm_db, req.knowledge_base, user)
             if level is None:
                 raise HTTPException(status_code=403, detail="无权访问该知识库")
+            # scope 补全：该库 admin（含超管隐式 admin）可见库内全部文档（含他人 private）
+            scope_is_admin = level == "admin"
         else:
             # 未指定 KB：将检索范围严格限定为用户有权访问的 KB 列表，
             # 防止已登录用户跨库检索其无权查看的知识库内容（P0-2）。
             accessible_kb_ids = await get_accessible_kb_ids(perm_db, user)
             if not accessible_kb_ids:
                 raise HTTPException(status_code=403, detail="无权访问任何知识库")
+            # 全部知识库模式：仅超管豁免 scope 过滤
+            scope_is_admin = await is_super_admin(perm_db, user)
+        # 部门可见子树：非 admin 才需计算（admin 跳过 scope 过滤）
+        visible_dept_ids = frozenset()
+        if not scope_is_admin:
+            visible_dept_ids = await compute_visible_dept_ids(perm_db, user)
+    # 文档级可见性上下文：注入检索器，private 仅本人、department 命中可见部门子树
+    scope_ctx = ScopeContext(
+        user_id=str(user.id), is_admin=scope_is_admin, visible_dept_ids=visible_dept_ids
+    )
 
     async def event_generator():
         logger.info("ask stream start", extra={"request_id": rid})
@@ -97,19 +112,21 @@ async def ask(
             if es.enabled:
                 if req.knowledge_base and await es.index_exists(req.knowledge_base):
                     # 指定单库且索引已建 → ES 快路（kNN+BM25，免内存全量余弦）
-                    retriever = ESRetriever(embedder, es, settings.RRF_K)
+                    retriever = ESRetriever(embedder, es, settings.RRF_K, scope_ctx=scope_ctx)
                 elif accessible_kb_ids:
                     # 「全部知识库」模式：ES 跨索引检索用户可访问的全部库，
                     # 避免把全量 chunk 拉进内存算余弦（库多量大时是主要瓶颈）
                     retriever = ESRetriever(
                         embedder, es, settings.RRF_K,
                         fallback_kb_ids=[str(k) for k in accessible_kb_ids],
+                        scope_ctx=scope_ctx,
                     )
             if retriever is None:
                 # ES 不可用 / 索引未建：回退 pgvector 内存混合检索，
                 # 未指定 KB 时注入可访问范围做库级隔离过滤
                 retriever = HybridRetriever(
-                    embedder, gen_db, settings.RRF_K, kb_ids=accessible_kb_ids
+                    embedder, gen_db, settings.RRF_K, kb_ids=accessible_kb_ids,
+                    scope_ctx=scope_ctx,
                 )
             pipeline = RAGPipeline(
                 retriever, llm, redis, gen_db,

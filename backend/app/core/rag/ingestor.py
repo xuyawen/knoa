@@ -117,6 +117,7 @@ class DocumentIngester:
                         chunk_index=chunk_data["index"],
                         content=chunk_data["content"],
                         embedding=embedding,
+                        scope="public",  # 开发者灌库内容默认公开，无上传者
                     )
                 )
                 # 双写 ES（幂等：用确定性 _id，失败静默不影响主流程）
@@ -144,6 +145,10 @@ class DocumentIngester:
             "doc_id": str(doc.id),
             "chunk_index": chunk_data["index"],
             "doc_title": doc.title,
+            # 文档级权限冗余（scope 补全）：ES 检索按 scope bool filter 过滤私有内容
+            "scope": doc.scope or "public",
+            "uploader_id": str(doc.uploader_id) if doc.uploader_id else None,
+            "department_id": str(doc.department_id) if doc.department_id else None,
         }
         await self._es.upsert_chunk(kb_id, es_id, body)
 
@@ -185,6 +190,9 @@ class DocumentIngester:
                         chunk_index=chunk_data["index"],
                         content=chunk_data["content"],
                         embedding=embedding,
+                        scope=doc.scope,
+                        uploader_id=doc.uploader_id,
+                        department_id=doc.department_id,
                     )
                 )
                 await self._sync_es_chunk(doc.kb_id, doc, chunk_data, embedding)

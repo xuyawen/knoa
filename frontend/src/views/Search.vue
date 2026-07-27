@@ -33,7 +33,6 @@ const typeOpts = [
 const scopeOpts = [
   { label: '全部权限', value: '' },
   { label: '公开', value: 'public' },
-  { label: '公司内部', value: 'company' },
   { label: '部门', value: 'department' },
   { label: '私有', value: 'private' },
 ]
@@ -135,7 +134,7 @@ function fmtTime(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 function scopeLabel(scope: string): string {
-  const map: Record<string, string> = { public: '公开', company: '公司内部', department: '部门可见', private: '仅本人可见' }
+  const map: Record<string, string> = { public: '公开', department: '部门可见', private: '仅本人可见' }
   return map[scope] || scope
 }
 
@@ -257,6 +256,10 @@ function gotoQuery(text: string) {
   align-items: center;
   gap: 12px;
 }
+.search-input-row .btn-primary {
+  min-width: 72px;
+  padding: 0 20px;
+}
 .search-input-wrap {
   flex: 1;
   position: relative;
@@ -275,6 +278,8 @@ function gotoQuery(text: string) {
   padding: 0 34px 0 38px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-primary);
   font-size: 14px;
   transition: all var(--dur-fast);
 }

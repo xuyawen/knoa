@@ -18,6 +18,7 @@ export interface CurrentUser {
   preferredModel: string | null
   ttsEnabled: boolean
   email: string | null
+  departmentId: string | null
   department: string | null
   employeeId: string | null
 }
@@ -62,6 +63,7 @@ export const useAuthStore = defineStore('auth', () => {
       preferredModel: u.preferredModel ?? null,
       ttsEnabled: u.ttsEnabled ?? false,
       email: u.email ?? null,
+      departmentId: u.departmentId ?? null,
       department: u.department ?? null,
       employeeId: u.employeeId ?? null,
     }

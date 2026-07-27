@@ -139,11 +139,15 @@ export async function getDocuments(
 export async function uploadDocument(
   kbId: string,
   filename: string,
-  opts?: { contentB64?: string; fileUrl?: string },
+  opts?: { contentB64?: string; fileUrl?: string; scope?: string; departmentId?: string },
 ): Promise<DocumentItem> {
   const body: Record<string, unknown> = { filename }
   if (opts?.fileUrl) body.fileUrl = opts.fileUrl
   else if (opts?.contentB64) body.contentB64 = opts.contentB64
+  // scope 补全：上传时指定文档权限范围（private 仅本人可见），不传后端默认 public
+  if (opts?.scope) body.scope = opts.scope
+  // 部门文档：显式指定归属部门；scope=department 不传则后端默认取上传者部门
+  if (opts?.departmentId) body.departmentId = opts.departmentId
   return request(`/api/knowledge-bases/${kbId}/documents`, { method: 'POST', json: body })
 }
 

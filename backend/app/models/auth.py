@@ -21,7 +21,8 @@ class UserOut(CamelModel):
     preferred_model: str | None = None          # P8：偏好问答模型（透传进 ask 管线）
     tts_enabled: bool = False                   # P8：是否启用语音播报
     email: str | None = None
-    department: str | None = None
+    department_id: str | None = None              # 部门外键（真相源）
+    department: str | None = None                 # 部门显示名（后端按 department_id 解析，仅供展示）
     employee_id: str | None = None
 
 
@@ -37,7 +38,7 @@ class UserCreateIn(CamelModel):
     display_name: str | None = None
     role_id: str                                # 关联角色 id
     email: str | None = None
-    department: str | None = None
+    department_id: str | None = None            # 部门外键（真相源）
     employee_id: str | None = None
 
 
@@ -47,7 +48,7 @@ class UserUpdateIn(CamelModel):
     is_active: bool | None = None
     password: str | None = None
     email: str | None = None
-    department: str | None = None
+    department_id: str | None = None            # 部门外键（真相源）
     employee_id: str | None = None
 
 

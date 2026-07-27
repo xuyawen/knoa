@@ -43,7 +43,7 @@ from app.core.security import (
 )
 from app.database import AsyncSessionLocal
 from app.deps import get_es
-from app.db import ChatSession, Role, User
+from app.db import ChatSession, Department, Role, User
 from app.routers import (
     analytics,
     announcements,
@@ -82,6 +82,13 @@ async def lifespan(app: FastAPI):
         # 内置 admin 角色 id（_seed_roles 已保证存在）
         admin_role = await session.scalar(select(Role).where(Role.key == "admin"))
         admin_role_id = admin_role.id if admin_role else None
+        # admin 部门：按名解析 department_id（部门表已播种；解析不到留 NULL，admin 为超管不依赖部门权限）
+        admin_dept_id = None
+        if settings.ADMIN_DEPARTMENT:
+            admin_dept = await session.scalar(
+                select(Department).where(Department.name == settings.ADMIN_DEPARTMENT)
+            )
+            admin_dept_id = admin_dept.id if admin_dept else None
         admin = await session.scalar(
             select(User).where(User.username == settings.ADMIN_USERNAME)
         )
@@ -95,7 +102,7 @@ async def lifespan(app: FastAPI):
                 display_name=settings.ADMIN_DISPLAY_NAME,
                 role_id=admin_role_id,
                 email=settings.ADMIN_EMAIL,
-                department=settings.ADMIN_DEPARTMENT,
+                department_id=admin_dept_id,
                 employee_id=settings.ADMIN_EMPLOYEE_ID,
             )
             session.add(admin)
@@ -107,8 +114,8 @@ async def lifespan(app: FastAPI):
             if admin.email is None:
                 admin.email = settings.ADMIN_EMAIL
                 changed = True
-            if admin.department is None:
-                admin.department = settings.ADMIN_DEPARTMENT
+            if admin.department_id is None and admin_dept_id is not None:
+                admin.department_id = admin_dept_id
                 changed = True
             if admin.employee_id is None:
                 admin.employee_id = settings.ADMIN_EMPLOYEE_ID

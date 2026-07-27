@@ -11,15 +11,16 @@ import json
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.rbac import PERMISSION_KEYS, Perm
-from app.db import KBPermission, KnowledgeBase, RolePermission, User
+from app.db import Department, Document, KBPermission, KnowledgeBase, RolePermission, User
 from app.deps import get_db, get_redis
 
 logger = logging.getLogger("knoa.security")
@@ -230,9 +231,11 @@ async def get_kb_permission_level(
         select(KBPermission.id).where(KBPermission.kb_id == kb_id).limit(1)
     )
     if any_perm is None:
-        # 遗留开放库（无任何权限记录）：对全体已登录用户开放，按角色授予
-        perms = await get_role_permissions(db, user.role_id)
-        return "edit" if Perm.DOC_EDIT in perms else "view"
+        # 遗留开放库（无任何权限记录）：仅隐式开放 view（只读）。
+        # 写操作（edit/admin）必须显式授权——否则"建库忘加权限记录"会让所有
+        # DOC_EDIT 角色用户都能改/删全库文档（含他人 private），叠加文档级
+        # scope 后这个坑更危险。超管仍由 _is_kb_super_admin 走 admin 不受影响。
+        return "view"
     return None         # 严格库，当前用户未被授权
 
 
@@ -274,3 +277,121 @@ async def get_accessible_kb_ids(db: AsyncSession, user: User) -> list[str]:
         await db.execute(select(KnowledgeBase.id).where(user_perm | ~any_perm))
     ).scalars().all()
     return [str(x) for x in rows]
+
+
+# ---------------------------------------------------------------------------
+# 文档级 scope 可见性（scope 补全）
+# ---------------------------------------------------------------------------
+# 非 admin 用户可见 public；department 需按部门子树判定（不在此列），private 仅上传者本人可见。
+SCOPE_PUBLIC_LIKE: tuple[str, ...] = ("public",)
+SCOPE_PRIVATE = "private"
+SCOPE_DEPARTMENT = "department"
+
+
+@dataclass(frozen=True)
+class ScopeContext:
+    """检索/列表的文档级可见性上下文。
+
+    is_admin（超级管理员或该库 KB admin）→ 可见全部，跳过 scope 过滤；
+    其余用户仅可见 public-like、自己的 private、以及命中可见部门子树的 department 文档。
+    """
+
+    user_id: str
+    is_admin: bool
+    # 用户可见的部门 id 集合（本人部门 + 所有后代部门，str 形式）；department 文档命中此集合才可见
+    visible_dept_ids: frozenset[str] = frozenset()
+
+
+async def is_super_admin(db: AsyncSession, user: User) -> bool:
+    """超级管理员（拥有 user_manage 权限）公开判定，供检索/列表注入 ScopeContext。"""
+    return await _is_kb_super_admin(db, user)
+
+
+async def compute_visible_dept_ids(db: AsyncSession, user: User) -> frozenset[str]:
+    """计算用户可见的部门 id 集合：本人部门 + 所有后代部门（部门树向下递归）。
+
+    无部门用户返回空集（看不到任何 department 文档）。一次全量拉取部门（量小），
+    内存 BFS 展开子树，避免递归 SQL。
+    """
+    if user.department_id is None:
+        return frozenset()
+    rows = (await db.execute(select(Department.id, Department.parent_id))).all()
+    children: dict[uuid.UUID | None, list[uuid.UUID]] = {}
+    for did, pid in rows:
+        children.setdefault(pid, []).append(did)
+    visible: set[uuid.UUID] = set()
+    stack = [user.department_id]
+    while stack:
+        cur = stack.pop()
+        if cur in visible:
+            continue
+        visible.add(cur)
+        stack.extend(children.get(cur, []))
+    return frozenset(str(d) for d in visible)
+
+
+def doc_scope_clause(user: User, is_admin: bool, visible_dept_ids: frozenset[str] = frozenset()):
+    """返回 SQLAlchemy 条件：当前用户可见的文档 scope 范围；is_admin → None（不限制）。
+
+    用于 list_documents / search_docs / 文档详情的强制可见性过滤。
+    普通用户：public 全可见 + private 仅本人 + department 命中可见部门子树。
+    """
+    if is_admin:
+        return None
+    clauses = [
+        Document.scope.in_(SCOPE_PUBLIC_LIKE),
+        and_(Document.scope == SCOPE_PRIVATE, Document.uploader_id == user.id),
+    ]
+    if visible_dept_ids:
+        dept_uuids = [uuid.UUID(d) for d in visible_dept_ids]
+        clauses.append(
+            and_(Document.scope == SCOPE_DEPARTMENT, Document.department_id.in_(dept_uuids))
+        )
+    return or_(*clauses)
+
+
+def is_scope_visible(
+    scope: str,
+    uploader_id,
+    ctx: ScopeContext | None,
+    department_id: str | None = None,
+) -> bool:
+    """单个 chunk/文档的可见性判定（pgvector 检索分数掩码用，纯 Python）。
+
+    与 doc_scope_clause 语义一致；uploader_id 可为 UUID 或 str，统一转 str 比较。
+    ctx 为 None（内部任务/无用户上下文）或 admin → 全可见。
+    department 文档：department_id 命中 ctx.visible_dept_ids 才可见。
+    未知 scope 兜底放行（数据异常时宁可可见也不误杀，与 public 默认值一致）。
+    """
+    if ctx is None or ctx.is_admin:
+        return True
+    if scope in SCOPE_PUBLIC_LIKE:
+        return True
+    if scope == SCOPE_PRIVATE:
+        return uploader_id is not None and str(uploader_id) == ctx.user_id
+    if scope == SCOPE_DEPARTMENT:
+        return bool(department_id) and str(department_id) in ctx.visible_dept_ids
+    # 未知 scope：兜底放行（与 public 默认值一致，避免脏数据误杀），但打 warning 便于排查。
+    # 权限系统理论上更该 fail-closed，这里权衡可用性选 fail-open + 告警（不再静默放过）。
+    logger.warning(
+        "is_scope_visible 遇到未知 scope=%r（uploader=%s），按 fail-open 放行", scope, uploader_id
+    )
+    return True
+
+
+async def ensure_doc_scope_writable(db: AsyncSession, doc: Document, user: User) -> None:
+    """写操作（删除/审核通过/驳回）的文档级 scope 校验，不可见 → 403。
+
+    与读路径 get_document 的 scope 校验对称：先取库级权限定 admin，
+    非 admin 再算部门子树并判 is_scope_visible。堵住"有库 edit 就能改/删
+    别人 private 文档"的越权（读路径已拦，写路径补上）；admin 豁免。
+    """
+    level = await get_kb_permission_level(db, doc.kb_id, user)
+    is_admin = level == "admin"
+    dept_ids = frozenset() if is_admin else await compute_visible_dept_ids(db, user)
+    if not is_scope_visible(
+        doc.scope, doc.uploader_id,
+        ScopeContext(str(user.id), is_admin, dept_ids),
+        str(doc.department_id) if doc.department_id else None,
+    ):
+        raise HTTPException(status_code=403, detail="无权操作该文档")

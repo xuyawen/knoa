@@ -21,6 +21,13 @@ logger = logging.getLogger("knoa.es")
 
 
 class ESClient:
+    # scope 补全：文档级权限字段（keyword 供 term/terms 过滤）。新建索引与既有索引补 mapping 共用。
+    _SCOPE_MAPPING_PROPERTIES = {
+        "scope": {"type": "keyword"},
+        "uploader_id": {"type": "keyword"},
+        "department_id": {"type": "keyword"},
+    }
+
     def __init__(self):
         # 总开关：显式开启且配置了 URL 才算启用
         self.enabled = bool(settings.ES_ENABLED and settings.ES_URL)
@@ -96,6 +103,13 @@ class ESClient:
             return False
         name = self.index_name(kb_id)
         if await self.index_exists(kb_id):
+            # 既有索引幂等补 scope 权限字段 mapping：早期索引无此 3 字段，若不显式
+            # 声明 keyword，首次写入会被动态映射判成 text，导致 term/terms 过滤失效。
+            # PUT _mapping 只增不改，对已有字段无副作用。
+            await self._request(
+                "PUT", f"/{name}/_mapping",
+                json_body={"properties": self._SCOPE_MAPPING_PROPERTIES},
+            )
             return True
         # content: IK 分词（入库细粒度 ik_max_word，检索高效 ik_smart）
         # embedding: dense_vector，余弦相似度，供 kNN 向量检索
@@ -121,6 +135,7 @@ class ESClient:
                     "doc_id": {"type": "keyword"},
                     "chunk_index": {"type": "integer"},
                     "doc_title": {"type": "keyword"},
+                    **self._SCOPE_MAPPING_PROPERTIES,
                 }
             },
         }
@@ -166,38 +181,54 @@ class ESClient:
         return f"/{names}/_search?ignore_unavailable=true&allow_no_indices=true"
 
     async def knn_search(
-        self, kb_ids: "str | list[str]", query_vector: list[float], size: int, num_candidates: int = 100
+        self, kb_ids: "str | list[str]", query_vector: list[float], size: int,
+        num_candidates: int = 100, scope_filter: dict | None = None,
     ) -> list[dict]:
-        """向量路：kNN 余弦检索（支持单库 str 或多库 list）。"""
+        """向量路：kNN 余弦检索（支持单库 str 或多库 list）。
+
+        scope_filter（可选）：ES bool filter，仅对当前用户可见的 chunk 做向量召回
+        （ES 8.x kNN 原生支持 filter）；admin 不传则不过滤。
+        """
         if not self.enabled:
             return []
+        knn = {
+            "field": "embedding",
+            "query_vector": query_vector,
+            "k": size,
+            "num_candidates": num_candidates,
+        }
+        if scope_filter:
+            knn["filter"] = scope_filter
         body = {
             "size": size,
-            "knn": {
-                "field": "embedding",
-                "query_vector": query_vector,
-                "k": size,
-                "num_candidates": num_candidates,
-            },
+            "knn": knn,
         }
         r = await self._request("POST", self._search_path(kb_ids), json_body=body)
         if not r or "hits" not in r:
             return []
         return r["hits"]["hits"]
 
-    async def bm25_search(self, kb_ids: "str | list[str]", query: str, size: int) -> list[dict]:
-        """关键词路：multi_match + ik_smart 分词（BM25 打分，支持单库/多库）。"""
+    async def bm25_search(
+        self, kb_ids: "str | list[str]", query: str, size: int,
+        scope_filter: dict | None = None,
+    ) -> list[dict]:
+        """关键词路：multi_match + ik_smart 分词（BM25 打分，支持单库/多库）。
+
+        scope_filter（可选）：包成 bool{must, filter} 限定仅可见 chunk 参与打分。
+        """
         if not self.enabled:
             return []
+        match = {
+            "multi_match": {
+                "query": query,
+                "fields": ["content"],
+                "analyzer": "ik_smart",
+            }
+        }
+        query_body = {"bool": {"must": match, "filter": scope_filter}} if scope_filter else match
         body = {
             "size": size,
-            "query": {
-                "multi_match": {
-                    "query": query,
-                    "fields": ["content"],
-                    "analyzer": "ik_smart",
-                }
-            },
+            "query": query_body,
         }
         r = await self._request("POST", self._search_path(kb_ids), json_body=body)
         if not r or "hits" not in r:

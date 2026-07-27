@@ -20,7 +20,7 @@ from app.core.security import (
     revoke_user_tokens_before,
 )
 from app.core.rbac import Perm
-from app.db import ChatSession, KBPermission, Memory, Role, User
+from app.db import ChatSession, Department, KBPermission, Memory, Role, User
 from app.deps import get_db, get_redis
 from app.models.operation_log import record_operation
 from app.config import settings
@@ -51,6 +51,20 @@ async def _resolve_role_id(db: AsyncSession, role_id: str) -> uuid.UUID:
     return rid
 
 
+async def _resolve_department_id(db: AsyncSession, department_id: str | None) -> uuid.UUID | None:
+    """校验部门外键：空值（None/空串）→ None（清空部门）；非法 UUID 或部门不存在 → 400。"""
+    if not department_id:
+        return None
+    try:
+        did = uuid.UUID(department_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="department_id 非法") from None
+    dept = await db.scalar(select(Department).where(Department.id == did))
+    if dept is None:
+        raise HTTPException(status_code=400, detail="部门不存在")
+    return did
+
+
 def _to_out(u: User) -> UserOut:
     return UserOut(
         id=str(u.id),
@@ -63,7 +77,8 @@ def _to_out(u: User) -> UserOut:
         preferred_model=u.preferred_model,
         tts_enabled=u.tts_enabled,
         email=u.email,
-        department=u.department,
+        department_id=str(u.department_id) if u.department_id else None,
+        department=u.department_ref.name if u.department_ref else None,
         employee_id=u.employee_id,
     )
 
@@ -240,7 +255,7 @@ async def create_user(
         display_name=payload.display_name,
         role_id=role_id,
         email=payload.email,
-        department=payload.department,
+        department_id=await _resolve_department_id(db, payload.department_id),
         employee_id=payload.employee_id,
     )
     db.add(u)
@@ -284,8 +299,8 @@ async def update_user(
     # 档案字段（邮箱/部门/工号）本人与 admin 均可改，不算特权字段
     if payload.email is not None:
         u.email = payload.email
-    if payload.department is not None:
-        u.department = payload.department
+    if payload.department_id is not None:
+        u.department_id = await _resolve_department_id(db, payload.department_id)
     if payload.employee_id is not None:
         u.employee_id = payload.employee_id
     pwd_reset = False

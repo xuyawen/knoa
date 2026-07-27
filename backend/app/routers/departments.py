@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user, require_permission
 from app.core.rbac import Perm
-from app.db import Department, Document
+from app.db import Department, Document, User
 from app.deps import get_db
 from app.models.department import (
     DepartmentCreateIn,
@@ -163,5 +163,10 @@ async def delete_department(
     )
     if doc_cnt:
         raise HTTPException(status_code=400, detail="该部门下仍有文档，无法删除")
+    user_cnt = await db.scalar(
+        select(func.count()).select_from(User).where(User.department_id == d.id)
+    )
+    if user_cnt:
+        raise HTTPException(status_code=400, detail="该部门下仍有用户，无法删除")
     await db.delete(d)
     await db.commit()

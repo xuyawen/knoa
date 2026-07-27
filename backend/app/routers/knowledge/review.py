@@ -12,7 +12,7 @@ from app.core.graph import GraphStore
 from app.core.llm.openai_compat import OpenAICompatProvider
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.ingestor import DocumentIngester
-from app.core.security import require_kb_access
+from app.core.security import ensure_doc_scope_writable, require_kb_access
 from app.database import AsyncSessionLocal
 from app.db import Document, DocumentTask, User
 from app.deps import get_db, get_embedder, get_es, get_llm
@@ -91,6 +91,8 @@ async def approve_document(
     doc = await db.scalar(select(Document).where(Document.id == doc_id, Document.kb_id == kb_id))
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
+    # scope 补全：库级 edit 之上再校验文档级可见性（堵越权审核他人 private）
+    await ensure_doc_scope_writable(db, doc, user)
     if doc.status == "已审核":
         return doc_out(doc)  # 幂等：已审核不再重复摄入
 
@@ -139,6 +141,8 @@ async def reject_document(
     doc = await db.scalar(select(Document).where(Document.id == doc_id, Document.kb_id == kb_id))
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
+    # scope 补全：库级 edit 之上再校验文档级可见性（堵越权驳回他人 private）
+    await ensure_doc_scope_writable(db, doc, user)
     doc.status = "已拒绝"
     doc.reviewed_at = datetime.now(timezone.utc)
     doc.reviewed_by = str(user.id)

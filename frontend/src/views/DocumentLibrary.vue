@@ -4,6 +4,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
+import DepartmentSelect from '@/components/ui/DepartmentSelect.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
@@ -96,9 +97,19 @@ const scopeOptions = [
   { label: '全部权限', value: '' },
   { label: '仅本人可见', value: 'private' },
   { label: '部门可见', value: 'department' },
-  { label: '公司可见', value: 'company' },
   { label: '公开可见', value: 'public' },
 ]
+// scope 补全：上传时指定文档权限范围；默认 public（与后端默认值一致）。
+// department：部门可见，可手动指定归属部门（不选则后端默认取上传者部门）。
+const uploadScope = ref<string>('public')
+const uploadDeptId = ref<string>('')
+const uploadScopeOptions = [
+  { label: '公开可见', value: 'public' },
+  { label: '部门可见', value: 'department' },
+  { label: '仅本人可见', value: 'private' },
+]
+// 上传设置弹窗开关（权限范围/归属部门收纳进弹窗，避免工具栏拥挤）
+const uploadOpen = ref(false)
 
 // P5：部门筛选（部门树）+ 标签筛选
 const departments = ref<DepartmentNode[]>([])
@@ -106,6 +117,18 @@ const filterDept = ref<string>('')
 const deptPopoverOpen = ref(false)
 const tagOptions = ref<{ label: string; value: string }[]>([])
 const filterTag = ref<string>('')
+
+// 是否有任一筛选器激活（用于显示「重置筛选」按钮）
+const hasActiveFilter = computed(() =>
+  !!(filterType.value || filterStatus.value || filterScope.value || filterDept.value || filterTag.value),
+)
+function resetFilters() {
+  filterType.value = ''
+  filterStatus.value = ''
+  filterScope.value = ''
+  filterDept.value = ''
+  filterTag.value = ''
+}
 
 // 当前选中部门名（用于筛选按钮文案）
 const deptLabel = computed(() => {
@@ -240,6 +263,16 @@ function onDocClickOutside(e: MouseEvent) {
   if (el && !el.contains(e.target as Node)) deptPopoverOpen.value = false
 }
 
+// 上传设置弹窗：点击外部关闭（复用部门弹层的同款模式）
+watch(uploadOpen, (open) => {
+  if (open) document.addEventListener('click', onUploadClickOutside)
+  else document.removeEventListener('click', onUploadClickOutside)
+})
+function onUploadClickOutside(e: MouseEvent) {
+  const el = document.getElementById('upload-wrap')
+  if (el && !el.contains(e.target as Node)) uploadOpen.value = false
+}
+
 // 组件存活标志 + 轮询 timer 句柄：卸载后中止一切异步定时任务，
 // 避免 pollTask 递归 setTimeout 在后台持续请求（内存泄漏 + 无效流量）。
 let alive = true
@@ -330,7 +363,6 @@ function parseStatusLabel(s: string | undefined): string {
 function scopeLabel(s: string | undefined): string {
   if (s === 'private') return '仅本人可见'
   if (s === 'department') return '部门可见'
-  if (s === 'company') return '公司可见'
   return '公开可见' // public | 默认
 }
 
@@ -367,6 +399,7 @@ function readFileB64(file: File): Promise<string> {
 
 /* ---------- 上传 + 进度条（P5）---------- */
 async function onUploadFiles(e: Event) {
+  uploadOpen.value = false
   const input = e.target as HTMLInputElement
   const files = Array.from(input.files || [])
   if (!files.length) return
@@ -381,14 +414,15 @@ async function onUploadFiles(e: Event) {
     try {
       // 优先 OSS 前端直传（后端启用时）；未启用或签名被拒则回退旧 base64 流程
       let doc: DocumentItem
+      const deptId = uploadScope.value === 'department' ? (uploadDeptId.value || undefined) : undefined
       try {
         const { url } = await uploadToOss(f, `uploads/docs/${selectedKb.value}`)
-        doc = await uploadDocument(selectedKb.value, f.name, { fileUrl: url })
+        doc = await uploadDocument(selectedKb.value, f.name, { fileUrl: url, scope: uploadScope.value, departmentId: deptId })
       } catch (ossErr: unknown) {
         const msg = errMsg(ossErr, '')
         if (msg.includes('OSS 未启用')) {
           const b64 = await readFileB64(f)
-          doc = await uploadDocument(selectedKb.value, f.name, { contentB64: b64 })
+          doc = await uploadDocument(selectedKb.value, f.name, { contentB64: b64, scope: uploadScope.value, departmentId: deptId })
         } else {
           throw ossErr
         }
@@ -572,15 +606,16 @@ async function confirmBatchDelete() {
       <span>文档归档：仅展示状态为「已拒绝」的文档。</span>
     </div>
 
-    <!-- ====== 工具栏 ====== -->
+    <!-- ====== 工具栏（双行：主操作行 + 筛选行）====== -->
     <div class="toolbar card">
-      <div class="toolbar-left">
+      <!-- 第一行：主操作行 -->
+      <div class="toolbar-main">
         <!-- KB 选择器（严格隔离后仅列当前用户可见的库） -->
         <CustomSelect
           v-model="selectedKb"
           :options="kbOptions"
           placeholder="选择知识库"
-          width="180px"
+          width="200px"
         />
         <button
           v-if="auth.isAdmin && selectedKb"
@@ -591,7 +626,7 @@ async function confirmBatchDelete() {
           <Icon name="users" :size="13" /> 管理成员
         </button>
 
-        <!-- 搜索 -->
+        <!-- 搜索（自适应拉宽） -->
         <div class="search-box">
           <Icon name="search" :size="14" class="search-icon" />
           <input v-model="searchQuery" type="text" placeholder="搜索文档名称、内容、上传人等" class="search-input" />
@@ -600,16 +635,65 @@ async function confirmBatchDelete() {
           </button>
         </div>
 
-        <!-- 批量上传 -->
-        <label class="btn btn-primary btn-sm upload-btn" :class="{ 'is-loading': uploadTasks.length > 0 }">
-          <Icon name="upload" :size="13" /> {{ uploadTasks.length > 0 ? '上传中…' : '批量上传' }}
-          <input type="file" multiple accept=".md,.txt,.docx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.mov,.webm,.mkv,.avi" class="file-hidden" @change="onUploadFiles" />
-        </label>
+        <!-- 右侧操作组 -->
+        <div class="toolbar-actions">
+          <!-- 批量上传（点击展开上传设置弹窗） -->
+          <div id="upload-wrap" class="upload-wrap">
+            <button
+              class="btn btn-primary btn-sm"
+              :class="{ 'is-loading': uploadTasks.length > 0 }"
+              @click.stop="uploadOpen = !uploadOpen"
+            >
+              <Icon name="upload" :size="13" /> {{ uploadTasks.length > 0 ? '上传中…' : '批量上传' }}
+            </button>
+            <div v-if="uploadOpen" class="upload-popover card">
+              <div class="up-title">上传文档</div>
+              <div class="up-field">
+                <span class="up-field-label">权限范围</span>
+                <CustomSelect v-model="uploadScope" :options="uploadScopeOptions" width="100%" />
+              </div>
+              <div v-if="uploadScope === 'department'" class="up-field">
+                <span class="up-field-label">归属部门</span>
+                <DepartmentSelect
+                  v-model="uploadDeptId"
+                  placeholder="默认本人部门"
+                  empty-label="默认本人部门"
+                  width="100%"
+                />
+              </div>
+              <label class="btn btn-primary btn-sm upload-btn up-pick">
+                <Icon name="upload" :size="13" /> 选择文件
+                <input type="file" multiple accept=".md,.txt,.docx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.mov,.webm,.mkv,.avi" class="file-hidden" @change="onUploadFiles" />
+              </label>
+              <p class="up-hint">支持 md / txt / docx / pdf / 图片 / 音视频，可多选</p>
+            </div>
+          </div>
 
-        <!-- 筛选下拉组 -->
-        <CustomSelect v-model="filterType" :options="typeOptions" placeholder="文件类型" width="110px" />
-        <CustomSelect v-model="filterStatus" :options="statusOptions" placeholder="解析状态" width="110px" />
-        <CustomSelect v-model="filterScope" :options="scopeOptions" placeholder="权限范围" width="110px" />
+          <!-- 刷新 -->
+          <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDocs">
+            <Icon name="refresh" :size="15" :class="{ spin: loading }" />
+          </button>
+
+          <span class="action-divider"></span>
+
+          <!-- 视图切换 -->
+          <button class="view-toggle" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">
+            <Icon name="listview" :size="16" />
+          </button>
+          <button class="view-toggle" :class="{ active: viewMode === 'grid' }" @click="viewMode = 'grid'">
+            <Icon name="gridview" :size="16" />
+          </button>
+        </div>
+      </div>
+
+      <!-- 第二行：筛选行 -->
+      <div class="toolbar-filters">
+        <span class="filter-label">
+          <Icon name="filter" :size="13" /> 筛选
+        </span>
+        <CustomSelect v-model="filterType" :options="typeOptions" placeholder="文件类型" width="120px" />
+        <CustomSelect v-model="filterStatus" :options="statusOptions" placeholder="解析状态" width="120px" />
+        <CustomSelect v-model="filterScope" :options="scopeOptions" placeholder="权限范围" width="120px" />
 
         <!-- P5：部门筛选（弹出部门树） -->
         <div id="dept-filter-wrap" class="dept-filter-wrap">
@@ -626,18 +710,9 @@ async function confirmBatchDelete() {
         <!-- P5：标签筛选 -->
         <CustomSelect v-model="filterTag" :options="tagOptions" placeholder="标签" width="120px" />
 
-        <!-- 刷新 -->
-        <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDocs">
-          <Icon name="refresh" :size="15" :class="{ spin: loading }" />
-        </button>
-      </div>
-
-      <div class="toolbar-right">
-        <button class="view-toggle" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">
-          <Icon name="listview" :size="16" />
-        </button>
-        <button class="view-toggle" :class="{ active: viewMode === 'grid' }" @click="viewMode = 'grid'">
-          <Icon name="gridview" :size="16" />
+        <!-- 重置筛选（任一筛选器激活时显示） -->
+        <button v-if="hasActiveFilter" class="reset-btn" @click="resetFilters">
+          <Icon name="close" :size="12" /> 重置筛选
         </button>
       </div>
     </div>
@@ -822,32 +897,72 @@ async function confirmBatchDelete() {
 .scope-banner.warn { background: var(--warning-soft); }
 .scope-banner.warn :deep(svg) { color: var(--warning); }
 
-/* ---- 工具栏 ---- */
+/* ---- 工具栏（双行：主操作行 + 筛选行）---- */
 .toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  padding: 0;
+  overflow: visible;
 }
-.toolbar-left {
+.toolbar-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+}
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.action-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 2px;
+}
+/* 第二行：筛选行（底色微区分 + 顶部分隔线） */
+.toolbar-filters {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface-2);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
 }
-.toolbar-right {
-  display: flex;
+.filter-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+  margin-right: 2px;
+}
+.reset-btn {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: auto;
+  height: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all var(--dur-fast);
 }
+.reset-btn:hover { color: var(--brand); background: var(--brand-soft); }
 
-/* 搜索框 */
+/* 搜索框（自适应拉宽） */
 .search-box {
   position: relative;
-  width: 240px;
+  flex: 1;
+  min-width: 220px;
 }
 .search-icon {
   position: absolute;
@@ -899,6 +1014,45 @@ async function confirmBatchDelete() {
   width: 100%;
 }
 .upload-btn.is-loading { opacity: 0.7; pointer-events: none; }
+
+/* 上传设置弹窗（锚定批量上传按钮，向左下展开） */
+.upload-wrap { position: relative; }
+.upload-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 280px;
+  padding: 14px;
+  box-shadow: var(--shadow-pop);
+}
+.up-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.up-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.up-field-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.up-pick {
+  justify-content: center;
+  width: 100%;
+}
+.up-hint {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
 
 .view-toggle {
   display: flex;

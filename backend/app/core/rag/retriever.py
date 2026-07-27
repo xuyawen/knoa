@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.reranker import Reranker
+from app.core.security import ScopeContext, is_scope_visible
 from app.db import DocChunk, Document, KnowledgeBase
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,10 @@ def _chunk_to_dict(c) -> dict:
         "content": c.content,
         "kb_id": c.kb_id,
         "document_id": c.document_id,
+        # scope 补全：冗余权限字段，供检索时按用户可见性做分数掩码
+        "scope": c.scope,
+        "uploader_id": c.uploader_id,
+        "department_id": c.department_id,
     }
 
 
@@ -60,6 +65,7 @@ class HybridRetriever:
         db: AsyncSession,
         rrf_k: int = 60,
         kb_ids: "list[str] | None" = None,
+        scope_ctx: ScopeContext | None = None,
     ):
         self.embedder = embedder
         self.db = db
@@ -68,6 +74,9 @@ class HybridRetriever:
         # 仅当每次检索未传入具体 kb_id 时生效，用于「未指定 KB 时」
         # 把检索严格限定在该用户有权访问的 KB 集合内，防止跨库越权。
         self._kb_ids_filter = kb_ids
+        # scope 补全：文档级可见性上下文（None = 不过滤，仅内部/测试用）。
+        # 正常问答路径由 ask.py 注入，private 文档仅上传者本人可检索。
+        self._scope_ctx = scope_ctx
         self._bm25: BM25Okapi | None = None
         self._bm25_chunks: list = []
         # 8.2 Reranker：RRF 之后的精细重排层（零依赖规则，可换 cross-encoder）
@@ -118,8 +127,28 @@ class HybridRetriever:
             self._bm25_chunks = chunks
             _BM25_CACHE[key] = {"ts": now, "chunks": chunks, "bm25": self._bm25, "matrix": chunk_embeddings}
 
+        # scope 补全：当前用户不可见的 chunk 下标集合（逐请求计算，依赖当前用户；
+        # 缓存的 chunks/bm25/matrix 仍按 KB 共享，掩码不破坏索引对齐）。
+        # 一致性窗口：chunks 冗余的 scope/uploader_id/department_id 随缓存固化，文档改
+        # scope / 重摄入后，最多 _BM25_TTL（60s）内旧值仍在缓存里——属「可见性偏差」
+        # 非数据错误，TTL 到期自然收敛；严格场景需即时一致可在写侧主动清 _BM25_CACHE。
+        blocked: set[int] = set()
+        if self._scope_ctx is not None and not self._scope_ctx.is_admin:
+            blocked = {
+                i for i, c in enumerate(chunks)
+                if not is_scope_visible(
+                    c.get("scope", "public"),
+                    c.get("uploader_id"),
+                    self._scope_ctx,
+                    c.get("department_id"),
+                )
+            }
+
         # 1. 向量检索 (numpy 余弦相似度, 归一化向量直接点积)
         cosine_scores = chunk_embeddings @ query_vec  # 归一化向量点积 = 余弦
+        # 不可见 chunk 分数置 -inf，排序时沉底被排除（可见 chunk 保持密集排名）
+        for i in blocked:
+            cosine_scores[i] = -np.inf
         vector_ranked = sorted(
             enumerate(cosine_scores), key=lambda x: x[1], reverse=True
         )[: top_k * 2]
@@ -127,6 +156,8 @@ class HybridRetriever:
         # 2. BM25 检索
         tokens = list(jieba.cut_for_search(question))
         bm25_scores = self._bm25.get_scores(tokens)
+        for i in blocked:
+            bm25_scores[i] = -np.inf
         bm25_ranked = sorted(enumerate(bm25_scores), key=lambda x: x[1], reverse=True)[
             : top_k * 2
         ]
@@ -155,8 +186,12 @@ class HybridRetriever:
                 }
 
         for rank, (idx, score) in enumerate(vector_ranked):
+            if idx in blocked:
+                continue  # scope 补全：绝对排除不可见 chunk（-inf 掩码的兑底）
             add_chunk(idx, rank, 1.0 - float(score))
         for rank, (idx, _) in enumerate(bm25_ranked):
+            if idx in blocked:
+                continue
             if idx < len(chunks):
                 # 仅关键词命中（无向量相似度）：distance 置 1.0 使 confidence=0，
                 # 前端对 0 值只显示「相关」，不会误报「100% 相关」

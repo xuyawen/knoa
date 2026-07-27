@@ -84,7 +84,7 @@ export interface DocumentItem {
   originalFilename?: string | null
   fileSize?: number | null
   uploaderName?: string | null   // P0：真实上传人显示名
-  scope?: string                  // P0：权限范围 private|department|company|public
+  scope?: string                  // P0：权限范围 private|department|public
   parseStatus?: string            // P0：解析状态 pending|parsing|done|failed
 }
 
@@ -269,7 +269,8 @@ export interface UserOut {
   preferredModel?: string | null    // P8：偏好问答模型
   ttsEnabled?: boolean              // P8：是否启用语音播报
   email?: string | null
-  department?: string | null
+  departmentId?: string | null      // 部门 id（真相源）
+  department?: string | null        // 部门显示名（后端按 id 解析）
   employeeId?: string | null
 }
 
@@ -285,7 +286,7 @@ export interface UserCreate {
   displayName?: string | null
   roleId: string       // 关联角色 id
   email?: string | null
-  department?: string | null
+  departmentId?: string | null
   employeeId?: string | null
 }
 
@@ -295,7 +296,7 @@ export interface UserUpdate {
   isActive?: boolean
   password?: string
   email?: string | null
-  department?: string | null
+  departmentId?: string | null
   employeeId?: string | null
 }
 

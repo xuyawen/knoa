@@ -8,8 +8,8 @@ import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
 import { getKbMembers, setKbMembers } from '@/api'
-import { getUserList } from '@/api/auth'
 import type { KBMember, UserOut } from '@/types/api'
+import UserSearchSelect from '@/components/ui/UserSearchSelect.vue'
 
 const props = defineProps<{
   show: boolean
@@ -22,11 +22,11 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const toast = useToastStore()
 
 const memberRows = ref<KBMember[]>([])
-const allUsers = ref<UserOut[]>([])
 const loading = ref(false)
 const saving = ref(false)
-const newUserId = ref<string>('')
 const newUserLevel = ref<'view' | 'edit' | 'admin'>('view')
+// 已添加成员的用户 id，传给搜索选择器做排除，避免重复添加
+const excludeIds = computed(() => memberRows.value.map((m) => m.userId))
 
 const levelOptions = [
   { label: '可查看', value: 'view' },
@@ -34,14 +34,7 @@ const levelOptions = [
   { label: '管理员', value: 'admin' },
 ]
 
-const availableUserOptions = computed(() => {
-  const used = new Set(memberRows.value.map((m) => m.userId))
-  return allUsers.value
-    .filter((u) => !used.has(u.id))
-    .map((u) => ({ label: `${u.displayName || u.username}（@${u.username}）`, value: u.id }))
-})
-
-// 每次打开时重新拉取成员与用户列表
+// 每次打开时重新拉取成员列表
 watch(
   () => props.show,
   (v) => {
@@ -51,12 +44,10 @@ watch(
 
 async function load() {
   loading.value = true
-  newUserId.value = ''
   newUserLevel.value = 'view'
   try {
-    const [members, users] = await Promise.all([getKbMembers(props.kbId), getUserList(1, 200)])
-    memberRows.value = members
-    allUsers.value = users.items
+    // 用户列表改由搜索选择器按需检索（getUserList 的 q 参数），此处只拉成员
+    memberRows.value = await getKbMembers(props.kbId)
   } catch (e: unknown) {
     toast.error(`加载成员失败：${errMsg(e)}`)
     emit('close')
@@ -65,9 +56,8 @@ async function load() {
   }
 }
 
-function addMember() {
-  const u = allUsers.value.find((x) => x.id === newUserId.value)
-  if (!u) return
+// 搜索选择器选中用户即添加（使用当前选定的权限级别）
+function onUserSelect(u: UserOut) {
   if (memberRows.value.some((m) => m.userId === u.id)) {
     toast.warning('该用户已在成员列表中')
     return
@@ -78,7 +68,6 @@ function addMember() {
     displayName: u.displayName,
     level: newUserLevel.value,
   })
-  newUserId.value = ''
   newUserLevel.value = 'view'
 }
 
@@ -129,9 +118,13 @@ async function saveMembers() {
         <div v-if="!memberRows.length" class="member-empty">暂无成员，请在下方添加。</div>
       </div>
       <div class="member-add">
-        <CustomSelect v-model="newUserId" :options="availableUserOptions" placeholder="选择用户" width="220px" />
         <CustomSelect v-model="newUserLevel" :options="levelOptions" width="110px" />
-        <button class="btn btn-primary btn-sm" :disabled="!newUserId" @click="addMember">添加</button>
+        <UserSearchSelect
+          :exclude-ids="excludeIds"
+          placeholder="搜索用户并点击添加"
+          width="260px"
+          @select="onUserSelect"
+        />
       </div>
     </template>
     <template #foot>

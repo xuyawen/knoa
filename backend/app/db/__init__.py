@@ -52,7 +52,7 @@ class Document(Base):
     # 上传人：冗余 display_name 避免每次 join app_user；id 用于"我的文档"过滤
     uploader_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"), nullable=True)
     uploader_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # 权限范围：private(仅本人) | department(部门) | company(公司) | public(公开)
+    # 权限范围：private(仅本人) | department(部门) | public(公开)
     scope: Mapped[str] = mapped_column(String(20), nullable=False, default="public", server_default="public")
     # 解析状态：pending(待解析) | parsing(解析中) | done(完成) | failed(失败)
     # ponytail: 与 DocumentTask.status 同步，列表展示用，避免每次 join task
@@ -73,6 +73,12 @@ class DocChunk(Base):
     content: Mapped[str] = mapped_column(Text)
     # ponytail: 用 JSONB 存向量, numpy 内存算余弦相似度; pgvector 留 Phase 2
     embedding: Mapped[list] = mapped_column(JSONB)
+    # 文档级权限冗余（scope 补全）：从 document 表冗余 scope/上传者/部门，
+    # 供检索层按当前用户可见性过滤（private 仅上传者可见），避免每次检索 join document。
+    # 摄入时写入，重摄入（审核路径）自然同步；作为缓存列不加 FK 约束，引用完整性由 document 表保证。
+    scope: Mapped[str] = mapped_column(String(20), nullable=False, default="public", server_default="public")
+    uploader_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     document: Mapped["Document"] = relationship(back_populates="chunks")
 
@@ -143,6 +149,9 @@ class User(Base):
     # 全局角色：外键关联 roles 表（admin/editor/viewer 为内置角色）
     role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id"), index=True)
     role_ref: Mapped["Role"] = relationship("Role", lazy="joined")
+    # 部门归属：外键关联 department 表（部门级文档权限的唯一真相源；显示名走 department_ref.name）
+    department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("department.id"), nullable=True, index=True)
+    department_ref: Mapped["Department"] = relationship("Department", lazy="joined")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     @property
@@ -159,7 +168,6 @@ class User(Base):
     model_prefs: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict, server_default="{}")
     # 用户档案字段（用户管理界面维护）
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    department: Mapped[str | None] = mapped_column(String(100), nullable=True)
     employee_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

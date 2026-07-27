@@ -22,9 +22,15 @@ from app.core.rag.multimodal import (
 from app.core.rag.parsers import UnsupportedFormatError, parse_document
 from app.core.security import (
     LEVEL_ORDER,
+    ScopeContext,
+    compute_visible_dept_ids,
+    doc_scope_clause,
+    ensure_doc_scope_writable,
     get_accessible_kb_ids,
     get_current_user,
     get_kb_permission_level,
+    is_scope_visible,
+    is_super_admin,
     require_kb_access,
 )
 from app.core.storage import get_object_store
@@ -67,6 +73,14 @@ async def list_documents(
     返回统一分页结构 {items,total,page,pageSize,pages}。
     """
     base = select(Document).where(Document.kb_id == kb_id)
+    # scope 补全：强制可见性过滤——非该库 admin 仅见 public-like 及自己的 private 文档，
+    # 取代旧「前端传 scope 才过滤」的可选逻辑（不传则私有文档也会暴露）
+    _level = await get_kb_permission_level(db, kb_id, user)
+    _is_admin = _level == "admin"
+    _dept_ids = frozenset() if _is_admin else await compute_visible_dept_ids(db, user)
+    _clause = doc_scope_clause(user, _is_admin, _dept_ids)
+    if _clause is not None:
+        base = base.where(_clause)
     if scope:
         base = base.where(Document.scope == scope)
     if doc_type_filter:
@@ -130,6 +144,12 @@ async def search_docs(
         .join(KnowledgeBase, KnowledgeBase.id == Document.kb_id)
         .where(Document.kb_id.in_(accessible), Document.title.ilike(f"%{q}%"))
     )
+    # scope 补全：全局搜索强制可见性过滤（仅超管豁免）
+    _is_admin = await is_super_admin(db, user)
+    _dept_ids = frozenset() if _is_admin else await compute_visible_dept_ids(db, user)
+    _clause = doc_scope_clause(user, _is_admin, _dept_ids)
+    if _clause is not None:
+        base = base.where(_clause)
     if status:
         base = base.where(Document.status == status)
     if doc_type_filter:
@@ -296,7 +316,7 @@ async def upload_document(
     title = extract_title(parsed.text, filename)
     # P0：权限范围校验（信任边界），非法值归 public
     scope = payload.scope or "public"
-    if scope not in ("private", "department", "company", "public"):
+    if scope not in ("private", "department", "public"):
         scope = "public"
     doc = Document(
         kb_id=kb_id,
@@ -317,11 +337,19 @@ async def upload_document(
         doc.tags = payload.tags
     if payload.category:
         doc.category = payload.category
+    # 归属部门：显式传 department_id 优先；scope=department 未传则默认取上传者部门。
+    # department 文档必须有部门（否则无人可见），两者皆空 → 400。
     if payload.department_id:
         try:
             doc.department_id = uuid.UUID(payload.department_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="department_id 非法") from None
+    elif scope == "department":
+        if user.department_id is None:
+            raise HTTPException(
+                status_code=400, detail="部门文档需指定部门，且当前用户无部门可默认"
+            )
+        doc.department_id = user.department_id
     db.add(doc)
     # 先 flush 让 doc.id 生成，否则 task.document_id 会拿到 None（FK 落空）
     await db.flush()
@@ -361,6 +389,15 @@ async def get_document_by_id(
     level = await get_kb_permission_level(db, doc.kb_id, user)
     if level is None or LEVEL_ORDER.get(level, 0) < LEVEL_ORDER.get("view", 0):
         raise HTTPException(status_code=403, detail="无权访问该文档")
+    # scope 补全：库级 view 之上再校验文档级可见性（private 仅上传者，department 命中部门子树，admin 豁免）
+    _is_admin = level == "admin"
+    _dept_ids = frozenset() if _is_admin else await compute_visible_dept_ids(db, user)
+    if not is_scope_visible(
+        doc.scope, doc.uploader_id,
+        ScopeContext(str(user.id), _is_admin, _dept_ids),
+        str(doc.department_id) if doc.department_id else None,
+    ):
+        raise HTTPException(status_code=403, detail="无权访问该文档")
     return DocumentDetailOut(
         id=str(doc.id),
         title=doc.title,
@@ -380,12 +417,22 @@ async def get_document(
     kb_id: str,
     doc_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_kb_access("view")),
+    user: User = Depends(require_kb_access("view")),
 ):
     """文档详情：返回解析后的 content_md（溯源/预览/审核查看用）。"""
     doc = await db.scalar(select(Document).where(Document.id == doc_id, Document.kb_id == kb_id))
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
+    # scope 补全：库级 view 之上再校验文档级可见性（private 仅上传者，department 命中部门子树，admin 豁免）
+    level = await get_kb_permission_level(db, kb_id, user)
+    _is_admin = level == "admin"
+    _dept_ids = frozenset() if _is_admin else await compute_visible_dept_ids(db, user)
+    if not is_scope_visible(
+        doc.scope, doc.uploader_id,
+        ScopeContext(str(user.id), _is_admin, _dept_ids),
+        str(doc.department_id) if doc.department_id else None,
+    ):
+        raise HTTPException(status_code=403, detail="无权访问该文档")
     return DocumentDetailOut(
         id=str(doc.id),
         title=doc.title,
@@ -415,6 +462,9 @@ async def delete_document(
     doc = await db.scalar(select(Document).where(Document.id == doc_id, Document.kb_id == kb_id))
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
+
+    # scope 补全：库级 edit 之上再校验文档级可见性，堵住"有库 edit 删别人 private"越权
+    await ensure_doc_scope_writable(db, doc, user)
 
     # 1) 取该文档的全部 chunk id（删图节点 / 删 ES 前先取）
     chunk_ids = (

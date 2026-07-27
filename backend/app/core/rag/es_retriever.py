@@ -16,6 +16,7 @@ import logging
 
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.es_client import ESClient
+from app.core.security import SCOPE_DEPARTMENT, SCOPE_PRIVATE, SCOPE_PUBLIC_LIKE, ScopeContext
 
 logger = logging.getLogger("knoa.es")
 
@@ -27,6 +28,7 @@ class ESRetriever:
         es: ESClient,
         rrf_k: int = 60,
         fallback_kb_ids: "list[str] | None" = None,
+        scope_ctx: ScopeContext | None = None,
     ):
         self.embedder = embedder
         self.es = es
@@ -34,6 +36,37 @@ class ESRetriever:
         # 「全部知识库」模式：agent 传入的 kb_id 为 None 时，跨用户可访问的
         # 全部库索引检索（缺索引的库被 ignore_unavailable 静默跳过）
         self.fallback_kb_ids = fallback_kb_ids
+        # scope 补全：文档级可见性上下文（None = 不过滤）；ask.py 注入，
+        # 转为 ES bool filter 下传 knn/bm25，private 文档仅上传者本人可检索。
+        self._scope_ctx = scope_ctx
+
+    def _build_scope_filter(self) -> dict | None:
+        """构建 ES bool filter：仅召回当前用户可见的 chunk；admin → None（不过滤）。
+
+        与 security.doc_scope_clause 语义一致：public 全可见，
+        private 仅上传者本人，department 命中可见部门子树（visible_dept_ids）。
+        """
+        ctx = self._scope_ctx
+        if ctx is None or ctx.is_admin:
+            return None
+        should = [
+            {"terms": {"scope": list(SCOPE_PUBLIC_LIKE)}},
+            {"bool": {"must": [
+                {"term": {"scope": SCOPE_PRIVATE}},
+                {"term": {"uploader_id": ctx.user_id}},
+            ]}},
+        ]
+        if ctx.visible_dept_ids:
+            should.append({"bool": {"must": [
+                {"term": {"scope": SCOPE_DEPARTMENT}},
+                {"terms": {"department_id": list(ctx.visible_dept_ids)}},
+            ]}})
+        return {
+            "bool": {
+                "should": should,
+                "minimum_should_match": 1,
+            }
+        }
 
     async def retrieve(
         self, question: str, kb_id: str | None = None, top_k: int = 5
@@ -49,12 +82,15 @@ class ESRetriever:
 
         # 1. 向量路：query 向量化 → ES kNN（cosine）
         query_vec = await self.embedder.embed_query(question)
+        # scope 补全：仅对当前用户可见的 chunk 做召回（admin 为 None 不过滤）
+        scope_filter = self._build_scope_filter()
         knn_hits = await self.es.knn_search(
-            target, query_vec, top_k * 2, num_candidates=max(100, top_k * 10)
+            target, query_vec, top_k * 2, num_candidates=max(100, top_k * 10),
+            scope_filter=scope_filter,
         )
 
         # 2. 关键词路：ik_smart 分词后 BM25
-        bm25_hits = await self.es.bm25_search(target, question, top_k * 2)
+        bm25_hits = await self.es.bm25_search(target, question, top_k * 2, scope_filter=scope_filter)
 
         # 3. RRF 融合（只看排名，不看原始分数）
         rrf: dict[str, float] = {}

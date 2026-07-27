@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select, func
 from app.database import AsyncSessionLocal, _seed_roles
-from app.db import Role, User
+from app.db import Department, Role, User
 
 
 # 10 个测试账号：覆盖 admin/editor/viewer、启用/停用、
@@ -125,6 +125,11 @@ async def main() -> None:
             r.key: r.id
             for r in (await session.execute(select(Role))).scalars().all()
         }
+        # 部门名 → id 映射（SEED_USERS 里的 department 文本按名解析；解析不到留 NULL）
+        dept_map = {
+            d.name: d.id
+            for d in (await session.execute(select(Department))).scalars().all()
+        }
         for u in SEED_USERS:
             exists = await session.scalar(
                 select(func.count()).select_from(User).where(User.username == u["username"])
@@ -148,7 +153,7 @@ async def main() -> None:
                     preferred_model=u.get("preferred_model"),
                     tts_enabled=u.get("tts_enabled", False),
                     email=u.get("email"),
-                    department=u.get("department"),
+                    department_id=dept_map.get(u.get("department")),
                     employee_id=u.get("employee_id"),
                 )
             )
