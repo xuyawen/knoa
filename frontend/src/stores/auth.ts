@@ -25,8 +25,15 @@ export interface CurrentUser {
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<CurrentUser | null>(
     (() => {
-      const raw = localStorage.getItem(USER_KEY)
-      return raw ? (JSON.parse(raw) as CurrentUser) : null
+      // 容错：localStorage 被污染（手改/旧版本残留）时 JSON.parse 会抛异常，
+      // 若不兜住会在应用启动即白屏；解析失败回退未登录并清掉脏数据。
+      try {
+        const raw = localStorage.getItem(USER_KEY)
+        return raw ? (JSON.parse(raw) as CurrentUser) : null
+      } catch {
+        localStorage.removeItem(USER_KEY)
+        return null
+      }
     })(),
   )
 

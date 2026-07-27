@@ -14,7 +14,8 @@ router = APIRouter()
 
 
 # 模型配置偏好默认值（服务端真值，前端不再依赖 localStorage）。
-# name(模型选择)单独走 preferred_model 列；其余 10 项走 model_prefs JSONB。
+# name(模型选择)单独走 preferred_model 列；其余走 model_prefs JSONB。
+# ttsVoiceType：腾讯 TTS 音色（1002 成熟男声 | 1004 温润女声 | 1050 新闻女声）。
 DEFAULT_MODEL_PREFS: dict = {
     "temp": 0.3,
     "topP": 0.9,
@@ -26,6 +27,8 @@ DEFAULT_MODEL_PREFS: dict = {
     "systemPrompt": "",
     "showThinking": True,
     "conciseMode": False,
+    "ttsVoiceType": 1004,
+    "enterToSend": True,
 }
 
 

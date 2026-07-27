@@ -154,13 +154,23 @@ class ESClient:
     # ------------------------------------------------------------------ #
     # 检索（两路，分别返回 ES hits，由 es_retriever 做 RRF 融合）
     # ------------------------------------------------------------------ #
+    def _search_path(self, kb_ids: "str | list[str]") -> str:
+        """单库或多库的 _search 路径。
+
+        多库用逗号拼接索引名（ES 原生支持）；ignore_unavailable /
+        allow_no_indices 让尚未建索引的知识库被静默跳过——否则
+        「全部知识库」模式下任一库缺索引会使整个请求 404。
+        """
+        ids = [kb_ids] if isinstance(kb_ids, str) else list(kb_ids)
+        names = ",".join(self.index_name(i) for i in ids)
+        return f"/{names}/_search?ignore_unavailable=true&allow_no_indices=true"
+
     async def knn_search(
-        self, kb_id: str, query_vector: list[float], size: int, num_candidates: int = 100
+        self, kb_ids: "str | list[str]", query_vector: list[float], size: int, num_candidates: int = 100
     ) -> list[dict]:
-        """向量路：kNN 余弦检索。"""
+        """向量路：kNN 余弦检索（支持单库 str 或多库 list）。"""
         if not self.enabled:
             return []
-        name = self.index_name(kb_id)
         body = {
             "size": size,
             "knn": {
@@ -170,16 +180,15 @@ class ESClient:
                 "num_candidates": num_candidates,
             },
         }
-        r = await self._request("POST", f"/{name}/_search", json_body=body)
+        r = await self._request("POST", self._search_path(kb_ids), json_body=body)
         if not r or "hits" not in r:
             return []
         return r["hits"]["hits"]
 
-    async def bm25_search(self, kb_id: str, query: str, size: int) -> list[dict]:
-        """关键词路：multi_match + ik_smart 分词（BM25 打分）。"""
+    async def bm25_search(self, kb_ids: "str | list[str]", query: str, size: int) -> list[dict]:
+        """关键词路：multi_match + ik_smart 分词（BM25 打分，支持单库/多库）。"""
         if not self.enabled:
             return []
-        name = self.index_name(kb_id)
         body = {
             "size": size,
             "query": {
@@ -190,7 +199,7 @@ class ESClient:
                 }
             },
         }
-        r = await self._request("POST", f"/{name}/_search", json_body=body)
+        r = await self._request("POST", self._search_path(kb_ids), json_body=body)
         if not r or "hits" not in r:
             return []
         return r["hits"]["hits"]

@@ -1,21 +1,30 @@
 <script setup lang="ts">
 // 智能问答 — 对话主界面，接真实 SSE 流式问答。
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import Icon from '@/components/ui/Icon.vue'
+import CustomSelect from '@/components/ui/CustomSelect.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import AppModal from '@/components/ui/AppModal.vue'
+import ChatSessionList from '@/components/chat/ChatSessionList.vue'
+import DocDetailModal from '@/components/chat/DocDetailModal.vue'
 import { useToastStore } from '@/stores/toast'
+import { errMsg } from '@/utils/errmsg'
 import { useAuthStore } from '@/stores/auth'
 import {
   getSessions,
   createSession,
   getSession,
   deleteSession,
+  clearSessionMessages,
+  renameSession,
+  deleteMessage,
   streamAsk,
   submitFeedback,
   deleteFeedback,
-  ttsSpeak,
   getDocument,
+  getKnowledgeBases,
 } from '@/api'
 import type {
   ChatSession,
@@ -26,9 +35,11 @@ import type {
   ChatAttachment,
   Paginated,
   DocumentDetail,
+  KnowledgeBase,
 } from '@/types/api'
 import { uploadToOss } from '@/utils/oss'
 import { useModelConfig } from '@/composables/useModelConfig'
+import { useTts } from '@/composables/useTts'
 
 /** 生成唯一 ID（兼容非安全上下文 HTTP 下 crypto.randomUUID 不可用） */
 function genId(): string {
@@ -64,36 +75,8 @@ const auth = useAuthStore()
 const { state, load } = useModelConfig()
 load()
 
-// 语音播报（P8）：朗读某条 AI 回答
-const playingId = ref<string | null>(null)
-let audioEl: HTMLAudioElement | null = null
-async function speak(m: ChatMessage) {
-  if (!m.content) return
-  // 若当前正在播放同一条 → 停止播报（toggle off）
-  if (playingId.value === m.id) {
-    stopSpeak()
-    return
-  }
-  // 正在播放其他消息 → 先停旧再播新
-  if (playingId.value && audioEl) {
-    stopSpeak()
-  }
-  playingId.value = m.id
-  try {
-    const { audio, contentType } = await ttsSpeak(m.content)
-    audioEl = new Audio(`data:${contentType};base64,${audio}`)
-    audioEl.onended = () => { playingId.value = null; audioEl = null }
-    await audioEl.play()
-  } catch (e) {
-    playingId.value = null; audioEl = null
-    toast.error(e instanceof Error ? e.message : '语音播报失败')
-  }
-}
-
-function stopSpeak() {
-  if (audioEl) { audioEl.pause(); audioEl = null }
-  playingId.value = null
-}
+// 语音播报（P8）：朗读某条 AI 回答（逻辑在 useTts，含卸载清理）
+const { playingId, speak } = useTts()
 
 // 从「问答记录」打开某会话：载入消息并切回对话视图
 
@@ -111,9 +94,23 @@ const showClearConfirm = ref(false)
 const messages = ref<ChatMessage[]>([])
 const streaming = ref(false)
 const inputText = ref('')
+const inputRef = ref<HTMLTextAreaElement>()
+// 输入框高度自适应：初始单行，随内容增高（上限 180px 后滚动），
+// 避免固定高输入框挤占对话区；发送清空后自动收回单行
+function autoResize() {
+  const el = inputRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 180) + 'px'
+}
+watch(inputText, () => nextTick(autoResize))
 const errorMsg = ref('')
+// V4：问答失败后保留上一问题（含附件），供内联「重试」按钮复发
+const retryPayload = ref<{ text: string; attachments: ChatAttachment[] | null } | null>(null)
 const askAbort = ref<AbortController | null>(null)
 const attached = ref<ChatAttachment[]>([])
+const deepThinking = ref(false)      // ping 事件驱动：LLM 长调用中显示「深度思考」提示
+const followUps = ref<string[]>([])  // follow_ups 事件：答后生成的相关追问
 const expandedThinking = ref<Set<string>>(new Set())
 function toggleThinking(id: string) {
   const next = new Set(expandedThinking.value)
@@ -122,19 +119,16 @@ function toggleThinking(id: string) {
   expandedThinking.value = next
 }
 
-// 组件卸载时清理进行中的问答流与 TTS 音频，避免对已销毁实例继续回调/播放
+// 组件卸载时中断进行中的问答流（TTS 清理在 useTts 内）
 onBeforeUnmount(() => {
   askAbort.value?.abort()
-  if (audioEl) {
-    audioEl.pause()
-    audioEl = null
-  }
 })
 
-// 文档详情弹框
+// 文档详情弹框（展示逻辑在 DocDetailModal）
 const docDetail = ref<DocumentDetail | null>(null)
 const docDetailLoading = ref(false)
-const detail = computed(() => docDetail.value!)
+// 引用片段：传给 DocDetailModal 在全文中高亮定位
+const docDetailSnippet = ref('')
 async function openDocDetail(s: SourceItem) {
   // 联网来源：有链接则新窗口打开
   if (s.sourceType === 'web' && s.url) {
@@ -146,12 +140,13 @@ async function openDocDetail(s: SourceItem) {
     toast.warning(s.sourceType === 'kb' ? '该引用缺少文档标识，无法查看详情' : '仅知识库来源支持查看文档详情')
     return
   }
+  docDetailSnippet.value = s.snippet ?? ''
   docDetailLoading.value = true
   docDetail.value = null
   try {
     docDetail.value = await getDocument(s.kbId, s.docId)
-  } catch (e: any) {
-    toast.error(`加载文档失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`加载文档失败：${errMsg(e)}`)
   } finally {
     docDetailLoading.value = false
   }
@@ -166,14 +161,51 @@ const firstQuestion = computed(() => {
 })
 
 const suggested = [
-  '差旅报销需要哪些材料？',
-  '差旅报销的标准是怎么样的？',
-  '如何申请系统权限？',
-  '员工入职流程是怎样的？',
+  '亚马逊选品有哪些方法和工具？',
+  'FBA 入库发货的完整流程是什么？',
+  '如何优化广告 ACOS？',
+  '卖儿童玩具需要哪些合规认证？',
 ]
 
+// 检索范围：默认搜全部可访问知识库；选定具体 KB 后仅在该库内检索，
+// 后端会优先走 ES 快路（kNN + BM25），相关性与速度都更好
+const kbOptions = ref<KnowledgeBase[]>([])
+// CustomSelect 选项：首项「全部知识库」（value='' 表示不限定范围）+ 各可见库
+const kbSelectOptions = computed(() => [
+  { label: '全部知识库', value: '' },
+  ...kbOptions.value.map((kb) => ({ label: kb.name, value: kb.id })),
+])
+// 记住上次选择的知识库（跨页面跳转保持）
+const KB_STORAGE_KEY = 'knoa.chat.selectedKb'
+const selectedKb = ref(localStorage.getItem(KB_STORAGE_KEY) || '')
+watch(selectedKb, (v) => localStorage.setItem(KB_STORAGE_KEY, v))
+async function loadKbOptions() {
+  try {
+    const res = await getKnowledgeBases(1, 100)
+    kbOptions.value = res.knowledgeBases
+    // 之前选中的 KB 已不可访问（被删/权限收回）→ 重置为全库
+    if (selectedKb.value && !kbOptions.value.some((k) => k.id === selectedKb.value)) {
+      selectedKb.value = ''
+    }
+  } catch {
+    // 知识库列表加载失败不阻断问答（回退全库检索）
+  }
+}
+
 /* ---------- 工具 ---------- */
-function scrollToBottom() {
+// V3：用户上滑查看历史时暂停自动滚底，回到底部附近后恢复；
+// force=true（发送/切会话）无条件滚底并重置标志。
+const autoScroll = ref(true)
+
+function onMsgScroll(e: Event) {
+  const el = e.target as HTMLElement
+  if (!el) return
+  autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+}
+
+function scrollToBottom(force = false) {
+  if (force) autoScroll.value = true
+  if (!autoScroll.value) return
   nextTick(() => {
     const el = scrollRef.value
     if (el) el.scrollTop = el.scrollHeight
@@ -217,11 +249,32 @@ async function copyAnswer(m: ChatMessage) {
   }
 }
 
-/** 格式化文件大小。 */
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+/* ---------- Markdown 渲染 + 引用角标 ---------- */
+// LLM 回答含列表/加粗/代码块，用 marked 渲染、DOMPurify 防注入；
+// [N] 引用角标转为可点击 chip，点击高亮对应来源卡片。
+marked.use({ breaks: true, gfm: true })
+function renderAnswer(content: string): string {
+  if (!content) return ''
+  const html = marked.parse(content, { async: false }) as string
+  const withCites = html.replace(
+    /\[(\d{1,3})\]/g,
+    '<button type="button" class="cite-chip" data-cite="$1">$1</button>',
+  )
+  return DOMPurify.sanitize(withCites)
+}
+
+/** 角标点击：滚动到同一条回答内编号相同的来源卡并闪烁高亮。 */
+function onCiteClick(e: Event) {
+  const chip = (e.target as HTMLElement).closest('.cite-chip')
+  if (!chip) return
+  const n = chip.getAttribute('data-cite')
+  const row = chip.closest('.msg-row')
+  const card = n && row ? (row.querySelector(`.ref-card[data-ref-id="${n}"]`) as HTMLElement | null) : null
+  if (!card) return
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  card.classList.remove('ref-flash')
+  void card.offsetWidth // 强制重排，让高亮动画可重复触发
+  card.classList.add('ref-flash')
 }
 
 function toChatMessage(m: SessionMessage): ChatMessage {
@@ -232,15 +285,13 @@ function toChatMessage(m: SessionMessage): ChatMessage {
     citations: m.citations || undefined,
     sources: m.sources || undefined,
     attachments: m.attachments || null,
-    thinkingSteps: undefined,
+    thinkingSteps: m.thinkingSteps || undefined,
     feedback: null,
     messageId: m.id || undefined,
   }
 }
 
-/* ---------- 会话（懒加载） ---------- */
-const convListRef = ref<HTMLElement | null>(null)
-
+/* ---------- 会话（懒加载；列表 UI 在 ChatSessionList） ---------- */
 async function loadSessions(append = false) {
   if (sessionLoadingMore.value || allSessionsLoaded.value) return
   const page = append ? sessionPage.value + 1 : 1
@@ -257,19 +308,11 @@ async function loadSessions(append = false) {
     }
     // 检查是否还有更多
     allSessionsLoaded.value = data.items.length < SESSION_PAGE_SIZE || sessions.value.length >= data.total
-  } catch (e: any) {
-    toast.error(`加载会话失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`加载会话失败：${errMsg(e)}`)
   } finally {
     sessionLoadingMore.value = false
   }
-}
-
-/** 滚动到底部自动加载 */
-function onConvScroll(e: Event) {
-  const el = e.target as HTMLElement
-  if (!el || sessionLoadingMore.value || allSessionsLoaded.value) return
-  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-  if (nearBottom) loadSessions(true)
 }
 
 async function selectSession(id: string) {
@@ -277,12 +320,13 @@ async function selectSession(id: string) {
   streaming.value = false
   activeId.value = id
   errorMsg.value = ''
+  followUps.value = []
   try {
     const det = await getSession(id)
     messages.value = det.messages.map(toChatMessage)
-    scrollToBottom()
-  } catch (e: any) {
-    toast.error(`加载会话失败：${e?.message || e}`)
+    scrollToBottom(true)
+  } catch (e: unknown) {
+    toast.error(`加载会话失败：${errMsg(e)}`)
   }
 }
 
@@ -294,9 +338,10 @@ async function newChat() {
     activeId.value = s.id
     messages.value = []
     errorMsg.value = ''
+    followUps.value = []
     await loadSessions()
-  } catch (e: any) {
-    toast.error(`新建会话失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`新建会话失败：${errMsg(e)}`)
   }
 }
 
@@ -314,19 +359,35 @@ async function confirmDeleteSession() {
     }
     await loadSessions()
     toast.success('会话已删除')
-  } catch (e: any) {
-    toast.error(`删除失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`删除失败：${errMsg(e)}`)
   } finally {
     deleteTargetId.value = null
   }
 }
 
 /* ---------- 清空对话 ---------- */
-function confirmClear() {
-  messages.value = []
-  inputText.value = ''
+async function confirmClear() {
   showClearConfirm.value = false
-  toast.success('对话已清空')
+  const sid = activeId.value
+  if (!sid) {
+    messages.value = []
+    inputText.value = ''
+    return
+  }
+  try {
+    // 真清空：后端删消息 + 重置滚动摘要，保证 LLM 上下文一并清空
+    // （此前只清前端数组，后端历史还在，模型仍会记得旧内容）
+    askAbort.value?.abort()
+    streaming.value = false
+    await clearSessionMessages(sid)
+    messages.value = []
+    inputText.value = ''
+    followUps.value = []
+    toast.success('对话已清空')
+  } catch (e: unknown) {
+    toast.error(`清空失败：${errMsg(e)}`)
+  }
 }
 
 /* ---------- 发送（SSE） ---------- */
@@ -344,8 +405,8 @@ async function send() {
         ? { ...cur, items: [s, ...cur.items], total: cur.total + 1 }
         : { items: [s], total: 1, page: 1, pageSize: 20, pages: 1 }
       activeId.value = sid
-    } catch (e: any) {
-      toast.error(`创建会话失败：${e?.message || e}`)
+    } catch (e: unknown) {
+      toast.error(`创建会话失败：${errMsg(e)}`)
       return
     }
   }
@@ -367,15 +428,28 @@ async function send() {
   messages.value.push(userMsg, aiMsg)
   inputText.value = ''
   attached.value = []
-  scrollToBottom()
+  scrollToBottom(true)
 
+  await runStream(text, sid, userMsg.attachments ?? null, aiMsg)
+}
+
+/** SSE 流式核心：发送 / 重新生成共用。 */
+async function runStream(
+  text: string,
+  sid: string,
+  attachments: ChatAttachment[] | null,
+  aiMsg: ChatMessage,
+) {
   streaming.value = true
   errorMsg.value = ''
+  retryPayload.value = null
+  followUps.value = []
+  deepThinking.value = false
   const ac = new AbortController()
   askAbort.value = ac
 
   try {
-    for await (const ev of streamAsk(text, null, sid, userMsg.attachments || undefined, {
+    for await (const ev of streamAsk(text, selectedKb.value || null, sid, attachments || undefined, {
       signal: ac.signal,
       modelConfig: readModelConfig(),
     })) {
@@ -383,25 +457,41 @@ async function send() {
         aiMsg.thinkingSteps = [...(aiMsg.thinkingSteps || []), ev.data as ThinkingStep]
       } else if (ev.event === 'sources') {
         aiMsg.sources = ev.data as SourceItem[]
+      } else if (ev.event === 'ping') {
+        // 后端每次 LLM 调用前推的心跳 → 提示「深度思考」，缓解长等待焦虑
+        deepThinking.value = true
       } else if (ev.event === 'delta') {
+        deepThinking.value = false
         aiMsg.content += (ev.data as { content: string }).content
         scrollToBottom()
       } else if (ev.event === 'done') {
         const d = ev.data as { messageId: string; sessionId: string }
         aiMsg.messageId = d.messageId
         if (d.sessionId) activeId.value = d.sessionId
+      } else if (ev.event === 'follow_ups') {
+        const d = ev.data as { questions?: string[]; sessionTitle?: string | null }
+        followUps.value = d.questions || []
+        // 后端在首轮问答后把会话标题改写为 LLM 摘要，同步侧边栏
+        if (d.sessionTitle) {
+          const item = sessions.value.find((x) => x.id === sid)
+          if (item) item.title = d.sessionTitle
+        }
       } else if (ev.event === 'error') {
         const d = ev.data as { message: string }
         errorMsg.value = d.message
+        retryPayload.value = { text, attachments }
         toast.error(`问答出错：${d.message}`)
       }
     }
-  } catch (e: any) {
-    if (e?.name !== 'AbortError') {
-      toast.error(`问答中断：${e?.message || e}`)
+  } catch (e: unknown) {
+    if (!(e instanceof DOMException && e.name === 'AbortError')) {
+      errorMsg.value = errorMsg.value || errMsg(e)
+      retryPayload.value = { text, attachments }
+      toast.error(`问答中断：${errMsg(e)}`)
     }
   } finally {
     streaming.value = false
+    deepThinking.value = false
     askAbort.value = null
     // 就地同步当前会话，不整页 reload，避免覆盖懒加载列表与滚动位置
     const cur = sessions.value.find((x) => x.id === sid)
@@ -420,8 +510,31 @@ function stop() {
   askAbort.value?.abort()
 }
 
+/** V4：重试上一个失败的问题：移除失败的用户/助手消息对，恢复输入后复发。 */
+function retryLast() {
+  const p = retryPayload.value
+  if (!p || streaming.value) return
+  // 尾部两条即本次失败的 user + 空 assistant，移除后重发避免重复气泡
+  const ms = messages.value
+  if (ms.length >= 2 && ms[ms.length - 1].role !== 'user' && !ms[ms.length - 1].content) {
+    messages.value = ms.slice(0, -2)
+  }
+  errorMsg.value = ''
+  retryPayload.value = null
+  inputText.value = p.text
+  attached.value = p.attachments ? [...p.attachments] : []
+  void send()
+}
+
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  if (e.key !== 'Enter') return
+  // 发送习惯跟随个人设置（系统设置页「Enter 发送」开关）
+  if (state.prefs.enterToSend !== false) {
+    if (!e.shiftKey) {
+      e.preventDefault()
+      send()
+    }
+  } else if (e.ctrlKey || e.metaKey) {
     e.preventDefault()
     send()
   }
@@ -439,8 +552,8 @@ async function onAttach(e: Event) {
       try {
         const { url } = await uploadToOss(f, 'uploads/chat')
         attached.value.push({ kind, mimeType: f.type, url, name: f.name })
-      } catch (ossErr: any) {
-        if (String(ossErr?.message || '').includes('OSS 未启用')) {
+      } catch (ossErr: unknown) {
+        if (errMsg(ossErr, '').includes('OSS 未启用')) {
           const b64 = await readFileB64(f)
           attached.value.push({ kind, mimeType: f.type, dataB64: b64, name: f.name })
         } else {
@@ -466,8 +579,8 @@ async function onFeedback(m: ChatMessage, rating: 'up' | 'down') {
     if (next) await submitFeedback(m.messageId, next)
     else await deleteFeedback(m.messageId)
     m.feedback = next
-  } catch (e: any) {
-    toast.error(`反馈失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`反馈失败：${errMsg(e)}`)
   }
 }
 
@@ -476,51 +589,137 @@ function pick(s: string) {
   inputText.value = s
 }
 
-onMounted(() => {
-  void loadSessions()
+/** 追问 chip：直接发送（区别于空状态卡片只填充输入框）。 */
+function pickAndSend(s: string) {
+  if (streaming.value) return
+  inputText.value = s
+  void send()
+}
+
+/* ---------- 重新生成 / 导出 / 重命名 ---------- */
+const lastAiId = computed(() => {
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const m = messages.value[i]
+    if (m.role !== 'user' && m.content) return m.id
+  }
+  return null
 })
-watch(messages, scrollToBottom, { deep: false })
+
+/** 重新生成：移除旧回答（服务端同删）后重发上一问。 */
+async function regenerate(m: ChatMessage) {
+  if (streaming.value || !m.messageId) return
+  const idx = messages.value.findIndex((x) => x.id === m.id)
+  const prev = idx > 0 ? messages.value[idx - 1] : null
+  const sid = activeId.value
+  if (!prev || prev.role !== 'user' || !sid) return
+  try {
+    await deleteMessage(m.messageId)
+  } catch (e: unknown) {
+    toast.error(`删除旧回答失败：${errMsg(e)}`)
+    return
+  }
+  messages.value.splice(idx, 1)
+  const aiMsg: ChatMessage = { id: genId(), role: 'assistant', content: '', thinkingSteps: [], feedback: null }
+  messages.value.push(aiMsg)
+  scrollToBottom(true)
+  await runStream(prev.content, sid, prev.attachments ?? null, aiMsg)
+}
+
+/** 导出当前对话为 Markdown 文件。 */
+function exportSession() {
+  if (!messages.value.length) {
+    toast.warning('没有可导出的内容')
+    return
+  }
+  const title = activeSession.value?.title || firstQuestion.value || '对话'
+  const lines: string[] = [
+    `# ${title}`,
+    '',
+    `> 导出自知海 Knoa 智能问答 · ${new Date().toLocaleString()}`,
+    '',
+  ]
+  for (const m of messages.value) {
+    if (!m.content) continue
+    lines.push(m.role === 'user' ? '## 提问' : '## 回答', '', m.content, '')
+    if (m.sources?.length) {
+      lines.push(
+        '**引用来源：**',
+        ...m.sources.map((s) => `- [${s.id}] ${s.title}（${s.kb || s.sourceType || 'kb'}）`),
+        '',
+      )
+    }
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${title.slice(0, 30)}_${new Date().toISOString().slice(0, 10)}.md`
+  a.click()
+  URL.revokeObjectURL(url)
+  toast.success('对话已导出')
+}
+
+async function onRenameSession(id: string, title: string) {
+  try {
+    await renameSession(id, title)
+    const item = sessions.value.find((x) => x.id === id)
+    if (item) item.title = title
+  } catch (e: unknown) {
+    toast.error(`重命名失败：${errMsg(e)}`)
+  }
+}
+
+/* ---------- 无来源引导 ---------- */
+function prevUserOf(m: ChatMessage): ChatMessage | null {
+  const idx = messages.value.findIndex((x) => x.id === m.id)
+  const prev = idx > 0 ? messages.value[idx - 1] : null
+  return prev && prev.role === 'user' ? prev : null
+}
+
+/** 无来源提示仅对最新一条回答显示，且排除简短问候。 */
+function showNoSourceHint(m: ChatMessage): boolean {
+  if (streaming.value || m.id !== lastAiId.value || m.sources?.length || !m.messageId) return false
+  const prev = prevUserOf(m)
+  return !!prev && prev.content.length >= 8
+}
+
+/** 无来源：把上一问填回输入框供用户换种问法。 */
+function rephrase(m: ChatMessage) {
+  const prev = prevUserOf(m)
+  if (prev) inputText.value = prev.content
+}
+
+/** 无来源：解除知识库范围限制后重新生成。 */
+async function retryAllKb(m: ChatMessage) {
+  selectedKb.value = ''
+  await regenerate(m)
+}
+
+const route = useRoute()
+onMounted(async () => {
+  await loadSessions()
+  void loadKbOptions()
+  // 支持从检索记录页等带 ?session=xxx 跳转进来打开对应对话
+  const sid = route.query.session
+  if (typeof sid === 'string' && sid) await selectSession(sid)
+})
+watch(messages, () => scrollToBottom(), { deep: false })
 </script>
 
 <template>
   <div class="chat-page">
-    <!-- ====== 左栏：会话列表 ====== -->
-    <aside class="chat-sidebar">
-      <div class="sidebar-head">
-        <div class="sidebar-title">
-          <span>对话</span>
-          <span class="sidebar-count">{{ sessionTotal }}</span>
-        </div>
-      </div>
-
-      <div class="conv-list" ref="convListRef" @scroll="onConvScroll">
-        <button
-          v-for="s in sessions"
-          :key="s.id"
-          class="conv-item"
-          :class="{ active: s.id === activeId }"
-          @click="selectSession(s.id)"
-        >
-          <span class="conv-dot" />
-          <span class="conv-body">
-            <span class="conv-q">{{ s.title || '（新会话）' }}</span>
-            <span class="conv-meta">
-              <span class="conv-time">{{ s.updatedAt ? s.updatedAt.slice(5, 10) : '' }}</span>
-              <span class="conv-sep">·</span>
-              <span>{{ s.msgCount }} 条</span>
-            </span>
-          </span>
-          <span class="conv-del" title="删除会话" @click.stop="onDeleteSession(s.id)">
-            <Icon name="trash" :size="14" />
-          </span>
-        </button>
-        <p v-if="!sessions.length && !sessionLoadingMore" class="conv-empty">还没有对话，点击右上角开始。</p>
-        <div v-if="sessionLoadingMore" class="conv-loading-more">
-          <span class="dot-sm" /><span class="dot-sm" /><span class="dot-sm" />
-        </div>
-        <p v-if="allSessionsLoaded && sessions.length > 0" class="conv-all-done">已全部加载</p>
-      </div>
-    </aside>
+    <!-- ====== 左栏：会话列表（拆分组件） ====== -->
+    <ChatSessionList
+      :sessions="sessions"
+      :total="sessionTotal"
+      :active-id="activeId"
+      :loading-more="sessionLoadingMore"
+      :all-loaded="allSessionsLoaded"
+      @select="selectSession"
+      @remove="onDeleteSession"
+      @rename="onRenameSession"
+      @load-more="loadSessions(true)"
+    />
 
     <!-- ====== 中栏：对话区 ====== -->
     <main class="chat-main">
@@ -536,6 +735,10 @@ watch(messages, scrollToBottom, { deep: false })
             <Icon name="plus" :size="14" />
             <span>新建对话</span>
           </button>
+          <button class="ghost-btn" title="导出当前对话为 Markdown" @click="exportSession">
+            <Icon name="export" :size="14" />
+            <span>导出</span>
+          </button>
           <button class="ghost-btn chat-clear" @click="showClearConfirm = true">
             <Icon name="trash" :size="14" />
             <span>清空对话</span>
@@ -546,7 +749,7 @@ watch(messages, scrollToBottom, { deep: false })
       <!-- 消息区 + 输入区（共用灰色背景） -->
       <div class="chat-body">
       <!-- 消息区 -->
-      <div class="messages-area" ref="scrollRef">
+      <div class="messages-area" ref="scrollRef" @scroll="onMsgScroll">
         <!-- 空状态（hero） -->
         <div v-if="!messages.length" class="empty-hero">
           <div class="empty-orb">
@@ -573,14 +776,14 @@ watch(messages, scrollToBottom, { deep: false })
             <Icon name="sparkles" :size="15" />
           </div>
 
-          <div class="msg-bubble" :class="{ 'has-tts': m.role !== 'user' && auth.user?.ttsEnabled }">
+          <div class="msg-bubble" :class="{ 'has-tts': m.role !== 'user' && auth.user?.ttsEnabled && m.content }">
             <!-- 语音播报（右上角） -->
             <button
-              v-if="m.role !== 'user' && auth.user?.ttsEnabled"
+              v-if="m.role !== 'user' && auth.user?.ttsEnabled && m.content"
               class="tts-corner act-btn"
               :class="{ on: playingId === m.id }"
               :title="playingId === m.id ? '停止播报' : '朗读回答'"
-              @click="speak(m)"
+              @click="speak(m.id, m.content)"
             >
               <Icon :name="playingId === m.id ? 'square' : 'volume'" :size="14" />
             </button>
@@ -611,10 +814,11 @@ watch(messages, scrollToBottom, { deep: false })
               </ol>
             </div>
 
-            <!-- 正文 -->
-            <div v-if="m.content" class="answer-body">{{ m.content }}</div>
+            <!-- 正文（Markdown 渲染，[N] 角标可点击联动来源卡） -->
+            <div v-if="m.content" class="answer-body md" v-html="renderAnswer(m.content)" @click="onCiteClick"></div>
             <div v-else-if="streaming" class="answer-loading">
               <span class="dot" /><span class="dot" /><span class="dot" />
+              <span v-if="deepThinking" class="busy-hint">深度思考中…</span>
             </div>
 
             <!-- 引用文档 -->
@@ -624,7 +828,7 @@ watch(messages, scrollToBottom, { deep: false })
                 <span>引用来源（{{ m.sources.length }}）</span>
               </div>
               <div class="refs-grid">
-                <div v-for="(s, i) in m.sources" :key="s.id ?? i" class="ref-card" :class="{ 'ref-clickable': s.sourceType === 'kb' }" @click="openDocDetail(s)" :title="s.sourceType === 'kb' ? '点击查看文档详情' : undefined">
+                <div v-for="(s, i) in m.sources" :key="s.id ?? i" class="ref-card" :data-ref-id="s.id" :class="{ 'ref-clickable': s.sourceType === 'kb' }" @click="openDocDetail(s)" :title="s.sourceType === 'kb' ? '点击查看文档详情' : undefined">
                   <span class="ref-icon" :class="`src-${s.sourceType || 'kb'}`">
                     <Icon :name="s.sourceType === 'web' ? 'globe' : s.sourceType === 'graph' ? 'graph' : 'doc'" :size="16" />
                   </span>
@@ -640,10 +844,19 @@ watch(messages, scrollToBottom, { deep: false })
               </div>
             </div>
 
+            <!-- 无来源引导：检索不到时提示换问法 / 放宽范围 -->
+            <div v-if="m.role !== 'user' && showNoSourceHint(m)" class="no-source-hint">
+              <Icon name="info" :size="13" />
+              <span>未在知识库找到相关来源，可以试试：</span>
+              <button class="chip chip-mini" @click="rephrase(m)">换种问法</button>
+              <button v-if="selectedKb" class="chip chip-mini" @click="retryAllKb(m)">搜全部知识库</button>
+            </div>
+
             <!-- 错误 -->
             <div v-if="m.role !== 'user' && errorMsg && !m.content" class="answer-error">
               <Icon name="alert" :size="14" />
               <span>{{ errorMsg }}</span>
+              <button v-if="retryPayload" class="btn-retry" @click="retryLast">重试</button>
             </div>
 
             <!-- 反馈 + 操作 -->
@@ -651,6 +864,9 @@ watch(messages, scrollToBottom, { deep: false })
               <span class="msg-actions-divider" />
               <button class="act-btn" title="复制回答" @click="copyAnswer(m)">
                 <Icon name="copy" :size="14" />
+              </button>
+              <button v-if="m.id === lastAiId" class="act-btn" title="重新生成" @click="regenerate(m)">
+                <Icon name="refresh" :size="14" />
               </button>
               <button class="act-btn" :class="{ on: m.feedback === 'up' }" title="有用" @click="onFeedback(m, 'up')">
                 <Icon name="thumbs-up" :size="14" />
@@ -663,10 +879,10 @@ watch(messages, scrollToBottom, { deep: false })
         </article>
       </div>
 
-      <!-- 建议追问 -->
+      <!-- 建议追问（优先用后端 follow_ups 事件下发的动态追问） -->
       <div class="suggest-row" v-if="!streaming && messages.length">
         <span class="suggest-label">你可能还想问</span>
-        <button v-for="(s, i) in suggested" :key="i" class="chip" @click="pick(s)">{{ s }}</button>
+        <button v-for="(s, i) in (followUps.length ? followUps : suggested)" :key="i" class="chip" @click="pickAndSend(s)">{{ s }}</button>
       </div>
 
       <!-- 输入区（仅对话视图显示） -->
@@ -681,11 +897,21 @@ watch(messages, scrollToBottom, { deep: false })
           </div>
         </div>
 
+        <!-- 知识库范围：独立置于输入框上方，避免与底部发送按钮挤在一排 -->
+        <div class="composer-scope">
+          <span class="scope-label" title="限定检索的知识库范围">
+            <Icon name="folder" :size="13" />
+            知识库范围
+          </span>
+          <CustomSelect v-model="selectedKb" :options="kbSelectOptions" width="170px" />
+        </div>
+
         <textarea
+          ref="inputRef"
           v-model="inputText"
           class="composer-input"
-          rows="4"
-          placeholder="输入问题，Shift + Enter 换行，Enter 发送"
+          rows="1"
+          :placeholder="state.prefs.enterToSend !== false ? '输入问题，Shift + Enter 换行，Enter 发送' : '输入问题，Enter 换行，Ctrl + Enter 发送'"
           @keydown="onKeydown"
         ></textarea>
 
@@ -735,50 +961,8 @@ watch(messages, scrollToBottom, { deep: false })
     @confirm="confirmClear"
   />
 
-  <!-- 文档详情弹框 -->
-  <AppModal
-    :show="!!docDetail"
-    :title="docDetail?.title || '文档详情'"
-    wide
-    @close="docDetail = null"
-  >
-    <template v-if="docDetailLoading" #default>
-      <div class="doc-detail-loading">
-        <span class="dot" /><span class="dot" /><span class="dot" />
-      </div>
-    </template>
-    <template v-else-if="docDetail" #default>
-      <div class="doc-detail">
-        <div class="doc-meta-grid">
-          <div class="doc-meta-item">
-            <span class="doc-meta-label">类型</span>
-            <span class="doc-meta-value">{{ detail.type || '—' }}</span>
-          </div>
-          <div class="doc-meta-item">
-            <span class="doc-meta-label">状态</span>
-            <span class="doc-meta-value" :class="'status-' + (detail.status || '')">{{ detail.status || '—' }}</span>
-          </div>
-          <div class="doc-meta-item">
-            <span class="doc-meta-label">更新时间</span>
-            <span class="doc-meta-value mono">{{ detail.updatedAt?.slice(0, 16) || '—' }}</span>
-          </div>
-        </div>
-        <div v-if="detail.originalFilename" class="doc-file-info">
-          <Icon name="file-text" :size="14" />
-          <span>{{ detail.originalFilename }}</span>
-          <span v-if="detail.fileSize" class="doc-file-size">({{ formatSize(detail.fileSize) }})</span>
-        </div>
-        <div v-if="detail.reviewedAt" class="doc-review-info">
-          审核于 {{ detail.reviewedAt.slice(0, 16) }}
-          <span v-if="detail.reviewedBy"> · {{ detail.reviewedBy }}</span>
-        </div>
-        <div class="doc-content">
-          <div class="doc-content-label">文档内容</div>
-          <pre class="doc-content-body">{{ detail.contentMd }}</pre>
-        </div>
-      </div>
-    </template>
-  </AppModal>
+  <!-- 文档详情弹框（拆分组件） -->
+  <DocDetailModal :doc="docDetail" :loading="docDetailLoading" :snippet="docDetailSnippet" @close="docDetail = null" />
 </template>
 
 <style scoped>
@@ -796,137 +980,6 @@ watch(messages, scrollToBottom, { deep: false })
   cursor: pointer;
 }
 
-
-/* ============ 侧栏 ============ */
-.chat-sidebar {
-  width: 272px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--border);
-  background: var(--bg-surface);
-}
-.sidebar-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 18px 14px;
-}
-.sidebar-title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: -0.01em;
-}
-.sidebar-count {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  background: var(--bg-subtle);
-  padding: 1px 8px;
-  border-radius: var(--radius-pill);
-}
-.conv-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 10px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.conv-item {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 11px 12px;
-  border-radius: var(--radius-md);
-  text-align: left;
-  color: var(--text-secondary);
-  transition: background var(--dur-fast) var(--ease-out);
-}
-.conv-item:hover { background: var(--bg-hover); }
-.conv-item.active {
-  background: var(--brand-soft);
-  color: var(--text-primary);
-}
-.conv-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-tertiary);
-  flex-shrink: 0;
-  transition: background var(--dur-fast);
-}
-.conv-item.active .conv-dot { background: var(--brand); }
-.conv-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.conv-q {
-  font-size: 13px;
-  font-weight: 600;
-  color: inherit;
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.conv-item.active .conv-q { color: var(--brand); }
-.conv-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-.conv-sep { opacity: 0.6; }
-.conv-del {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
-  opacity: 0;
-  transition: all var(--dur-fast) var(--ease-out);
-}
-.conv-item:hover .conv-del { opacity: 1; }
-.conv-del:hover { background: var(--danger-soft); color: var(--danger); }
-.conv-empty {
-  margin: 24px 8px;
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--text-tertiary);
-  text-align: center;
-}
-.conv-loading-more {
-  display: flex;
-  justify-content: center;
-  gap: 4px;
-  padding: 12px 0 6px;
-}
-.dot-sm {
-  width: 5px; height: 5px; border-radius: 50%;
-  background: var(--text-tertiary);
-  animation: blink 1.3s infinite ease-in-out;
-}
-.conv-loading-more .dot-sm:nth-child(2) { animation-delay: 0.18s; }
-.conv-loading-more .dot-sm:nth-child(3) { animation-delay: 0.36s; }
-.conv-all-done {
-  text-align: center;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  margin: 0;
-}
 
 /* ============ 对话主区 ============ */
 .chat-main {
@@ -956,8 +1009,7 @@ watch(messages, scrollToBottom, { deep: false })
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 18px;
-  margin-bottom: 4px;
+  padding-bottom: 10px;
 }
 .chat-head-actions {
   display: flex;
@@ -1110,7 +1162,7 @@ watch(messages, scrollToBottom, { deep: false })
 }
 .tts-corner {
   position: absolute;
-  top: 10px;
+  top: 15px;
   right: 10px;
   width: 28px;
   height: 28px;
@@ -1178,6 +1230,142 @@ watch(messages, scrollToBottom, { deep: false })
   display: flex; align-items: center; gap: 6px;
   margin-top: 12px; font-size: 12.5px; color: var(--danger);
 }
+
+.btn-retry {
+  margin-left: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border: none;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background var(--dur-fast);
+}
+.btn-retry:hover { background: var(--bg-hover); }
+
+/* ============ Markdown 渲染（answer-body）============ */
+/* 气泡是 pre-wrap（用户消息纯文本需要），Markdown 渲染必须复位为 normal，
+   否则 HTML 标签间的换行会被当内容渲染出大量空行 */
+.answer-body.md { white-space: normal; font-size: 14px; }
+.answer-body.md :deep(> :first-child) { margin-top: 0; }
+.answer-body.md :deep(> :last-child) { margin-bottom: 0; }
+.answer-body.md :deep(p) { margin: 0 0 12px; }
+/* 标题：拉开字号梯度形成视觉锚点，避免和正文混成一片 */
+.answer-body.md :deep(h1), .answer-body.md :deep(h2), .answer-body.md :deep(h3), .answer-body.md :deep(h4) {
+  font-weight: 700; color: var(--text-primary); line-height: 1.45;
+}
+.answer-body.md :deep(h1) { font-size: 16.5px; margin: 20px 0 10px; }
+.answer-body.md :deep(h2) { font-size: 15px; margin: 18px 0 8px; }
+.answer-body.md :deep(h3), .answer-body.md :deep(h4) { font-size: 14px; margin: 14px 0 6px; }
+/* 列表：品牌色圆点 + 宽松行距，嵌套列表收紧 */
+.answer-body.md :deep(ul), .answer-body.md :deep(ol) { margin: 0 0 12px; padding-left: 20px; }
+.answer-body.md :deep(li) { margin: 5px 0; padding-left: 2px; }
+.answer-body.md :deep(ul > li)::marker { color: var(--brand); }
+.answer-body.md :deep(ol > li)::marker { color: var(--text-tertiary); font-weight: 600; }
+.answer-body.md :deep(li > p) { margin: 0; }
+.answer-body.md :deep(li > ul), .answer-body.md :deep(li > ol) { margin: 4px 0; }
+/* 加粗降为 600：模型爱滥加粗，700 大片黑体显得噪 */
+.answer-body.md :deep(strong) { font-weight: 600; color: var(--text-primary); }
+/* 行内代码：去边框只留浅底，减少碎片感 */
+.answer-body.md :deep(code) {
+  font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', Consolas, monospace);
+  font-size: 0.88em;
+  background: var(--bg-subtle);
+  border-radius: 5px;
+  padding: 2px 6px;
+  color: var(--text-secondary);
+}
+/* 代码块：固定深色底（深浅主题一致），更接近 IDE 观感 */
+.answer-body.md :deep(pre) {
+  background: #1f2330;
+  border: none;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 0 0 14px;
+  overflow-x: auto;
+}
+.answer-body.md :deep(pre code) {
+  background: none; border: none; padding: 0;
+  color: #e6e9f0; font-size: 12.5px; line-height: 1.65;
+}
+.answer-body.md :deep(blockquote) {
+  margin: 0 0 12px;
+  padding: 8px 14px;
+  border-left: 3px solid var(--brand);
+  background: var(--brand-soft);
+  color: var(--text-secondary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.answer-body.md :deep(blockquote p) { margin: 0; }
+/* 表格：横向滚动 + 斑马纹 + 只留横线，去掉田字格 */
+.answer-body.md :deep(table) {
+  display: block; overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0 0 14px; font-size: 13px;
+  max-width: 100%;
+}
+.answer-body.md :deep(th), .answer-body.md :deep(td) {
+  border: 1px solid var(--border); padding: 7px 12px; text-align: left;
+}
+.answer-body.md :deep(th) { background: var(--bg-subtle); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.answer-body.md :deep(tbody tr:nth-child(even)) { background: var(--bg-subtle); }
+.answer-body.md :deep(a) { color: var(--brand); text-decoration: none; border-bottom: 1px solid transparent; }
+.answer-body.md :deep(a:hover) { border-bottom-color: var(--brand); }
+.answer-body.md :deep(hr) { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+/* 引用角标 chip：正文 [N] → 点击滚动高亮同号来源卡。
+   chip 由 v-html 动态注入（无 data-v 属性），必须用 :deep() 穿透 scoped，
+   否则样式失效、被全局 button reset 还原成裸数字文本 */
+.answer-body.md :deep(.cite-chip) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  margin: 0 2px;
+  border-radius: 5px;
+  border: 1px solid var(--brand-ring);
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: 1px;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.answer-body.md :deep(.cite-chip:hover) { background: var(--brand); color: #fff; border-color: var(--brand); }
+.ref-flash { animation: ref-flash 1.4s var(--ease-out); }
+@keyframes ref-flash {
+  0%, 55% { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+  100% { box-shadow: none; }
+}
+
+/* 深度思考提示（ping 驱动） */
+.busy-hint {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  animation: blink 1.3s infinite ease-in-out;
+}
+
+/* 无来源引导 */
+.no-source-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.chip-mini { padding: 3px 10px; font-size: 11.5px; }
 
 /* 引用来源 */
 .refs { margin-top: 16px; }
@@ -1286,7 +1474,7 @@ watch(messages, scrollToBottom, { deep: false })
 /* ============ 输入区（composer） ============ */
 .composer {
   margin: 5px 10px 10px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-surface);
@@ -1323,9 +1511,9 @@ watch(messages, scrollToBottom, { deep: false })
   font-size: 14px;
   line-height: 1.6;
   color: var(--text-primary);
-  min-height: 90px;
+  height: 45px;
   font-family: inherit;
-  max-height: 180px;
+  max-height: 45px;
   padding: 2px 2px;
 }
 .composer-input::placeholder { color: var(--text-placeholder); }
@@ -1337,6 +1525,23 @@ watch(messages, scrollToBottom, { deep: false })
   margin-top: 10px;
 }
 .composer-left { display: flex; align-items: center; gap: 12px; }
+/* 知识库范围行：独立置于输入框上方，与输入区、底部操作栏形成清晰分层；
+   trigger 压缩到 28px（覆盖公共组件默认 34px），整行更紧凑，把高度让给对话区 */
+.composer-scope {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.composer-scope :deep(.c-select-trigger) { height: 28px; font-size: 12.5px; }
+.scope-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
 .composer-attach {
   position: relative;
   display: flex;
@@ -1394,12 +1599,11 @@ watch(messages, scrollToBottom, { deep: false })
 .spin { animation: spin 0.9s linear infinite; }
 
 @media (max-width: 720px) {
-  .chat-sidebar { width: 210px; }
   .empty-suggest { grid-template-columns: 1fr; }
   .chat-question { max-width: 50vw; }
 }
 
-/* ============ 文档详情弹框 ============ */
+/* 引用卡片可点击态（详情弹框本体在 DocDetailModal） */
 .ref-clickable {
   cursor: pointer;
 }
@@ -1407,97 +1611,6 @@ watch(messages, scrollToBottom, { deep: false })
   border-color: var(--brand);
   transform: translateY(-2px);
   box-shadow: var(--shadow-float);
-}
-
-.doc-detail-loading {
-  display: flex;
-  gap: 6px;
-  padding: 40px 0;
-  justify-content: center;
-}
-.doc-detail-loading .dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--text-tertiary);
-  animation: blink 1.3s infinite ease-in-out;
-}
-.doc-detail-loading .dot:nth-child(2) { animation-delay: 0.18s; }
-.doc-detail-loading .dot:nth-child(3) { animation-delay: 0.36s; }
-
-.doc-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.doc-meta-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px 20px;
-}
-.doc-meta-item {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.doc-meta-label {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.doc-meta-value {
-  font-size: 13.5px;
-  color: var(--text-primary);
-  font-weight: 500;
-}
-.mono { font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', Consolas, monospace); }
-.doc-meta-value.status-已审核 { color: var(--success); }
-.doc-meta-value.status-待复核 { color: var(--warning); }
-.doc-meta-value.status-已拒绝 { color: var(--danger); }
-
-.doc-file-info {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 14px;
-  background: var(--bg-subtle);
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.doc-file-size {
-  color: var(--text-tertiary);
-  font-size: 12px;
-}
-.doc-review-info {
-  font-size: 12.5px;
-  color: var(--text-tertiary);
-}
-
-.doc-content {
-  border-top: 1px solid var(--border);
-  padding-top: 14px;
-}
-.doc-content-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  margin-bottom: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.doc-content-body {
-  margin: 0;
-  padding: 14px 16px;
-  background: var(--bg-subtle);
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  line-height: 1.75;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 400px;
-  overflow-y: auto;
 }
 
 </style>

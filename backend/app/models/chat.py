@@ -73,6 +73,7 @@ class SessionMessageOut(CamelModel):
     citations: list[int] | None = None
     sources: list | None = None
     attachments: list[dict] | None = None
+    thinking_steps: list[dict] | None = None  # Agentic RAG 决策链（仅 assistant）
 
 
 class SessionDetailOut(CamelModel):

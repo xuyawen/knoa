@@ -114,9 +114,16 @@ class Settings(BaseSettings):
     CORS_ALLOW_CREDENTIALS: bool = True
     # 鉴权 Cookie（P1-8：token 改 HttpOnly Cookie，防 XSS 窃取）
     COOKIE_NAME: str = "knoa_token"
-    # ponytail: dev(http) 自动关闭 Secure，使 HttpOnly Cookie 能被浏览器存储；生产(https)仍为 True
-    COOKIE_SECURE: bool = APP_ENV != "development"
+    # Cookie Secure 标记：本项目生产环境走明文 HTTP（无 TLS），Secure=True
+    # 会让浏览器拒收/拒发 Cookie、直接打破登录，故默认 False；
+    # 仅在确实启用 HTTPS 的部署里通过环境变量显式开启。
+    # （旧写法 `APP_ENV != "development"` 在类体求值时只能读到类属性默认值，
+    # 实际永远为 False，改为独立显式配置消除该陷阱。）
+    COOKIE_SECURE: bool = False
     COOKIE_SAMESITE: str = "lax"
+    # 反向代理信任开关：True 时才信任 X-Forwarded-For 首个 IP（生产 nginx 反代场景）；
+    # False（默认）用直连对端地址，防止客户端伪造 XFF 绕过登录限流。
+    TRUST_PROXY: bool = False
     # 腾讯云 TTS（语音播报；httpx 直连 + 手写 TC3 签名，不引第三方 SDK）
     # 留空则 /api/tts 优雅降级返回 503，前端朗读按钮自动隐藏
     TENCENT_TTS_SECRET_ID: str = ""

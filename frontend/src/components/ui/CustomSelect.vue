@@ -37,14 +37,18 @@ const currentLabel = computed(() => {
 function measure() {
   if (!root.value || !panel.value) return
   const rect = root.value.getBoundingClientRect()
-  const ph = panel.value.scrollHeight
+  // 用 offsetHeight（实际渲染高度，受 max-height 约束）而非 scrollHeight（完整内容高度），
+  // 否则选项超出 max-height 时向上翻转会按虚高的内容高定位，面板悬空偏高
+  const ph = panel.value.offsetHeight
   const below = window.innerHeight - rect.bottom - 4
   const shouldFlip = ph > below && rect.top > below
   flipUp.value = shouldFlip
+  // 面板是 position: fixed（相对视口定位），getBoundingClientRect 返回的也是视口坐标，
+  // 不能再叠加 window.scrollX/Y——否则页面一旦滚动（如小视口下 chat 页），面板就会整体偏移错位
   if (shouldFlip) {
-    panelStyle.value = { top: `${rect.top + window.scrollY - ph - 4}px`, left: `${rect.left + window.scrollX}px`, width: `${rect.width}px` }
+    panelStyle.value = { top: `${rect.top - ph - 4}px`, left: `${rect.left}px`, width: `${rect.width}px` }
   } else {
-    panelStyle.value = { top: `${rect.bottom + window.scrollY + 4}px`, left: `${rect.left + window.scrollX}px`, width: `${rect.width}px` }
+    panelStyle.value = { top: `${rect.bottom + 4}px`, left: `${rect.left}px`, width: `${rect.width}px` }
   }
 }
 
@@ -94,6 +98,7 @@ onBeforeUnmount(() => {
       <span class="c-select-label">{{ currentLabel }}</span>
       <Icon name="chevron-down" :size="12" class="c-select-arrow" />
     </button>
+    <Teleport to="body">
     <Transition :name="flipUp ? 'c-drop-up' : 'c-drop'">
       <div v-if="open" ref="panel" class="c-select-panel" :class="{ up: flipUp }" :style="panelStyle">
         <div
@@ -106,6 +111,7 @@ onBeforeUnmount(() => {
         <div v-if="!options.length" class="c-select-empty">暂无选项</div>
       </div>
     </Transition>
+    </Teleport>
   </div>
 </template>
 

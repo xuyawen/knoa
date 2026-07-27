@@ -1,13 +1,12 @@
 <script setup lang="ts">
 // 知识图谱 — 节点管理视图（实体表格 + 分页）。
-import Icon from '@/components/ui/Icon.vue'
 import DataTable from '@/components/ui/DataTable.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import { useGraphData } from '@/composables/useGraphData'
 import '@/assets/graph.css'
 
 const {
-  graph, nodeColumns, pagedNodes, selectedId, degree, kbName,
+  graph, nodeColumns, pagedNodes, degree, kbName,
   nodePage, nodePageSize,
 } = useGraphData()
 </script>
@@ -17,15 +16,12 @@ const {
     <div class="card node-card">
       <div class="panel-head">
         <span class="panel-title">实体节点（{{ graph?.nodes.length || 0 }}）</span>
-        <Icon name="node" :size="14" class="info-hint" />
       </div>
       <div class="node-scroll">
         <DataTable
           :columns="nodeColumns"
           :rows="pagedNodes"
           row-key="id"
-          clickable
-          @row-click="(n) => (selectedId = n.id)"
         >
           <template #cell="{ row, col }">
             <template v-if="col.key === 'label'">{{ row.label }}</template>

@@ -73,21 +73,7 @@
 .leg-arrow::after { content: ''; position: absolute; right: -1px; top: -4px; border: 4px solid transparent; border-left: 4px solid var(--text-tertiary); }
 .canvas-hint { text-align: center; font-size: 11px; color: var(--text-placeholder); padding: 6px; margin: 0; }
 
-/* 图例 */
-.graph-legend {
-  display: flex; align-items: center; gap: 16px;
-  padding: 10px 16px; border-top: 1px solid var(--border);
-  font-size: 12px; color: var(--text-secondary); flex-wrap: wrap;
-}
-.leg-item { display: inline-flex; align-items: center; gap: 5px; }
-.leg-dot {
-  width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex-shrink: 0;
-}
 .leg-divider { width: 1px; height: 14px; background: var(--border); }
-.leg-line .leg-line-dash, .leg-line .leg-line-solid {
-  display: inline-block; width: 20px; height: 0; border-top-width: 2px; border-style: solid;
-}
-.leg-line .leg-line-dash { border-style: dashed; }
 
 /* 导出按钮 */
 .btn-outline {
@@ -113,7 +99,7 @@
 
 .section-block { margin-bottom: 18px; }
 .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.section-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.section-title { font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 10px; }
 
 .detail-box { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-subtle); }
 .detail-name { font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; }
@@ -125,10 +111,10 @@
 .dn-label { font-size: 11px; color: var(--text-tertiary); }
 .dn-chip { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-secondary); }
 
-.type-bars { display: flex; flex-direction: column; gap: 7px; }
-.type-bar { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.type-bars { display: flex; flex-direction: column; gap: 12px; }
+.type-bar { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
 .tb-label { width: 56px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tb-track { flex: 1; height: 6px; border-radius: 3px; background: var(--bg-subtle); overflow: hidden; }
+.tb-track { flex: 1; height: 8px; border-radius: 4px; background: var(--bg-subtle); overflow: hidden; }
 .tb-fill { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--brand), var(--accent-violet)); }
 .tb-count { width: 28px; text-align: right; color: var(--text-tertiary); }
 
@@ -177,8 +163,10 @@
 /* ---- 图谱统计 ---- */
 .stats-page { display: flex; flex-direction: column; gap: 14px; }
 .stat-grid.wide { grid-template-columns: repeat(4, 1fr); }
-.stat-block { padding: 16px; }
+.stat-block { padding: 20px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.grid-2 > .stat-block { display: flex; flex-direction: column; }
+.hot-list, .recent-list { flex: 1; display: flex; flex-direction: column; justify-content: space-evenly; }
 
 @media (max-width: 900px) {
   .stat-grid.wide { grid-template-columns: 1fr 1fr; }

@@ -18,6 +18,10 @@ from app.db import User
 # key -> 命中时间戳列表（time.monotonic 秒）
 _HITS: dict[str, list[float]] = {}
 _LOCK = asyncio.Lock()
+# 陈旧 key 清理：字典超过该规模时，淘汰最近命中超过 1 小时的 key
+# （各 scope 窗口均远小于 1 小时，淘汰不影响限流正确性）
+_CLEANUP_THRESHOLD = 1024
+_STALE_AFTER = 3600.0
 
 
 def rate_limit(times: int, seconds: int, scope: str):
@@ -44,8 +48,11 @@ def rate_limit(times: int, seconds: int, scope: str):
                     headers={"Retry-After": str(retry_after)},
                 )
             hits.append(now)
-            # 窗口内已无命中则清理 key，避免字典随用户数无限增长
-            if not hits:
-                _HITS.pop(key, None)
+            # 定期清理：字典规模超阈值时剔除最近命中已远超窗口的陈旧 key，
+            # 避免随用户数无限增长（旧写法 append 后判 `not hits` 永假，是死代码）。
+            if len(_HITS) > _CLEANUP_THRESHOLD:
+                stale = [k for k, v in _HITS.items() if not v or now - v[-1] > _STALE_AFTER]
+                for k in stale:
+                    _HITS.pop(k, None)
 
     return _dep

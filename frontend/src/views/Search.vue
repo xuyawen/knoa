@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useToastStore } from '@/stores/toast'
+import { errMsg } from '@/utils/errmsg'
 import { searchDocs } from '@/api'
 import type { SearchDocItem, Paginated } from '@/types/api'
 import { useSearchHistory } from '@/composables/useSearchHistory'
@@ -78,8 +79,8 @@ async function runSearch(page = 1) {
       time: filterTime.value,
     })
     saveHistory(text)
-  } catch (e: any) {
-    toast.error(`搜索失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`搜索失败：${errMsg(e)}`)
     results.value = null
   } finally {
     loading.value = false

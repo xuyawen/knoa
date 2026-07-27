@@ -6,6 +6,7 @@ import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useToastStore } from '@/stores/toast'
+import { errMsg } from '@/utils/errmsg'
 import { createRole, deleteRole, getRoles, setRolePermissions, updateRole } from '@/api/auth'
 import type { RoleOut, RoleCreate } from '@/types/api'
 import { PERMISSIONS } from '@/types/api'
@@ -27,8 +28,8 @@ async function loadRoles() {
     roles.value = await getRoles()
     if (!selectedId.value && roles.value.length) selectedId.value = roles.value[0].id
     syncDraft()
-  } catch (e: any) {
-    toast.error(`加载角色失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`加载角色失败：${errMsg(e)}`)
   } finally {
     loading.value = false
   }
@@ -65,8 +66,8 @@ async function savePerms() {
     const idx = roles.value.findIndex((r) => r.id === updated.id)
     if (idx >= 0) roles.value[idx] = updated
     toast.success('权限已保存')
-  } catch (e: any) {
-    toast.error(`保存失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`保存失败：${errMsg(e)}`)
   }
 }
 
@@ -109,8 +110,8 @@ async function confirmCreate() {
     selectedId.value = created.id
     syncDraft()
     toast.success('角色已创建')
-  } catch (e: any) {
-    toast.error(`创建失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`创建失败：${errMsg(e)}`)
   } finally {
     creating.value = false
   }
@@ -135,8 +136,8 @@ async function confirmDelete() {
     if (selectedId.value === r.id) selectedId.value = roles.value[0]?.id ?? null
     syncDraft()
     toast.success(`已删除角色：${r.name}`)
-  } catch (e: any) {
-    toast.error(`删除失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`删除失败：${errMsg(e)}`)
   }
 }
 
@@ -159,8 +160,8 @@ async function saveName() {
     if (idx >= 0) roles.value[idx] = updated
     editingName.value = false
     toast.success('角色信息已更新')
-  } catch (e: any) {
-    toast.error(`更新失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`更新失败：${errMsg(e)}`)
   }
 }
 
@@ -210,7 +211,7 @@ onMounted(loadRoles)
               </h3>
               <div class="rm-key">{{ selectedRole.key }}</div>
             </div>
-            <button class="btn btn-ghost btn-sm" @click="openEditName"><Icon name="edit" :size="13" /> 编辑信息</button>
+            <button class="btn btn-primary btn-sm" @click="openEditName"><Icon name="edit" :size="13" /> 编辑信息</button>
           </div>
 
           <p class="rm-desc-full">{{ selectedRole.description || '暂无描述' }}</p>

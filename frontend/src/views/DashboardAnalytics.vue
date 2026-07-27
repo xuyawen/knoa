@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // 首页大盘 — 访问分析（访问趋势折线 + 访问量明细表）。
 import { computed, onMounted, ref, watch } from 'vue'
-import Icon from '@/components/ui/Icon.vue'
 import DataTable from '@/components/ui/DataTable.vue'
 import { getTrend } from '@/api'
 import { useTrendChart } from '@/composables/useTrendChart'
@@ -47,7 +46,6 @@ watch(trendRange, (r) => { void loadTrend(r) })
     <div class="chart-panel card">
       <div class="panel-head">
         <span class="panel-title">访问趋势</span>
-        <Icon name="info" :size="13" class="phint" />
       </div>
       <div class="trend-tabs">
         <button v-for="r in [{k:'today',l:'今日'},{k:'week',l:'近7日'},{k:'month',l:'近30日'}]"

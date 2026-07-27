@@ -1,30 +1,53 @@
-// 知识图谱共享数据层：四个图谱视图（全局图 / 节点 / 关系 / 统计）共用。
+// 知识图谱共享数据层：四个图谱视图（全局图 / 节点 / 关系 / 统计）共用同一份模块级状态。
+// 四个 tab 来回切换不会重复请求，筛选 / 分页 / 画布状态保留；「搜索」按钮或筛选变化强制刷新。
 // 力导向布局与画布交互仅在「全局图谱」视图内，其余三视图只消费这里的数据。
 import { ref, computed, watch, onMounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
+import { errMsg } from '@/utils/errmsg'
 import { getGraph, getGraphHotNodes, getGraphRecent, exportGraph } from '@/api'
 import type { GraphData, GraphNode, GraphFilter, GraphHotNode } from '@/types/api'
+
+/* ---- 模块级共享状态：四个视图拿到同一套 refs ---- */
+const graph = ref<GraphData | null>(null)
+const loading = ref(false)
+const errorMsg = ref('')
+const selectedKb = ref<string | null>(null)
+const searchTerm = ref('')
+const selectedId = ref<string | null>(null)
+const hoveredId = ref<string | null>(null)
+
+// 工具栏筛选（透传后端 GET /api/graph 真实过滤）
+const gFilterType = ref('')
+const gFilterBiz = ref('')
+const gFilterTime = ref('')
+
+// 节点类型选项：从已加载图谱的真实去重 type 派生（首次无类型过滤时采集）
+const allTypeOptions = ref<{ label: string; value: string }[]>([{ label: '全部', value: '' }])
+
+// 右侧「热门实体 Top5 / 最近更新」来自服务端专门接口
+const hotNodes = ref<GraphHotNode[]>([])
+const recentNodes = ref<GraphNode[]>([])
+
+// 节点表格 / 关系列表分页状态
+const nodePage = ref(1)
+const nodePageSize = ref(15)
+const relTerm = ref('')
+const relPage = ref(1)
+const relPageSize = ref(15)
+
+// 画布平移/缩放状态（被全局视图的交互处理器变更）
+const tx = ref(0)
+const ty = ref(0)
+const k = ref(1)
+
+// 是否已完成首次加载（模块级：仅第一个挂载的视图触发拉取）
+let fetched = false
 
 export function useGraphData() {
   const knowledge = useKnowledgeStore()
   const toast = useToastStore()
 
-  const graph = ref<GraphData | null>(null)
-  const loading = ref(false)
-  const errorMsg = ref('')
-  const selectedKb = ref<string | null>(null)
-  const searchTerm = ref('')
-  const selectedId = ref<string | null>(null)
-  const hoveredId = ref<string | null>(null)
-
-  // 工具栏筛选（透传后端 GET /api/graph 真实过滤）
-  const gFilterType = ref('')
-  const gFilterBiz = ref('')
-  const gFilterTime = ref('')
-
-  // 节点类型选项：从已加载图谱的真实去重 type 派生（首次无类型过滤时采集）
-  const allTypeOptions = ref<{ label: string; value: string }[]>([{ label: '全部', value: '' }])
   const bizCatOpts = computed<{ label: string; value: string }[]>(() => {
     const cats = Array.from(
       new Set(knowledge.bases.map((b) => b.category).filter((c): c is string => !!c)),
@@ -54,10 +77,6 @@ export function useGraphData() {
     ...timeRangeToFromTo(gFilterTime.value),
   }))
 
-  // 右侧「热门实体 Top5 / 最近更新」来自服务端专门接口（替代前端近似）
-  const hotNodes = ref<GraphHotNode[]>([])
-  const recentNodes = ref<GraphNode[]>([])
-
   /* ---- KB 配色 / 名称 ---- */
   const PALETTE = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#F97316', '#6366F1']
   const kbColor = computed<Record<string, string>>(() => {
@@ -71,8 +90,15 @@ export function useGraphData() {
   function kbName(id: string): string {
     return knowledge.bases.find((b) => b.id === id)?.name || id
   }
+
+  /* ---- 节点索引：替代模板 / 边过滤里的 O(N) find ---- */
+  const nodeById = computed<Record<string, GraphNode>>(() => {
+    const m: Record<string, GraphNode> = {}
+    for (const n of graph.value?.nodes || []) m[n.id] = n
+    return m
+  })
   function nodeLabel(id: string): string {
-    return graph.value?.nodes.find((n) => n.id === id)?.label || id
+    return nodeById.value[id]?.label || id
   }
 
   const degree = computed<Record<string, number>>(() => {
@@ -103,22 +129,7 @@ export function useGraphData() {
   /* ---- 统计面板派生数据 ---- */
   const stats = computed(() => graph.value?.stats)
 
-  const docNodeCount = computed(() => {
-    const tc = graph.value?.stats.typeCounts || {}
-    return Object.entries(tc).filter(([k]) => k.includes('文档') || k.includes('doc')).reduce((s, [, v]) => s + v, 0) || graph.value?.nodes.length || 0
-  })
-  const conceptCount = computed(() => {
-    const tc = graph.value?.stats.typeCounts || {}
-    return Object.entries(tc).filter(([k]) => k.includes('知识') || k.includes('概念')).reduce((s, [, v]) => s + v, 0) || 0
-  })
-  const tagCount = computed(() => {
-    const tc = graph.value?.stats.typeCounts || {}
-    return Object.entries(tc).filter(([k]) => k.includes('标签')).reduce((s, [, v]) => s + v, 0) || 0
-  })
-  const bizCatCount = computed(() => {
-    const tc = graph.value?.stats.typeCounts || {}
-    return Object.entries(tc).filter(([k]) => k.includes('业务') || k.includes('分类')).reduce((s, [, v]) => s + v, 0) || 0
-  })
+  // 类型分布条（typeCounts 来自后端按过滤全集的 GROUP BY 聚合）
   const typeBars = computed(() => {
     const tc = graph.value?.stats.typeCounts || {}
     const entries = Object.entries(tc).sort((a, b) => b[1] - a[1])
@@ -126,14 +137,26 @@ export function useGraphData() {
     return entries.map(([label, count]) => ({ label, count, pct: Math.round((count / max) * 100) }))
   })
 
-  const selectedNode = computed(() => graph.value?.nodes.find((n) => n.id === selectedId.value) || null)
+  // 渲染采样图谱的密度指标
+  const maxDegree = computed(() => {
+    let m = 0
+    for (const v of Object.values(degree.value)) if (v > m) m = v
+    return m
+  })
+  const avgDegree = computed(() => {
+    const n = graph.value?.nodes.length || 0
+    const e = graph.value?.edges.length || 0
+    return n ? Math.round(((2 * e) / n) * 10) / 10 : 0
+  })
+
+  const selectedNode = computed(() => (selectedId.value ? nodeById.value[selectedId.value] || null : null))
   const selectedNeighbors = computed<string[]>(() => {
     const id = selectedId.value
     if (!id) return []
     const out: string[] = []
     for (const e of graph.value?.edges || []) {
-      if (e.source === id) out.push(graph.value!.nodes.find((n) => n.id === e.target)?.label || e.target)
-      else if (e.target === id) out.push(graph.value!.nodes.find((n) => n.id === e.source)?.label || e.source)
+      if (e.source === id) out.push(nodeById.value[e.target]?.label || e.target)
+      else if (e.target === id) out.push(nodeById.value[e.source]?.label || e.source)
     }
     return out
   })
@@ -145,8 +168,6 @@ export function useGraphData() {
     { key: 'kb', title: '知识库' },
     { key: 'degree', title: '度数' },
   ]
-  const nodePage = ref(1)
-  const nodePageSize = ref(15)
   const pagedNodes = computed(() => {
     const nodes = graph.value?.nodes || []
     const start = (nodePage.value - 1) * nodePageSize.value
@@ -154,7 +175,6 @@ export function useGraphData() {
   })
 
   /* ---- 关系检索 ---- */
-  const relTerm = ref('')
   const filteredEdges = computed(() => {
     const t = relTerm.value.trim().toLowerCase()
     const edges = graph.value?.edges || []
@@ -166,11 +186,14 @@ export function useGraphData() {
         nodeLabel(e.target).toLowerCase().includes(t),
     )
   })
+  // 关系列表前端分页（同节点表格模式）：大图谱下避免全量渲染长列表卡顿
+  const pagedEdges = computed(() => {
+    const start = (relPage.value - 1) * relPageSize.value
+    return filteredEdges.value.slice(start, start + relPageSize.value)
+  })
+  // 检索词变化时回到第一页，避免停在超出结果集的页码
+  watch(relTerm, () => { relPage.value = 1 })
 
-  /* ---- 画布平移/缩放状态（被全局视图的交互处理器变更）---- */
-  const tx = ref(0)
-  const ty = ref(0)
-  const k = ref(1)
   function resetView() {
     tx.value = 0
     ty.value = 0
@@ -186,6 +209,8 @@ export function useGraphData() {
       graph.value = data
       selectedId.value = null
       hoveredId.value = null
+      nodePage.value = 1
+      relPage.value = 1
       resetView()
       // 无类型过滤时，用真实节点类型刷新下拉选项
       if (!gFilterType.value && data.nodes) {
@@ -198,8 +223,9 @@ export function useGraphData() {
         ]
       }
       await loadHotRecent()
-    } catch (e: any) {
-      errorMsg.value = e?.message || String(e)
+      fetched = true
+    } catch (e: unknown) {
+      errorMsg.value = errMsg(e)
       toast.error(`加载图谱失败：${errorMsg.value}`)
     } finally {
       loading.value = false
@@ -220,12 +246,13 @@ export function useGraphData() {
   }
 
   function onExport() {
-    exportGraph('json', selectedKb.value).catch((e: any) => {
-      toast.error(`导出失败：${e?.message || e}`)
+    exportGraph('json', selectedKb.value).catch((e: unknown) => {
+      toast.error(`导出失败：${errMsg(e)}`)
     })
   }
 
   function resetAll() {
+    const filtersDirty = gFilterType.value !== '' || gFilterBiz.value !== '' || gFilterTime.value !== ''
     gFilterType.value = ''
     gFilterBiz.value = ''
     gFilterTime.value = ''
@@ -233,12 +260,14 @@ export function useGraphData() {
     selectedId.value = null
     hoveredId.value = null
     resetView()
-    void fetchGraph()
+    // 筛选本来为空时 watch 不会触发，需手动拉取；否则交给 watch，避免双重请求
+    if (!filtersDirty) void fetchGraph()
   }
 
   onMounted(async () => {
     if (!knowledge.loaded) await knowledge.load().catch(() => {})
-    await fetchGraph()
+    // 共享状态只在首次挂载拉取；tab 切换直接复用（「搜索」按钮 / 筛选可强制刷新）
+    if (!fetched && !loading.value) await fetchGraph()
   })
 
   // 三个筛选下拉变化 → 重新拉图（后端真实过滤，节点集合随之变化）
@@ -252,11 +281,11 @@ export function useGraphData() {
     gFilterType, gFilterBiz, gFilterTime, allTypeOptions, bizCatOpts, nodeTypeOpts, timeRangeOpts,
     graphFilter, hotNodes, recentNodes,
     // 派生
-    kbColor, nodeColor, kbName, nodeLabel, degree, adjacency, presentKbs,
-    stats, docNodeCount, conceptCount, tagCount, bizCatCount, typeBars,
+    kbColor, nodeColor, kbName, nodeById, nodeLabel, degree, adjacency, presentKbs,
+    stats, typeBars, maxDegree, avgDegree,
     selectedNode, selectedNeighbors,
     nodeColumns, nodePage, nodePageSize, pagedNodes,
-    relTerm, filteredEdges,
+    relTerm, filteredEdges, relPage, relPageSize, pagedEdges,
     // 画布
     tx, ty, k, resetView,
     // 动作

@@ -157,6 +157,7 @@ export interface SessionMessage {
   citations?: number[] | null
   sources?: SourceItem[] | null
   attachments?: ChatAttachment[] | null
+  thinkingSteps?: ThinkingStep[] | null  // Agentic RAG 决策链（历史回显）
 }
 
 export interface SessionDetail {
@@ -348,6 +349,8 @@ export type SSEEvent =
   | { event: 'sources'; data: SourceItem[] }
   | { event: 'delta'; data: { content: string } }
   | { event: 'done'; data: { messageId: string; citations: number[]; sessionId: string } }
+  | { event: 'follow_ups'; data: { questions: string[]; sessionTitle?: string | null } }
+  | { event: 'ping'; data: unknown }
   | { event: 'error'; data: { message: string } }
   | { event: 'message'; data: unknown }
 

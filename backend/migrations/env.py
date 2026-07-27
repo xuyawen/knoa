@@ -32,7 +32,7 @@ def get_url() -> str:
 if config.config_file_name is not None:
     try:
         fileConfig(config.config_file_name)
-    except Exception:
+    except Exception:  # noqa: BLE001  (best-effort: logging config failure must not block migrations)
         pass
 
 target_metadata = Base.metadata

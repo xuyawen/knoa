@@ -5,6 +5,7 @@ import { ref, onMounted } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useToastStore } from '@/stores/toast'
+import { errMsg } from '@/utils/errmsg'
 import { getMemories, deleteMemory, clearMemories } from '@/api'
 import type { MemoryItem } from '@/types/api'
 
@@ -26,6 +27,16 @@ const TYPE_LABEL: Record<string, string> = {
 function typeLabel(t: string | null) {
   return (t && TYPE_LABEL[t]) || t || '其他'
 }
+// 类型色调用现有 accent token，避免写死颜色
+const TYPE_TONE: Record<string, string> = {
+  user_profile: 'brand',
+  preference: 'violet',
+  fact: 'green',
+  feedback: 'amber',
+}
+function typeTone(t: string | null) {
+  return (t && TYPE_TONE[t]) || 'brand'
+}
 
 function fmtTime(s: string | null) {
   if (!s) return '—'
@@ -39,9 +50,9 @@ async function loadMemories() {
   loading.value = true
   try {
     memories.value = await getMemories()
-  } catch (e: any) {
+  } catch (e: unknown) {
     memories.value = []
-    toast.error(`加载记忆失败：${e?.message || e}`)
+    toast.error(`加载记忆失败：${errMsg(e)}`)
   } finally {
     loading.value = false
   }
@@ -54,8 +65,8 @@ async function confirmDelete() {
     await deleteMemory(target.id)
     memories.value = memories.value.filter((m) => m.id !== target.id)
     toast.success('已删除该条记忆')
-  } catch (e: any) {
-    toast.error(`删除失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`删除失败：${errMsg(e)}`)
   } finally {
     deleteTarget.value = null
   }
@@ -68,8 +79,8 @@ async function confirmClear() {
     const n = await clearMemories()
     memories.value = []
     toast.success(`已清空 ${n} 条记忆`)
-  } catch (e: any) {
-    toast.error(`清空失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`清空失败：${errMsg(e)}`)
   } finally {
     clearing.value = false
     showClearConfirm.value = false
@@ -80,10 +91,13 @@ onMounted(loadMemories)
 </script>
 
 <template>
-  <div class="mem-page">
+  <div class="mem-page fade-up">
     <div class="mem-head">
       <div>
-        <h1 class="mem-title">记忆管理</h1>
+        <h1 class="mem-title">
+          记忆管理
+          <span v-if="!loading && memories.length" class="mem-count">{{ memories.length }} 条</span>
+        </h1>
         <p class="mem-sub">系统会在问答过程中自动学习关于你的长期记忆（用户画像、偏好、关键事实等），你可以在此查看或遗忘。</p>
       </div>
       <button
@@ -106,7 +120,7 @@ onMounted(loadMemories)
       <ul v-else class="mem-list">
         <li v-for="m in memories" :key="m.id" class="mem-item">
           <div class="mem-item-main">
-            <span class="mem-type">{{ typeLabel(m.type) }}</span>
+            <span class="mem-type" :class="`tt-${typeTone(m.type)}`">{{ typeLabel(m.type) }}</span>
             <p class="mem-content">{{ m.content }}</p>
             <span class="mem-time">{{ fmtTime(m.createdAt) }}</span>
           </div>
@@ -147,9 +161,19 @@ onMounted(loadMemories)
   gap: 16px;
   margin-bottom: 16px;
 }
-.mem-title { font-size: 20px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px; }
+.mem-title { font-size: 20px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px; display: flex; align-items: center; gap: 10px; }
+.mem-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-variant-numeric: tabular-nums;
+}
 .mem-sub { margin: 0; font-size: 13px; color: var(--text-tertiary); line-height: 1.6; max-width: 640px; }
-.mem-body { padding: 8px 4px; }
+.mem-body { padding: 6px; }
 .mem-hint, .mem-empty {
   display: flex;
   flex-direction: column;
@@ -160,26 +184,29 @@ onMounted(loadMemories)
   color: var(--text-tertiary);
   font-size: 13px;
 }
-.mem-list { list-style: none; margin: 0; padding: 0; }
+.mem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .mem-item {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 14px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  transition: background var(--dur-fast) var(--ease-out);
 }
-.mem-item:last-child { border-bottom: none; }
+.mem-item:hover { background: var(--bg-hover); }
 .mem-item-main { flex: 1; min-width: 0; }
 .mem-type {
   display: inline-block;
   font-size: 11px;
   font-weight: 600;
-  color: var(--brand);
-  background: var(--brand-soft);
   padding: 2px 8px;
   border-radius: 999px;
   margin-bottom: 6px;
 }
+.tt-brand { color: var(--brand); background: var(--brand-soft); }
+.tt-violet { color: var(--accent-violet); background: var(--accent-violet-soft); }
+.tt-green { color: var(--accent-green); background: var(--accent-green-soft); }
+.tt-amber { color: var(--accent-amber); background: var(--accent-amber-soft); }
 .mem-content {
   margin: 0 0 6px;
   font-size: 14px;
@@ -189,4 +216,21 @@ onMounted(loadMemories)
   word-break: break-word;
 }
 .mem-time { font-size: 12px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+
+/* 删除按钮（本页 scoped 自持，默认静默、悬停变危险色） */
+.action-btn {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.action-btn:hover { color: var(--danger); background: var(--danger-soft); }
 </style>

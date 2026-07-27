@@ -18,7 +18,6 @@ get_kb_permission_level / get_knowledge_bases）因每个库都至少有一条�
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
 # revision identifiers, used by Alembic.

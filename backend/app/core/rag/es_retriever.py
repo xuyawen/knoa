@@ -21,28 +21,40 @@ logger = logging.getLogger("knoa.es")
 
 
 class ESRetriever:
-    def __init__(self, embedder: EmbeddingModel, es: ESClient, rrf_k: int = 60):
+    def __init__(
+        self,
+        embedder: EmbeddingModel,
+        es: ESClient,
+        rrf_k: int = 60,
+        fallback_kb_ids: "list[str] | None" = None,
+    ):
         self.embedder = embedder
         self.es = es
         self.rrf_k = rrf_k
+        # 「全部知识库」模式：agent 传入的 kb_id 为 None 时，跨用户可访问的
+        # 全部库索引检索（缺索引的库被 ignore_unavailable 静默跳过）
+        self.fallback_kb_ids = fallback_kb_ids
 
     async def retrieve(
         self, question: str, kb_id: str | None = None, top_k: int = 5
     ) -> list[dict]:
-        # 没指定库 / ES 没开 / 该库索引还不存在 → 直接空，上层会回退 pgvector
-        if not kb_id or not self.es.enabled:
+        # 没指定库且无回退范围 / ES 没开 → 直接空，上层会回退 pgvector
+        target: "str | list[str] | None" = kb_id or self.fallback_kb_ids
+        if not target or not self.es.enabled:
             return []
-        if not await self.es.index_exists(kb_id):
+        # 单库快路：索引不存在直接空（上层回退）；多库不做逐库探测，
+        # 由 ES ignore_unavailable 统一跳过缺失索引
+        if isinstance(target, str) and not await self.es.index_exists(target):
             return []
 
         # 1. 向量路：query 向量化 → ES kNN（cosine）
         query_vec = await self.embedder.embed_query(question)
         knn_hits = await self.es.knn_search(
-            kb_id, query_vec, top_k * 2, num_candidates=max(100, top_k * 10)
+            target, query_vec, top_k * 2, num_candidates=max(100, top_k * 10)
         )
 
         # 2. 关键词路：ik_smart 分词后 BM25
-        bm25_hits = await self.es.bm25_search(kb_id, question, top_k * 2)
+        bm25_hits = await self.es.bm25_search(target, question, top_k * 2)
 
         # 3. RRF 融合（只看排名，不看原始分数）
         rrf: dict[str, float] = {}
@@ -53,9 +65,11 @@ class ESRetriever:
             rrf[cid] = rrf.get(cid, 0.0) + 1.0 / (self.rrf_k + rank + 1)
             if cid not in meta:
                 src = hit.get("_source", {})
+                # chunk 入库时都写了 kb_id 字段；多库模式下回退用单库名
+                fallback_kb = target if isinstance(target, str) else ""
                 meta[cid] = {
                     "content": src.get("content", ""),
-                    "kb_id": src.get("kb_id", kb_id),
+                    "kb_id": src.get("kb_id") or fallback_kb,
                     "doc_id": src.get("doc_id", ""),
                     "doc_title": src.get("doc_title", "未知文档"),
                     "distance": distance,
@@ -66,9 +80,10 @@ class ESRetriever:
             score = float(hit.get("_score", 0.0))
             distance = max(0.0, 1.0 - score)
             add(hit, rank, distance)
-        # 关键词路：BM25 分数量纲差异大，仅用排名，distance 置 0
+        # 关键词路：BM25 分数量纲差异大，仅用排名；distance 置 1.0 使
+        # confidence=0，前端对 0 值只显示「相关」，不会误报「100% 相关」
         for rank, hit in enumerate(bm25_hits):
-            add(hit, rank, 0.0)
+            add(hit, rank, 1.0)
 
         sorted_ids = sorted(rrf, key=rrf.get, reverse=True)[:top_k]
         results = []

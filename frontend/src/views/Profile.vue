@@ -41,10 +41,10 @@ onMounted(async () => {
 
 /* ---------- 统计 ---------- */
 const stats = computed(() => [
-  { label: '贡献文档', value: '—' }, // ponytail: 后端暂无用户贡献文档 API，先占位
-  { label: '提问', value: sessionsData.value?.total ?? 0 },
-  { label: '采纳回答', value: '—' }, // ponytail: 后端暂无采纳统计 API，先占位
-  { label: '加入知识库', value: kbData.value?.total ?? 0 },
+  { label: '贡献文档', value: '—', icon: 'doc', tone: 'blue' }, // ponytail: 后端暂无用户贡献文档 API，先占位
+  { label: '提问', value: sessionsData.value?.total ?? 0, icon: 'chat', tone: 'violet' },
+  { label: '采纳回答', value: '—', icon: 'check', tone: 'green' }, // ponytail: 后端暂无采纳统计 API，先占位
+  { label: '加入知识库', value: kbData.value?.total ?? 0, icon: 'folder', tone: 'amber' },
 ])
 
 /* ---------- 我的知识库 ---------- */
@@ -67,6 +67,7 @@ const myQuestions = computed(() =>
   (sessionsData.value?.items ?? []).slice(0, 3).map((s) => ({
     title: s.title || '未命名问题',
     meta: s.msgCount > 1 ? `${s.msgCount - 1} 个来源 · 已回答` : '新提问',
+    answered: s.msgCount > 1,
   })),
 )
 
@@ -91,7 +92,7 @@ const showEdit = ref(false)
         <div class="hero-info">
           <h1 class="hero-name">{{ displayName }}</h1>
           <p class="hero-meta">
-            <span>{{ roleLabel }}</span>
+            <span class="hero-role">{{ roleLabel }}</span>
             <span class="dot" />
             <span>{{ department }}</span>
           </p>
@@ -105,8 +106,11 @@ const showEdit = ref(false)
 
     <!-- ====== 统计行 ====== -->
     <section class="stats-row">
-      <div v-for="s in stats" :key="s.label" class="stat-card card" :class="{ dim: s.value === '—' }">
-        <span class="stat-num">{{ s.value }}</span>
+      <div v-for="s in stats" :key="s.label" class="stat-card card" :class="`tone-${s.tone}`">
+        <div class="stat-top">
+          <span class="stat-num" :class="{ dim: s.value === '—' }">{{ s.value }}</span>
+          <span class="stat-icon"><Icon :name="s.icon" :size="16" /></span>
+        </div>
         <span class="stat-label">{{ s.label }}</span>
       </div>
     </section>
@@ -116,7 +120,10 @@ const showEdit = ref(false)
       <div class="content-left">
         <!-- 我的知识库 -->
         <section class="section-card card">
-          <h2 class="section-title">我的知识库</h2>
+          <div class="section-head">
+            <h2 class="section-title"><Icon name="folder" :size="15" class="sec-ico" /> 我的知识库</h2>
+            <span class="section-count">{{ kbData?.total ?? 0 }}</span>
+          </div>
           <div v-if="myKBs.length" class="kb-list">
             <div v-for="kb in myKBs" :key="kb.id" class="kb-item">
               <div class="kb-icon" :style="{ background: kb.color }">
@@ -139,7 +146,10 @@ const showEdit = ref(false)
 
         <!-- 我的近期贡献 -->
         <section class="section-card card">
-          <h2 class="section-title">我的近期贡献</h2>
+          <div class="section-head">
+            <h2 class="section-title"><Icon name="pen-line" :size="15" class="sec-ico" /> 我的近期贡献</h2>
+            <span class="section-count">{{ recentContribs.length }}</span>
+          </div>
           <div class="contrib-list">
             <div v-for="(c, i) in recentContribs" :key="i" class="contrib-item">
               <p class="contrib-title">{{ c.title }}</p>
@@ -152,11 +162,14 @@ const showEdit = ref(false)
       <div class="content-right">
         <!-- 我的问答 -->
         <section class="section-card card">
-          <h2 class="section-title">我的问答</h2>
+          <div class="section-head">
+            <h2 class="section-title"><Icon name="chat" :size="15" class="sec-ico" /> 我的问答</h2>
+            <span class="section-count">{{ sessionsData?.total ?? 0 }}</span>
+          </div>
           <div v-if="myQuestions.length" class="qa-list">
             <div v-for="(q, i) in myQuestions" :key="i" class="qa-item">
               <p class="qa-title">{{ q.title }}</p>
-              <p class="qa-meta">{{ q.meta }}</p>
+              <p class="qa-meta" :class="{ answered: q.answered }">{{ q.meta }}</p>
             </div>
           </div>
           <div v-else class="empty-state">
@@ -185,8 +198,9 @@ const showEdit = ref(false)
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 20px;
+  padding: 22px;
   margin-bottom: 18px;
+  background: linear-gradient(135deg, var(--brand-soft) 0%, var(--bg-surface) 58%);
 }
 .hero-main {
   display: flex;
@@ -201,7 +215,7 @@ const showEdit = ref(false)
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: var(--shadow-float);
+  box-shadow: 0 0 0 4px var(--bg-surface), 0 0 0 6px var(--brand-ring), var(--shadow-float);
 }
 .ha-text {
   font-size: 32px;
@@ -227,6 +241,15 @@ const showEdit = ref(false)
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.hero-role {
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand);
+  background: var(--bg-surface);
+  box-shadow: inset 0 0 0 1px var(--brand-ring);
 }
 .hero-meta .dot {
   width: 4px;
@@ -256,16 +279,37 @@ const showEdit = ref(false)
 .stat-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 20px;
+  gap: 10px;
+  padding: 18px 20px;
+}
+.stat-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
 .stat-num {
   font-size: 28px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  line-height: 1.1;
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
-.stat-card.dim .stat-num { color: var(--text-tertiary); }
+.stat-num.dim { color: var(--text-tertiary); }
+.stat-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.tone-blue .stat-icon { color: var(--accent-blue); background: var(--accent-blue-soft); }
+.tone-violet .stat-icon { color: var(--accent-violet); background: var(--accent-violet-soft); }
+.tone-green .stat-icon { color: var(--accent-green); background: var(--accent-green-soft); }
+.tone-amber .stat-icon { color: var(--accent-amber); background: var(--accent-amber-soft); }
 .stat-label {
   font-size: 13px;
   color: var(--text-tertiary);
@@ -287,12 +331,32 @@ const showEdit = ref(false)
 .section-card {
   padding: 20px;
 }
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+}
 .section-title {
-  margin: 0 0 18px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.01em;
+}
+.sec-ico { color: var(--brand); flex-shrink: 0; }
+.section-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  background: var(--bg-subtle);
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ====== 知识库列表 ====== */
@@ -386,7 +450,7 @@ const showEdit = ref(false)
   font-size: 12.5px;
   color: var(--text-tertiary);
 }
-.qa-meta { color: var(--success); }
+.qa-meta.answered { color: var(--success); }
 
 /* ====== 空态 ====== */
 .empty-state {

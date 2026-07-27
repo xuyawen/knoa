@@ -7,6 +7,7 @@ import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import { useToastStore } from '@/stores/toast'
+import { errMsg } from '@/utils/errmsg'
 import { getDashboardMetrics, getDocCategory, getTrend, getOperations, getDocumentById } from '@/api'
 import { useTrendChart } from '@/composables/useTrendChart'
 import '@/assets/dashboard.css'
@@ -127,8 +128,8 @@ async function openPreview(docId: string) {
     const result = await getDocumentById(docId)
     previewDoc.value = result
     showPreview.value = true
-  } catch (e: any) {
-    toast.error(`加载文档失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`加载文档失败：${errMsg(e)}`)
   } finally {
     previewLoading.value = false
   }
@@ -175,7 +176,6 @@ watch(trendRange, (r) => { void loadTrend(r) })
       <div class="chart-panel card">
         <div class="panel-head">
           <span class="panel-title">访问趋势</span>
-          <Icon name="info" :size="13" class="phint" />
         </div>
         <div class="trend-tabs">
           <button v-for="r in [{k:'today',l:'今日'},{k:'week',l:'近7日'},{k:'month',l:'近30日'}]"
@@ -212,7 +212,6 @@ watch(trendRange, (r) => { void loadTrend(r) })
       <div class="pie-panel card">
         <div class="panel-head">
           <span class="panel-title">文档分类占比</span>
-          <Icon name="info" :size="13" class="phint" />
         </div>
         <div v-if="catTotal === 0" class="empty-hint">暂无文档</div>
         <div v-else class="cat-body">

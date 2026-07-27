@@ -4,13 +4,15 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
-import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
 import DepartmentTree from '@/components/DepartmentTree.vue'
+import KbMembersModal from '@/components/documents/KbMembersModal.vue'
+import DocPreviewModal from '@/components/documents/DocPreviewModal.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
+import { errMsg } from '@/utils/errmsg'
 import { useAuthStore } from '@/stores/auth'
 import {
   getDocuments,
@@ -18,25 +20,18 @@ import {
   approveDocument,
   rejectDocument,
   deleteDocument,
-  aiReviewDocument,
   getDocument,
   getDepartments,
   getDocumentTags,
   getDocumentTask,
   getDocumentTasks,
-  getKbMembers,
-  setKbMembers,
 } from '@/api'
-import { getUserList } from '@/api/auth'
 import { uploadToOss } from '@/utils/oss'
 import type {
   DocumentItem,
   DocumentDetail,
-  AIReview,
   DepartmentNode,
   DocumentTaskOut,
-  KBMember,
-  UserOut,
 } from '@/types/api'
 
 const knowledge = useKnowledgeStore()
@@ -51,94 +46,15 @@ const selectedKbName = computed(
   () => knowledge.bases.find((b) => b.id === selectedKb.value)?.name || '',
 )
 
-/* ---------- KB 成员管理（库级授权 / 严格隔离下的共享入口）---------- */
+/* ---------- KB 成员管理（弹窗逻辑在 KbMembersModal）---------- */
 const showMemberModal = ref(false)
-const memberKbId = ref('')
-const memberRows = ref<KBMember[]>([])
-const allUsers = ref<UserOut[]>([])
-const memberLoading = ref(false)
-const memberSaving = ref(false)
-const newUserId = ref<string>('')
-const newUserLevel = ref<'view' | 'edit' | 'admin'>('view')
 
-const levelOptions = [
-  { label: '可查看', value: 'view' },
-  { label: '可编辑', value: 'edit' },
-  { label: '管理员', value: 'admin' },
-]
-
-const availableUserOptions = computed(() => {
-  const used = new Set(memberRows.value.map((m) => m.userId))
-  return allUsers.value
-    .filter((u) => !used.has(u.id))
-    .map((u) => ({ label: `${u.displayName || u.username}（@${u.username}）`, value: u.id }))
-})
-
-async function openManageMembers() {
+function openManageMembers() {
   if (!selectedKb.value) {
     toast.warning('请先选择知识库')
     return
   }
-  memberKbId.value = selectedKb.value
   showMemberModal.value = true
-  memberLoading.value = true
-  newUserId.value = ''
-  newUserLevel.value = 'view'
-  try {
-    const [members, users] = await Promise.all([
-      getKbMembers(memberKbId.value),
-      getUserList(1, 200),
-    ])
-    memberRows.value = members
-    allUsers.value = users.items
-  } catch (e: any) {
-    toast.error(`加载成员失败：${e?.message || e}`)
-    showMemberModal.value = false
-  } finally {
-    memberLoading.value = false
-  }
-}
-
-function addMember() {
-  const u = allUsers.value.find((x) => x.id === newUserId.value)
-  if (!u) return
-  if (memberRows.value.some((m) => m.userId === u.id)) {
-    toast.warning('该用户已在成员列表中')
-    return
-  }
-  memberRows.value.push({
-    userId: u.id,
-    username: u.username,
-    displayName: u.displayName,
-    level: newUserLevel.value,
-  })
-  newUserId.value = ''
-  newUserLevel.value = 'view'
-}
-
-function removeMember(userId: string) {
-  memberRows.value = memberRows.value.filter((m) => m.userId !== userId)
-}
-
-async function saveMembers() {
-  const admins = memberRows.value.filter((m) => m.level === 'admin')
-  if (!admins.length) {
-    toast.error('至少保留一名管理员，否则知识库将无法管理')
-    return
-  }
-  memberSaving.value = true
-  try {
-    const updated = await setKbMembers(memberKbId.value, {
-      members: memberRows.value.map((m) => ({ userId: m.userId, level: m.level })),
-    })
-    memberRows.value = updated
-    toast.success('成员权限已保存')
-    showMemberModal.value = false
-  } catch (e: any) {
-    toast.error(`保存失败：${e?.message || e}`)
-  } finally {
-    memberSaving.value = false
-  }
 }
 
 const props = defineProps<{ scope?: string }>()
@@ -237,11 +153,9 @@ const docColumns = [
 const currentPage = ref(1)
 const pageSize = ref(10)
 
-// 弹窗
+// 弹窗（AI 审核状态内聚在 DocPreviewModal）
 const previewDoc = ref<DocumentDetail | null>(null)
 const previewLoading = ref(false)
-const aiReview = ref<AIReview | null>(null)
-const aiReviewLoading = ref(false)
 
 // 路由分区（我的/公共/部门/归档）→ 后端查询参数；下拉 scope 可进一步收窄。
 // ponytail: 所有过滤下推后端，前端不再做客户端过滤（旧 scopedDocs 已删）。
@@ -273,10 +187,10 @@ async function loadDocs() {
     const res = await getDocuments(selectedKb.value, buildQuery() as any)
     docs.value = res.items
     total.value = res.total
-  } catch (e: any) {
+  } catch (e: unknown) {
     docs.value = []
     total.value = 0
-    toast.error(`加载文档失败：${e?.message || e}`)
+    toast.error(`加载文档失败：${errMsg(e)}`)
   } finally {
     loading.value = false
   }
@@ -326,14 +240,35 @@ function onDocClickOutside(e: MouseEvent) {
   if (el && !el.contains(e.target as Node)) deptPopoverOpen.value = false
 }
 
-// 组件卸载时移除全局点击监听，避免 popover 打开时切走页面残留监听导致内存泄漏 / 报错
-onBeforeUnmount(() => document.removeEventListener('click', onDocClickOutside))
+// 组件存活标志 + 轮询 timer 句柄：卸载后中止一切异步定时任务，
+// 避免 pollTask 递归 setTimeout 在后台持续请求（内存泄漏 + 无效流量）。
+let alive = true
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>()
+
+function trackTimeout(fn: () => void, ms: number) {
+  const id = setTimeout(() => {
+    pendingTimers.delete(id)
+    if (alive) fn()
+  }, ms)
+  pendingTimers.add(id)
+  return id
+}
+
+// 组件卸载时移除全局点击监听，避免 popover 打开时切走页面残留监听导致内存泄漏 / 报错；
+// 同时中止搜索防抖与上传轮询的全部定时器。
+onBeforeUnmount(() => {
+  alive = false
+  document.removeEventListener('click', onDocClickOutside)
+  if (searchTimer) clearTimeout(searchTimer)
+  for (const id of pendingTimers) clearTimeout(id)
+  pendingTimers.clear()
+})
 
 /* ---------- P5：部门 / 标签 数据 ---------- */
 async function loadDepartments() {
   try {
     departments.value = await getDepartments()
-  } catch (e: any) {
+  } catch (e: unknown) {
     departments.value = []
   }
 }
@@ -345,7 +280,7 @@ async function loadTags() {
   try {
     const tags = await getDocumentTags(selectedKb.value)
     tagOptions.value = [{ label: '全部标签', value: '' }, ...tags.map((t) => ({ label: t, value: t }))]
-  } catch (e: any) {
+  } catch (e: unknown) {
     tagOptions.value = [{ label: '全部标签', value: '' }]
   }
 }
@@ -449,8 +384,8 @@ async function onUploadFiles(e: Event) {
       try {
         const { url } = await uploadToOss(f, `uploads/docs/${selectedKb.value}`)
         doc = await uploadDocument(selectedKb.value, f.name, { fileUrl: url })
-      } catch (ossErr: any) {
-        const msg = String(ossErr?.message || '')
+      } catch (ossErr: unknown) {
+        const msg = errMsg(ossErr, '')
         if (msg.includes('OSS 未启用')) {
           const b64 = await readFileB64(f)
           doc = await uploadDocument(selectedKb.value, f.name, { contentB64: b64 })
@@ -469,19 +404,20 @@ async function onUploadFiles(e: Event) {
         entry.status = 'done'
         scheduleRemove(entry)
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       entry.status = 'error'
-      entry.message = err?.message || String(err)
-      toast.error(`上传失败：${f.name} - ${err?.message || err}`)
+      entry.message = errMsg(err)
+      toast.error(`上传失败：${f.name} - ${errMsg(err)}`)
       scheduleRemove(entry)
     }
   }
   input.value = ''
 }
 
-// 轮询单个文档任务的真实进度，平滑补间到目标值
+// 轮询单个文档任务的真实进度，平滑补间到目标值（组件卸载后自动停止）
 async function pollTask(entry: UploadTask, taskId: string) {
   const tick = async () => {
+    if (!alive) return
     let t: DocumentTaskOut
     try {
       t = await getDocumentTask(taskId)
@@ -497,7 +433,7 @@ async function pollTask(entry: UploadTask, taskId: string) {
       await loadDocs()
       return
     }
-    setTimeout(tick, 700)
+    trackTimeout(() => { void tick() }, 700)
   }
   await tick()
 }
@@ -528,8 +464,8 @@ async function onApprove(doc: DocumentItem) {
     await approveDocument(selectedKb.value, doc.id)
     toast.success(`已通过审核：${doc.title}`)
     await loadDocs()
-  } catch (e: any) {
-    toast.error(`操作失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`操作失败：${errMsg(e)}`)
   }
 }
 
@@ -539,8 +475,8 @@ async function onReject(doc: DocumentItem) {
     await rejectDocument(selectedKb.value, doc.id)
     toast.success(`已驳回：${doc.title}`)
     await loadDocs()
-  } catch (e: any) {
-    toast.error(`操作失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`操作失败：${errMsg(e)}`)
   }
 }
 
@@ -557,8 +493,8 @@ async function confirmDelete() {
     await deleteDocument(selectedKb.value, doc.id)
     toast.success(`已删除：${doc.title}`)
     await loadDocs()
-  } catch (e: any) {
-    toast.error(`删除失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`删除失败：${errMsg(e)}`)
   } finally {
     deleting.value = false
   }
@@ -569,27 +505,12 @@ async function onPreview(doc: DocumentItem) {
   if (!selectedKb.value) return
   previewLoading.value = true
   previewDoc.value = null
-  aiReview.value = null
   try {
     previewDoc.value = await getDocument(selectedKb.value, doc.id)
-  } catch (e: any) {
-    toast.error(`预览失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`预览失败：${errMsg(e)}`)
   } finally {
     previewLoading.value = false
-  }
-}
-
-/* ---------- AI 审核（在预览弹窗右侧展示） ---------- */
-async function onAiReview(doc: { id: string }) {
-  if (!selectedKb.value) return
-  aiReviewLoading.value = true
-  aiReview.value = null
-  try {
-    aiReview.value = await aiReviewDocument(selectedKb.value, doc.id)
-  } catch (e: any) {
-    toast.error(`AI 审核失败：${e?.message || e}`)
-  } finally {
-    aiReviewLoading.value = false
   }
 }
 
@@ -631,8 +552,8 @@ async function confirmBatchDelete() {
     try {
       await deleteDocument(selectedKb.value, id)
       ok++
-    } catch (e: any) {
-      toast.error(`删除失败：${e?.message || e}`)
+    } catch (e: unknown) {
+      toast.error(`删除失败：${errMsg(e)}`)
     }
   }
   deleting.value = false
@@ -664,7 +585,6 @@ async function confirmBatchDelete() {
         <button
           v-if="auth.isAdmin && selectedKb"
           class="btn btn-ghost btn-sm"
-          :disabled="memberLoading"
           title="管理该知识库可访问的成员"
           @click="openManageMembers"
         >
@@ -843,68 +763,13 @@ async function confirmBatchDelete() {
       @update:page-size="currentPage = 1; loadDocs()"
     />
 
-    <!-- ====== 预览弹窗（含 AI 辅助审核） ====== -->
-    <AppModal :show="!!previewDoc" title="文档预览" wide @close="previewDoc = null">
-      <div v-if="previewLoading" class="modal-hint">加载中…</div>
-      <template v-else-if="previewDoc">
-        <div class="preview-toolbar">
-          <button
-            class="btn btn-primary btn-sm"
-            :disabled="aiReviewLoading"
-            @click="onAiReview(previewDoc)"
-          >
-            <span v-if="aiReviewLoading" class="spinner sm"></span>
-            {{ aiReviewLoading ? '分析中…' : (aiReview ? '重新审核' : 'AI 审核') }}
-          </button>
-        </div>
-        <div class="preview-split">
-          <!-- 左：文档内容 -->
-          <div class="preview-left">
-            <div class="preview-meta">
-              <span class="type-text">{{ previewDoc.type }}</span>
-              <span class="col-time">{{ fmtTime(previewDoc.updatedAt) }}</span>
-              <span class="status-badge mini" :class="statusType(previewDoc.status)">{{ previewDoc.status }}</span>
-            </div>
-            <pre class="preview-body">{{ previewDoc.contentMd || '（无内容）' }}</pre>
-          </div>
-          <!-- 右：AI 审核建议 -->
-          <aside class="preview-right">
-            <div class="ai-panel-head">AI 辅助审核</div>
-            <div v-if="aiReviewLoading" class="ai-loading">
-              <span class="spinner"></span>
-              正在调用大模型分析文档，请稍候…
-            </div>
-            <template v-else-if="aiReview">
-              <div class="ai-verdict" :class="aiReview.verdict">
-                建议：{{ aiReview.verdict === 'approve' ? '通过' : aiReview.verdict === 'reject' ? '驳回' : '人工复核' }}
-              </div>
-              <p class="ai-summary">{{ aiReview.summary }}</p>
-              <div v-if="aiReview.similarityFindings?.length" class="ai-section">
-                <h4>相似文档</h4>
-                <ul class="ai-list">
-                  <li v-for="(f, i) in aiReview.similarityFindings" :key="i">
-                    <span class="ai-sim">相似度 {{ (f.similarity * 100).toFixed(0) }}%</span>
-                    <span class="ai-doc">{{ f.docTitle }}</span>
-                    <p class="ai-snippet">{{ f.snippet }}</p>
-                  </li>
-                </ul>
-              </div>
-              <div v-if="aiReview.qualityNotes?.length" class="ai-section">
-                <h4>质量建议</h4>
-                <ul class="ai-list"><li v-for="(q, i) in aiReview.qualityNotes" :key="i">{{ q }}</li></ul>
-              </div>
-              <div v-if="aiReview.outdatedFindings?.length" class="ai-section">
-                <h4>过时内容</h4>
-                <ul class="ai-list"><li v-for="(o, i) in aiReview.outdatedFindings" :key="i">{{ o }}</li></ul>
-              </div>
-            </template>
-            <div v-else class="ai-empty">
-              点击左上角「AI 审核」按钮，调用大模型分析该文档并给出建议。
-            </div>
-          </aside>
-        </div>
-      </template>
-    </AppModal>
+    <!-- ====== 预览弹窗（含 AI 辅助审核；拆分组件） ====== -->
+    <DocPreviewModal
+      :doc="previewDoc"
+      :loading="previewLoading"
+      :kb-id="selectedKb"
+      @close="previewDoc = null"
+    />
 
     <ConfirmDialog
       :show="!!deleteTarget"
@@ -925,44 +790,13 @@ async function confirmBatchDelete() {
       @confirm="confirmBatchDelete"
     />
 
-    <!-- ====== KB 成员管理（库级授权）====== -->
-    <AppModal
+    <!-- ====== KB 成员管理（库级授权；拆分组件）====== -->
+    <KbMembersModal
       :show="showMemberModal"
-      :title="`管理成员 · ${selectedKbName}`"
-      wide
+      :kb-id="selectedKb"
+      :kb-name="selectedKbName"
       @close="showMemberModal = false"
-    >
-      <div v-if="memberLoading" class="modal-hint">加载中…</div>
-      <template v-else>
-        <p class="member-tip">
-          为该知识库添加成员并分配权限：<b>可查看</b>仅检索、<b>可编辑</b>可上传/删除文档、<b>管理员</b>可管理成员与库设置。至少保留一名管理员。
-        </p>
-        <div class="member-list">
-          <div v-for="m in memberRows" :key="m.userId" class="member-row">
-            <div class="member-info">
-              <span class="member-name">{{ m.displayName || m.username }}</span>
-              <span class="member-uname">@{{ m.username }}</span>
-            </div>
-            <CustomSelect v-model="m.level" :options="levelOptions" width="110px" />
-            <button class="action-btn" title="移除成员" @click="removeMember(m.userId)">
-              <Icon name="close" :size="15" />
-            </button>
-          </div>
-          <div v-if="!memberRows.length" class="member-empty">暂无成员，请在下方添加。</div>
-        </div>
-        <div class="member-add">
-          <CustomSelect v-model="newUserId" :options="availableUserOptions" placeholder="选择用户" width="220px" />
-          <CustomSelect v-model="newUserLevel" :options="levelOptions" width="110px" />
-          <button class="btn btn-primary btn-sm" :disabled="!newUserId" @click="addMember">添加</button>
-        </div>
-      </template>
-      <template #foot>
-        <button class="btn btn-ghost btn-sm" @click="showMemberModal = false">取消</button>
-        <button class="btn btn-primary btn-sm" :disabled="memberSaving" @click="saveMembers">
-          <span v-if="memberSaving" class="spinner sm"></span> 保存
-        </button>
-      </template>
-    </AppModal>
+    />
   </div>
 </template>
 
@@ -1189,7 +1023,6 @@ async function confirmBatchDelete() {
   white-space: nowrap;
 }
 .type-text { color: var(--text-secondary); font-weight: 500; }
-.col-time { color: var(--text-tertiary); white-space: nowrap; }
 
 /* 状态标签（原型风格） */
 .status-tag {
@@ -1291,131 +1124,4 @@ async function confirmBatchDelete() {
   padding: 40px 0;
 }
 
-/* ---- 弹窗内容 ---- */
-.modal-hint { color: var(--text-tertiary); text-align: center; padding: 20px 0; }
-.ai-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 40px 0;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-.spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--border);
-  border-top-color: var(--brand);
-  border-radius: 50%;
-  animation: ai-spin 0.7s linear infinite;
-}
-.spinner.sm {
-  width: 13px;
-  height: 13px;
-  border-width: 2px;
-}
-@keyframes ai-spin { to { transform: rotate(360deg); } }
-.preview-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  font-size: 12px;
-}
-.preview-body {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-  line-height: 1.7;
-  max-height: 52vh;
-  overflow-y: auto;
-  background: var(--bg-subtle);
-  border-radius: var(--radius-md);
-  padding: 14px;
-  margin: 0;
-  color: var(--text-secondary);
-}
-/* 预览弹窗顶部工具条（AI 审核触发） */
-.preview-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 12px;
-}
-/* 预览 + AI 审核左右分栏 */
-.preview-split {
-  display: flex;
-  gap: 16px;
-  align-items: stretch;
-}
-.preview-left {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.preview-right {
-  flex: 0 0 268px;
-  border-left: 1px solid var(--border);
-  padding-left: 16px;
-  max-height: 58vh;
-  overflow-y: auto;
-}
-.ai-panel-head {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-bottom: 12px;
-}
-.ai-empty {
-  font-size: 13px;
-  color: var(--text-tertiary);
-  line-height: 1.6;
-  padding: 12px 0;
-}
-.ai-loading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 24px 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.ai-verdict {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: var(--radius-pill);
-  font-weight: 600;
-  font-size: 13px;
-  margin-bottom: 10px;
-}
-.ai-verdict.approve { background: var(--success-soft); color: var(--success); }
-.ai-verdict.reject { background: var(--danger-soft); color: var(--danger); }
-.ai-verdict.manual_review, .ai-verdict.manual { background: var(--warning-soft); color: var(--warning); }
-.ai-summary { margin: 0 0 14px; color: var(--text-secondary); line-height: 1.6; }
-.ai-section h4 { font-size: 13px; color: var(--text-primary); margin: 14px 0 6px; }
-.ai-list { margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
-.ai-list li { margin-bottom: 8px; }
-.ai-sim { color: var(--brand); font-weight: 600; margin-right: 8px; }
-.ai-doc { font-weight: 500; color: var(--text-primary); }
-.ai-snippet { margin: 4px 0 0; color: var(--text-tertiary); font-size: 12px; }
-
-/* ===== KB 成员管理弹窗 ===== */
-.member-tip { margin: 0 0 14px; color: var(--text-tertiary); font-size: 12.5px; line-height: 1.6; }
-.member-tip b { color: var(--text-secondary); }
-.member-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
-.member-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-.member-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.member-name { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
-.member-uname { font-size: 12px; color: var(--text-tertiary); }
-.member-empty { padding: 14px; text-align: center; color: var(--text-tertiary); font-size: 13px; background: var(--bg-soft); border: 1px dashed var(--border); border-radius: var(--radius-md); }
-.member-add { display: flex; align-items: center; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
 </style>

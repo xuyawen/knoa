@@ -11,32 +11,30 @@ import type { GraphNode, GraphEdge } from '@/types/api'
 const {
   graph, loading, searchTerm, selectedId, hoveredId,
   gFilterType, gFilterBiz, gFilterTime, nodeTypeOpts, bizCatOpts, timeRangeOpts,
-  presentKbs, kbColor, nodeColor, kbName, degree,
-  stats, docNodeCount, conceptCount, tagCount, bizCatCount,
+  presentKbs, kbColor, nodeColor, kbName, degree, adjacency, nodeById,
+  stats, maxDegree, avgDegree,
   selectedNode, selectedNeighbors, typeBars, hotNodes, recentNodes,
   tx, ty, k, fetchGraph, onExport, resetAll, resetView,
 } = useGraphData()
 
 /* ---- 力导向布局 ---- */
-interface LNode { id: string; x: number; y: number; deg: number; r: number }
+interface LNode { id: string; x: number; y: number; r: number }
 const W = 900
 const H = 560
 const lNodes = ref<LNode[]>([])
 const svgRef = ref<SVGSVGElement | null>(null)
-
-const degreeLocal = degree // 别名，保持模板可读
 
 function computeLayout(nodes: GraphNode[], edges: GraphEdge[]): LNode[] {
   const n = nodes.length
   const arr: LNode[] = nodes.map((nd, i) => {
     const ang = (i / Math.max(1, n)) * Math.PI * 2
     const rad = Math.min(W, H) * 0.4
+    const deg = degree.value[nd.id] || 0
     return {
       id: nd.id,
       x: W / 2 + Math.cos(ang) * rad,
       y: H / 2 + Math.sin(ang) * rad,
-      deg: degreeLocal.value[nd.id] || 0,
-      r: 6 + Math.min(13, Math.sqrt(degreeLocal.value[nd.id] || 0) * 3),
+      r: 6 + Math.min(13, Math.sqrt(deg) * 3),
     }
   })
   const idx: Record<string, number> = {}
@@ -46,7 +44,9 @@ function computeLayout(nodes: GraphNode[], edges: GraphEdge[]): LNode[] {
   const SPRING = 0.04
   const REST = 72
   const CENTER = 0.008
-  for (let it = 0; it < 240; it++) {
+  // 斥力阶段是 O(迭代数 × N²)：大图谱降低迭代数避免主线程长时间卡顿
+  const iterations = n > 250 ? 100 : n > 120 ? 160 : 240
+  for (let it = 0; it < iterations; it++) {
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         let dx = arr[i].x - arr[j].x
@@ -91,12 +91,13 @@ const posMap = computed<Record<string, { x: number; y: number }>>(() => {
   return m
 })
 
-// 数据变化（首次加载 / 筛选切换）后重算布局
+// 数据变化（首次加载 / 筛选切换）后重算布局；immediate 保证从其他图谱 tab 切回时
+// （共享状态已有数据、watch 不会再触发）也能立即布局，避免画布空白
 watch(graph, async (g) => {
   if (!g) return
   lNodes.value = computeLayout(g.nodes, g.edges)
   await nextTick()
-})
+}, { immediate: true })
 
 /* ---- 高亮（悬浮 / 选中 / 搜索） ---- */
 const focusId = computed(() => hoveredId.value ?? selectedId.value)
@@ -113,21 +114,13 @@ const activeIds = computed<Set<string> | null>(() => {
     return null
   }
   if (set.size) {
-    const extra: string[] = []
-    for (const id of set) for (const nb of (degreeLocal.value[id] !== undefined ? adjacencySet(id) : [])) extra.push(nb)
-    extra.forEach((x) => set.add(x))
+    // 展开一跳邻居（复用共享邻接表索引，避免逐 id 扫全边集）
+    for (const id of [...set]) {
+      for (const nb of adjacency.value[id] || []) set.add(nb)
+    }
   }
   return set
 })
-// 仅用于高亮邻居展开
-function adjacencySet(id: string): string[] {
-  const out: string[] = []
-  for (const e of graph.value?.edges || []) {
-    if (e.source === id) out.push(e.target)
-    else if (e.target === id) out.push(e.source)
-  }
-  return out
-}
 function nodeDim(id: string): boolean {
   const a = activeIds.value
   return a ? !a.has(id) : false
@@ -136,6 +129,13 @@ function edgeDim(e: GraphEdge): boolean {
   const a = activeIds.value
   if (!a) return false
   return !(a.has(e.source) && a.has(e.target))
+}
+// 边标签降噪：有焦点时只显示焦点相关边，无焦点时边少才全显
+function edgeLabelShown(e: GraphEdge): boolean {
+  if (edgeDim(e)) return false
+  const f = focusId.value
+  if (f) return e.source === f || e.target === f
+  return (graph.value?.edges.length || 0) <= 60
 }
 
 /* ---- 交互：平移 / 拖拽 / 缩放 ---- */
@@ -184,7 +184,7 @@ function onUp() {
   dragging = null
 }
 function onWheel(e: WheelEvent) {
-  e.preventDefault()
+  // 模板 @wheel.prevent 已阻止默认滚动
   const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12
   k.value = Math.min(3, Math.max(0.3, k.value * factor))
 }
@@ -263,7 +263,7 @@ function zoom(dir: number) {
                     marker-end="url(#arrow)"
                   />
                   <text
-                    v-if="!edgeDim(e)"
+                    v-if="edgeLabelShown(e)"
                     :x="(posMap[e.source].x + posMap[e.target].x) / 2"
                     :y="(posMap[e.source].y + posMap[e.target].y) / 2 - 3"
                     class="edge-label"
@@ -288,11 +288,11 @@ function zoom(dir: number) {
               >
                 <circle
                   :r="n.r"
-                  :fill="nodeColor((graph?.nodes.find(x=>x.id===n.id)?.kbId) || '')"
+                  :fill="nodeColor(nodeById[n.id]?.kbId || '')"
                   :stroke="selectedId === n.id ? '#0F172A' : '#fff'"
                   :stroke-width="selectedId === n.id ? 2.5 : 1.5"
                 />
-                <text class="node-label" :y="n.r + 12" text-anchor="middle">{{ graph?.nodes.find(x=>x.id===n.id)?.label }}</text>
+                <text class="node-label" :y="n.r + 12" text-anchor="middle">{{ nodeById[n.id]?.label }}</text>
               </g>
             </g>
           </g>
@@ -314,24 +314,12 @@ function zoom(dir: number) {
           </div>
         </div>
         <p v-if="graph && graph.nodes.length" class="canvas-hint">拖拽节点可移动 · 滚轮缩放 · 拖拽空白处平移 · 点击查看详情</p>
-
-        <div v-if="graph && graph.nodes.length" class="graph-legend">
-          <span class="leg-item"><i class="leg-dot" style="background:var(--accent-blue)"></i> 文档</span>
-          <span class="leg-item"><i class="leg-dot" style="background:var(--accent-green)"></i> 知识点</span>
-          <span class="leg-item"><i class="leg-dot" style="background:var(--accent-violet)"></i> 标签</span>
-          <span class="leg-item"><i class="leg-dot" style="background:var(--accent-amber)"></i> 业务分类</span>
-          <span class="leg-divider"></span>
-          <span class="leg-item leg-line"><i class="leg-line-dash" style="border-color:var(--text-tertiary)"></i> 关联</span>
-          <span class="leg-item leg-line"><i class="leg-line-solid" style="border-color:var(--accent-blue)"></i> 引用</span>
-          <span class="leg-item leg-line"><i class="leg-line-solid" style="border-color:var(--accent-green)"></i> 包含</span>
-        </div>
       </div>
 
       <!-- 右：数据面板 -->
       <aside class="stats-panel card">
         <div class="panel-head">
           <span class="panel-title">图谱数据统计</span>
-          <Icon name="graph" :size="14" class="info-hint" />
         </div>
 
         <div class="stat-grid">
@@ -344,20 +332,20 @@ function zoom(dir: number) {
             <div class="sc-info"><div class="sc-label">关系总数</div><div class="sc-value" style="color:var(--accent-green)">{{ stats?.edgeCount ?? 0 }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:var(--accent-blue-soft)"><Icon name="doc" :size="18" style="color:var(--accent-blue)"/></div>
-            <div class="sc-info"><div class="sc-label">文档节点</div><div class="sc-value" style="color:var(--accent-blue)">{{ docNodeCount }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-violet-soft)"><Icon name="folder" :size="18" style="color:var(--accent-violet)"/></div>
+            <div class="sc-info"><div class="sc-label">覆盖知识库</div><div class="sc-value" style="color:var(--accent-violet)">{{ stats?.kbCount ?? 0 }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:var(--accent-green-soft)"><Icon name="lightbulb" :size="18" style="color:var(--accent-green)"/></div>
-            <div class="sc-info"><div class="sc-label">知识点</div><div class="sc-value" style="color:var(--accent-green)">{{ conceptCount }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-amber-soft)"><Icon name="tag" :size="18" style="color:var(--accent-amber)"/></div>
+            <div class="sc-info"><div class="sc-label">实体类型</div><div class="sc-value" style="color:var(--accent-amber)">{{ Object.keys(stats?.typeCounts || {}).length }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:var(--accent-violet-soft)"><Icon name="tag" :size="18" style="color:var(--accent-violet)"/></div>
-            <div class="sc-info"><div class="sc-label">标签</div><div class="sc-value" style="color:var(--accent-violet)">{{ tagCount }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-blue-soft)"><Icon name="link" :size="18" style="color:var(--accent-blue)"/></div>
+            <div class="sc-info"><div class="sc-label">平均度数</div><div class="sc-value" style="color:var(--accent-blue)">{{ avgDegree }}</div></div>
           </div>
           <div class="stat-cell">
-            <div class="sc-icon-wrap" style="background:var(--accent-amber-soft)"><Icon name="folder" :size="18" style="color:var(--accent-amber)"/></div>
-            <div class="sc-info"><div class="sc-label">业务分类</div><div class="sc-value" style="color:var(--accent-amber)">{{ bizCatCount }}</div></div>
+            <div class="sc-icon-wrap" style="background:var(--accent-green-soft)"><Icon name="node" :size="18" style="color:var(--accent-green)"/></div>
+            <div class="sc-info"><div class="sc-label">最高度数</div><div class="sc-value" style="color:var(--accent-green)">{{ maxDegree }}</div></div>
           </div>
         </div>
 
@@ -399,9 +387,7 @@ function zoom(dir: number) {
         </div>
 
         <div class="section-block">
-          <div class="section-header">
-            <span class="section-title">最近新增的实体</span>
-          </div>
+          <div class="section-title">最近新增的实体</div>
           <div class="recent-list">
             <div v-for="n in recentNodes" :key="n.id" class="recent-item" @click="selectedId = n.id" @mouseenter="hoveredId = n.id" @mouseleave="hoveredId = null">
               <span class="recent-icon" :style="{ background: nodeColor(n.kbId) + '18', color: nodeColor(n.kbId) }">

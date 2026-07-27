@@ -36,26 +36,34 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
-import uuid
 from collections.abc import AsyncIterator
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database import AsyncSessionLocal
 from app.core.llm.base import ToolCallResult
 from app.core.graph import GraphStore
 from app.core.memory import MemoryStore
+from app.core.rag.agent_prompts import (
+    AGENT_SYSTEM_PROMPT,
+    INTENT_PROMPT,
+    TOOLS_SCHEMA,
+    should_skip_retrieval,
+    should_web_search,
+)
+from app.core.rag.agent_session import SessionMemoryMixin
 from app.core.rag.retriever import HybridRetriever
 from app.core.metrics import record_ask_trace
 from app.core.rag.web_search import WebSearcher
 from app.core.store.redis_store import RedisStore
-from app.database import AsyncSessionLocal
-from app.db import ChatMessage, ChatSession
+from app.db import ChatMessage
 from app.models.knowledge import SourceItemOut
 
 logger = logging.getLogger(__name__)
@@ -83,178 +91,6 @@ except ImportError:
         return decorator
 
 
-# ---------------------------------------------------------------------------
-# Tool Schemas (OpenAI function calling format)
-# ---------------------------------------------------------------------------
-
-TOOLS_SCHEMA: list[dict] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "retrieve",
-            "description": (
-                "从知识库中检索与用户问题相关的文档片段。"
-                "使用向量语义检索+BM25关键词检索混合搜索。"
-                "当问题涉及具体业务知识、运营策略、合规要求时应调用此工具。"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "用于检索的查询词，可以是原始问题或提炼后的关键词",
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "为什么需要检索这个问题（简短说明）",
-                    },
-                },
-                "required": ["query", "reason"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "supplement_search",
-            "description": (
-                "当首次检索结果不够充分时，用更精确的查询词进行补充检索。"
-                "适用于：首次结果相关性低、覆盖面不够、需要不同角度信息的情况。"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "refined_query": {
-                        "type": "string",
-                        "description": "精炼后的检索词，应比首次查询更聚焦或换一个角度",
-                    },
-                    "gap_description": {
-                        "type": "string",
-                        "description": "当前缺失了什么信息，为什么要换个方式搜",
-                    },
-                },
-                "required": ["refined_query", "gap_description"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "web_search",
-            "description": (
-                "联网搜索实时/外部信息。当需要查询知识库未覆盖的最新政策、"
-                "实时汇率/股价、新闻事件、或任何需要联网才能确认的事实时使用。"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "用于联网搜索的查询词",
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "为什么需要联网搜索（简短说明）",
-                    },
-                },
-                "required": ["query", "reason"],
-            },
-        },
-    },
-]
-
-# System prompt for agent routing
-AGENT_SYSTEM_PROMPT = """你是「知海 Knoa」的智能问答路由器。你的任务是分析用户问题并决定最佳处理策略。
-
-## 可选动作
-1. **直接回答 (direct_answer)** — 不调用任何工具，直接回复。
-   适用场景：打招呼/闲聊（你好、hi、在吗、谢谢等）、常识性问题、纯寒暄。
-
-2. **调用 retrieve 工具** — 从知识库检索相关文档后回答。
-   适用场景：涉及业务知识、运营策略、平台规则、选品方法等问题。
-
-3. **调用 supplement_search 工具** — 当已有检索结果不够充分时，用更精准的关键词再次检索。
-   适用场景：首次结果相关性低、信息覆盖不全、需要从其他角度查找。
-
-4. **调用 web_search 工具** — 联网搜索实时/外部信息。
-   适用场景：汇率/股价/金价等实时数据、最新政策或平台公告、新闻事件、
-   知识库明显过时的内容、或任何需要联网才能确认的事实。
-
-## 判断原则
-- **核心原则：当用户询问知识库内的具体内容、文档信息、业务细节时，必须先调用 retrieve 检索，绝对不能直接回答。** 你不知道库里实际存了什么，直接回答一定是幻觉。
-- 问题越具体/专业，越应该走检索路径
-- 如果问题包含多个子问题或需要对比分析，优先做一次全面检索
-- 只有在确实缺少关键信息时才触发补充检索（控制成本）
-- 天气、时间日期类问题：若无知识库答案，用 web_search 联网查询实时信息，不要凭记忆编造
-- 汇率/股价/最新政策/新闻等实时或易变信息：优先 web_search 联网核实
-- 知识库能回答的运营/合规问题优先走 retrieve，不要无谓联网
-- 回答必须简洁务实，不要自我介绍或罗列功能
-- **宁可检索后说"库中未找到相关内容"，也不要不检索就直接编造答案**
-
-## 输出格式
-根据判断选择一个动作执行。如果是直接回答，就在 content 里写回复内容；
-如果需要检索或联网，就调用对应的工具（retrieve / supplement_search / web_search）并填好参数。"""
-
-
-# ---------------------------------------------------------------------------
-# 快速预分类：明显不需要检索的问题，跳过昂贵的 LLM tool_call（省 15~40s）
-# ---------------------------------------------------------------------------
-
-_SKIP_RETRIEVAL_PATTERNS: list[re.Pattern] = [
-    re.compile(r"现在(几点|什么时间|几号|星期几|农历)", re.I),
-    re.compile(r"^(现在)?(几点了?|什么时间|今天星期|今天几号)", re.I),
-    re.compile(r"^[0-9]+[+\-*/][0-9]+", re.I),  # 纯数学计算（阿拉伯符号）
-    re.compile(r"\d+\s*(的\s*)?(乘以|乘|×|除以|除|÷)\s*\d+|\d+\s*的\s*\d+\s*倍", re.I),  # 中文算式（125 乘以 8 / 100 的 3 倍）
-    re.compile(r"^(翻译|translate) +", re.I),  # 翻译请求
-]
-
-def _should_skip_retrieval(question: str) -> bool:
-    """快速判断是否应该跳过 RAG 检索（纯启发式，不调 LLM）。"""
-    q = question.strip()
-    return any(p.search(q) for p in _SKIP_RETRIEVAL_PATTERNS)
-
-
-# 需要联网搜索实时/易变信息的快速预分类（避免 LLM 凭记忆编造）
-_WEB_SEARCH_PATTERNS: list[re.Pattern] = [
-    re.compile(r"(今天|明天|后天|本周|下周|这周|那周).*?(天气|气温|温度|下雨|下雪|晴|阴|多云|台风|暴雨|雾霾)", re.I),
-    re.compile(r"(天气|气温|温度).*(怎么|怎么样|如何|多少度|几度|会.*吗|呢？?$)", re.I),
-    re.compile(r"(汇率|美金|美元|人民币|人民币兑|兑美元|eur|gbp|jpy).*(多少|走势|换算|现在|今日|今天)", re.I),
-    re.compile(r"(美元|人民币|欧元|英镑|日元|加元).*(兑|汇率|换|多少)", re.I),
-    re.compile(r"(金价|黄金价格|原油|油价|比特币|btc|eth|股票|股价|纳斯达克|道琼斯).*(多少|报价|行情|现在|今日)", re.I),
-    re.compile(r"(最新|新的|近期|2024|2025|今年|本月).*(政策|规定|公告|费率|费用|关税|税)", re.I),
-    re.compile(r"(新闻|热点|事件|刚刚|今天).*(发生|发布|宣布|消息)", re.I),
-    re.compile(r"(amazon|亚马逊).*(new|update|policy|fee|fba).*(2024|2025|recent|latest)", re.I),
-]
-
-def _should_web_search(question: str) -> bool:
-    """判断是否需要联网搜索实时/易变信息（避免 LLM 凭记忆编造）。"""
-    q = question.strip()
-    return any(p.search(q) for p in _WEB_SEARCH_PATTERNS)
-
-
-_INTENT_PROMPT = (
-    "你是跨境电商知识助手「知海 Knoa」的意图分类器。\n"
-    "只输出一个英文标签，不要任何解释或标点：\n"
-    "- greeting：打招呼 / 闲聊 / 常识 / 时间 / 简单寒暄（不涉及具体业务知识）\n"
-    "- web_search：需要实时或易变信息（天气、股价、汇率、最新政策新闻）\n"
-    "- simple：可用单篇知识库检索直接回答的具体业务问题\n"
-    "- complex：需要跨实体 / 跨流程关联推理的复杂业务问题"
-    "（如「A 流程和 B 流程的关系」「某政策对物流的影响」）"
-)
-
-
-_ROLL_SUMMARY_SYSTEM = (
-    "你是一个对话摘要压缩器。给定某跨境电商运营知识助手会话里「较早的对话片段」，"
-    "请把它压缩成一段简洁的摘要，供后续轮次理解上下文。\n"
-    "规则：\n"
-    "1. 保留关键事实：用户提到的产品/实体名称、已确认的结论、已做的决策、待办、用户偏好。\n"
-    "2. 丢弃寒暄、重复、与后续无关的细节。\n"
-    "3. 若给出「已有摘要」，请把新对话与已有摘要融合，输出一段连贯的新摘要（不要重复罗列）。\n"
-    "4. 语言与用户一致（中文则用中文）。\n"
-    "5. 输出一段紧凑的自然语言摘要，不超过 200 字。不要使用 markdown、不要解释。"
-)
-
-
 class _AgentState:
     """LangGraph 风格的共享状态：节点读写它，边（下一节点名）决定流转。
 
@@ -267,6 +103,9 @@ class _AgentState:
         self.kb_id = kb_id
         self.messages: list[dict] = []      # route 用到的 agent 对话上下文
         self.all_sources: list[dict] = []   # 已召回的全部来源（KB/图/联网），连续编号
+        # 来源编号 → chunk 全文。all_sources 里是 SourceItemOut（只带 150 字
+        # snippet，为的是 SSE/入库瘦身），生成回答时需用全文，另存这里。
+        self.source_content: dict[int, str] = {}
         self.retrieval_attempted: bool = False  # 是否已执行过 KB 检索（无论有无结果）
         self.step = 0                         # 已执行的 route 步数（上限 MAX_STEPS）
         self.action = ""                      # 最近一次 route 决策的动作名
@@ -280,10 +119,14 @@ class _AgentState:
         self.intent: str = "simple"          # greeting | web_search | simple | complex
         self.use_multihop: bool = False       # complex 意图 → 图谱多跳推理
         self.graph_reasoning: str = ""        # 多跳推理链路文本（注入 final prompt）
+        self.thinking_steps: list[dict] = []   # 决策链（thinking 事件累积），落库供历史回显
 
 
-class AgenticRAGAgent:
-    """Agentic RAG 代理 — 用 LLM 驱动的决策闭环替代固定检索流程。"""
+class AgenticRAGAgent(SessionMemoryMixin):
+    """Agentic RAG 代理 — 用 LLM 驱动的决策闭环替代固定检索流程。
+
+    会话持久化/记忆/滚动摘要方法由 SessionMemoryMixin 提供（agent_session.py）。
+    """
 
     MAX_STEPS = 3
     # 上下文窗口：最近多少条历史消息注入 LLM（约 N/2 轮对话）
@@ -321,43 +164,178 @@ class AgenticRAGAgent:
         self._source_count: int | None = None
         self._web_provider: str | None = None
 
-    async def _classify_intent(self, question: str) -> "str | None":
-        """LLM 意图分类（greeting/web_search/simple/complex）。
+    async def _classify_intent(self, question: str, history_hint: str = "") -> "tuple[str, str] | None":
+        """LLM 意图分类 + 检索 query 改写（一次调用两用）。
 
-        失败或返回空 → 返回 None，由调用方退化为正则启发式兜底。
+        返回 (intent, query)：intent ∈ greeting/web_search/simple/complex，
+        query 为改写后的检索关键词（simple 快路跳过 route 决策时用它检索，
+        替代原本 route LLM 的 query 改写能力，零额外成本）。
+        history_hint：最近两轮对话纯文本，供分类器消解追问里的指代/省略。
+        失败或返回空 → None，由调用方退化为正则启发式兜底（query 用原句）。
         用流式通道拿短输出，规避推理模型非流式 content 为空的老问题。
         """
         if not self.llm:
             return None
         try:
+            user_msg = f"问题：{question}"
+            if history_hint:
+                user_msg = (
+                    f"最近对话（供理解上下文、消解指代）：\n{history_hint}\n\n"
+                    f"问题：{question}"
+                )
             text = ""
             async for piece in self.llm.stream_chat(
                 [
-                    {"role": "system", "content": _INTENT_PROMPT},
-                    {"role": "user", "content": f"问题：{question}"},
+                    {"role": "system", "content": INTENT_PROMPT},
+                    {"role": "user", "content": user_msg},
                 ],
                 temperature=0.0,
-                max_tokens=20,
+                max_tokens=60,
             ):
                 text += piece
-            text = text.strip().lower()
-            for label in ("greeting", "web_search", "complex", "simple"):
-                if label in text:
-                    return label
-            return None
+            return self._parse_intent_json(text, question)
         except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort fallback to heuristic intent)
             logger.warning("intent classify failed (fallback heuristic): %s", e)
             return None
 
     @staticmethod
+    def _parse_intent_json(text: str, question: str) -> "tuple[str, str] | None":
+        """三层兜底解析意图分类器输出：JSON → 正则抽标签 → None。
+
+        分类器（小模型/短输出）偶尔吐格式不完整的 JSON 或退回纯标签，
+        逐层降级保证不比现状差；query 解析失败一律退回原问题。
+        """
+        raw = text.strip()
+        # 剥可能的 ```json 围栏（prompt 已禁止，防御性处理）
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw
+            raw = raw.strip()
+        # 第 1 层：严格 JSON
+        try:
+            obj = json.loads(raw)
+            intent = str(obj.get("intent", "")).strip().lower()
+            query = str(obj.get("query", "")).strip() or question
+            if intent in ("greeting", "web_search", "complex", "simple"):
+                return intent, query
+        except (ValueError, AttributeError, TypeError):
+            pass
+        # 第 2 层：从杂乱文本里抽 JSON 片段
+        m = re.search(
+            r'\{[^{}]*"intent"\s*:\s*"(greeting|web_search|complex|simple)"[^{}]*\}',
+            raw, re.I,
+        )
+        if m:
+            intent = m.group(1).lower()
+            qm = re.search(r'"query"\s*:\s*"([^"]*)"', raw)
+            query = (qm.group(1).strip() if qm else "") or question
+            return intent, query
+        # 第 3 层：纯标签（兼容旧格式 / 模型只吐了标签）
+        low = raw.lower()
+        for label in ("greeting", "web_search", "complex", "simple"):
+            if label in low:
+                return label, question
+        return None
+
+    @staticmethod
+    def _history_hint(raw_history: list[dict]) -> str:
+        """取最近两轮对话拼成纯文本，供意图分类器消解追问的指代/省略。
+
+        多模态 content blocks 只抽文本段（绝不塞 base64）；每条截断 120 字，
+        控制分类调用的输入体积。
+        """
+        turns = [m for m in raw_history if m.get("role") in ("user", "assistant")]
+        lines: list[str] = []
+        for m in turns[-4:]:  # 最近两轮 = 至多 2 user + 2 assistant
+            content = m.get("content")
+            if isinstance(content, list):
+                content = " ".join(
+                    b.get("text", "")
+                    for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+            content = (content or "").strip()
+            if content:
+                who = "用户" if m.get("role") == "user" else "助手"
+                lines.append(f"{who}：{content[:120]}")
+        return "\n".join(lines)
+
+    @staticmethod
     def _heuristic_intent(question: str) -> str:
         """LLM 不可用时的兜底意图判断（保留问候/实时快路 + 关系类判 complex）。"""
-        if _should_web_search(question):
+        if should_web_search(question):
             return "web_search"
         # 含关系/对比/影响类措辞 → 视为复杂业务问题，触发图谱多跳推理
         if re.search(r"(关系|区别|差异|对比|影响|联系|关联|和.{1,6}的|与.{1,6}的|vs|VS|相对于|导致|因为)", question):
             return "complex"
         return "simple"
+
+    async def _suggest_title(self, session, question: str, answer: str) -> "str | None":
+        """会话首轮问答时用 LLM 生成简洁标题（≤15 字），替代「问题前 50 字」默认标题。
+
+        仅当这是会话第一轮问答且标题仍为系统默认（新对话 / 问题截断）时
+        才重写，避免覆盖用户手动改过的标题。
+        """
+        if not self.llm or not answer.strip():
+            return None
+        cnt = await self.db.scalar(
+            select(func.count()).select_from(ChatMessage).where(
+                ChatMessage.session_id == session.id,
+                ChatMessage.role == "assistant",
+            )
+        )
+        if (cnt or 0) > 1:  # 非首轮问答（本轮回答已入库）→ 不重写
+            return None
+        await self.db.refresh(session)  # commit 后属性已过期，标题需重新加载
+        current = (session.title or "").strip()
+        if current not in ("", "新对话", question[:50]):
+            return None
+        try:
+            text = ""
+            async for piece in self.llm.stream_chat(
+                [
+                    {"role": "system", "content": "你是会话标题生成器。根据用户问题和AI回答，生成一个不超过15个字的简洁标题。直接输出标题文本，不要引号、标点或解释。"},
+                    {"role": "user", "content": f"问题：{question[:100]}\n回答摘要：{answer[:200]}"},
+                ],
+                temperature=0.3,
+                max_tokens=30,
+            ):
+                text += piece
+            title = text.strip().strip('"\'“”‘’《》【】')
+            return title[:30] or None
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, keep default title on failure)
+            logger.warning("session title generation failed: %s", e)
+            return None
+
+    async def _suggest_follow_ups(self, question: str, answer: str) -> list[str]:
+        """基于本轮问答生成 2~3 个用户可能想继续追问的简短问题。
+
+        前端用它们替换静态的「你可能还想问」，点击即发送。
+        """
+        if not self.llm or not answer.strip():
+            return []
+        try:
+            text = ""
+            async for piece in self.llm.stream_chat(
+                [
+                    {"role": "system", "content": "你是追问建议生成器。根据用户提问和AI回答，生成3个用户可能想继续追问的简短问题。每行一个问题，不要编号、不要引号、不要解释，每个问题不超过25个字。"},
+                    {"role": "user", "content": f"问题：{question[:100]}\n回答摘要：{answer[:300]}"},
+                ],
+                temperature=0.5,
+                max_tokens=120,
+            ):
+                text += piece
+            out: list[str] = []
+            for line in text.splitlines():
+                q = re.sub(r"^[\s\d.\-*、）)]+", "", line.strip()).strip('"\'“”‘’')
+                if q and 4 <= len(q) <= 40 and q not in out:
+                    out.append(q)
+                if len(out) >= 3:
+                    break
+            return out
+        except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, frontend falls back to static suggestions)
+            logger.warning("follow-up generation failed: %s", e)
+            return []
 
     @traceable(name="agentic_rag_stream", tags=["agent", "rag"])
     async def stream_answer(
@@ -417,77 +395,113 @@ class AgenticRAGAgent:
             await self.db.commit()
 
             # ponytail: 只统计真实业务提问，过滤打招呼/闲聊/天气等，避免污染"高频问题"
-            if not _should_skip_retrieval(question):
+            if not should_skip_retrieval(question):
                 try:
                     await self.redis.incr_trending(question)
                 except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, don't fail request if trending counter update fails)
                     pass
 
-            # ── Mem0 长期记忆：召回该用户的相关记忆，注入后续所有 prompt ──
-            if self.memory and self.user_id and settings.MEMORY_ENABLED:
-                try:
-                    self._memories = await self.memory.retrieve(
-                        self.user_id, question, self.db, settings.MEMORY_TOP_K
-                    )
-                except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, skip memory injection if retrieve fails)
-                    logger.warning("memory retrieve failed (skip inject): %s", e)
-                    self._memories = []
-
             all_sources: list[dict] = []
+            source_content: dict[int, str] = {}  # 编号 → chunk 全文（生成时注入）
             final_answer_text: str = ""
             graph_reasoning_text: str = ""  # 8.5 多跳推理链路，注入 final prompt
+            skip = should_skip_retrieval(question)
 
-            # ── 8.3 意图分类：LLM 判断 simple/complex/greeting/web_search ──
-            # 纯 trivial（打招呼/数学/时间）直接走 greeting 快路，不浪费 LLM 调用；
-            # 其余业务问题才调 LLM 分类，失败退化为正则启发式（保留问候/实时兜底）。
-            intent = "simple"
-            if _should_skip_retrieval(question):
-                intent = "greeting"
-            elif settings.INTENT_ENABLED:
-                classified = await self._classify_intent(question)
-                intent = classified if classified is not None else self._heuristic_intent(question)
-            else:
-                intent = self._heuristic_intent(question)
+            # ── 加载会话历史 + 滚动摘要（提前到三路并行之前）──
+            # 意图分类器需要最近两轮上下文来改写检索 query（消解追问里的
+            # 「这个/那个」指代），故历史必须先于三路并行就绪；摘要文本
+            # 同样在此处装配进 system prompt。
+            raw_history, summary = await self._load_session_history(session)
+            self._summary_text = summary or ""
+            history_hint = self._history_hint(raw_history)
+
+            # ── 三路并行：Mem0 记忆召回 / 8.3 意图分类 / 图谱相关 chunk 检索 ──
+            # 三者互不依赖，串行会白白浪费一次 LLM 往返的延迟（意图分类是
+            # 完整 LLM 调用）。注意 AsyncSession 不支持并发复用，memory 与
+            # graph 各用独立会话；意图分类是纯 LLM 调用，不依赖 DB。
+            async def _mem_task() -> list[str]:
+                if not (self.memory and self.user_id and settings.MEMORY_ENABLED):
+                    return []
+                try:
+                    async with AsyncSessionLocal() as mdb:
+                        return await self.memory.retrieve(
+                            self.user_id, question, mdb, settings.MEMORY_TOP_K
+                        )
+                except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, skip memory injection if retrieve fails)
+                    logger.warning("memory retrieve failed (skip inject): %s", e)
+                    return []
+
+            async def _intent_task() -> "tuple[str, str]":
+                # 纯 trivial（打招呼/数学/时间）直接 greeting 快路，不浪费 LLM 调用；
+                # 其余业务问题才调 LLM 分类（顺带改写检索 query），失败退化为
+                # 正则启发式（query 用原句，保留问候/实时兜底）。
+                if skip:
+                    return "greeting", question
+                if settings.INTENT_ENABLED:
+                    classified = await self._classify_intent(question, history_hint)
+                    if classified is not None:
+                        return classified
+                return self._heuristic_intent(question), question
+
+            async def _graph_task() -> list[dict]:
+                # Graph RAG：图感知检索，把实体关系相关的 chunk 也拉进来当来源；
+                # 仅对真实业务问题生效（跳过打招呼/闲聊），kb_id 为空也跳过。
+                if not (self.graph and settings.GRAPH_ENABLED and kb_id and not skip):
+                    return []
+                try:
+                    async with AsyncSessionLocal() as gdb:
+                        return await self.graph.retrieve_related_chunks(
+                            question, kb_id, gdb, settings.GRAPH_TOP_K
+                        )
+                except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, skip graph enrichment if it fails)
+                    logger.warning("graph retrieve failed (skip inject): %s", e)
+                    return []
+
+            self._memories, (intent, rewritten_query), graph_chunks = await asyncio.gather(
+                _mem_task(), _intent_task(), _graph_task()
+            )
             use_multihop = intent == "complex"
 
-            # ── Graph RAG：图感知检索，把实体关系相关的 chunk 也拉进来当来源 ──
-            # 仅对真实业务问题生效（跳过打招呼/闲聊）；kb_id 为空（纯通用问答）也跳过。
-            if self.graph and settings.GRAPH_ENABLED and kb_id and not _should_skip_retrieval(question):
+            # ── 并行召回的图谱相关 chunk 编号入来源 ──
+            if graph_chunks:
+                self._graph_chunks = graph_chunks
+                # 顺序编号只给角标 [N] 用；chunk_id 必须保留 graph.py 返回的
+                # 真实 DocChunk UUID，前端点「查看溯源」才能查到原文。
+                for i, g in enumerate(graph_chunks, len(all_sources) + 1):
+                    g["id"] = i
+                    source_content[i] = g.get("content") or g.get("snippet", "")
+                all_sources.extend(self._format_sources(graph_chunks))
+                # sources 事件发「全量快照」：前端以最后一份为准（覆盖式），
+                # 增量发送会让先到的图谱来源被后续批次覆盖丢失
+                yield {"event": "sources", "data": list(all_sources)}
+
+            # ── 8.5 complex 意图 → 图谱多跳推理，产出推理链路 + 追加沿途来源 ──
+            if use_multihop and self.graph and settings.GRAPH_ENABLED and kb_id and not skip:
                 try:
-                    self._graph_chunks = await self.graph.retrieve_related_chunks(
-                        question, kb_id, self.db, settings.GRAPH_TOP_K
+                    chains, mh_chunks = await self.graph.multi_hop_reason(
+                        question, kb_id, self.db, settings.GRAPH_MULTI_HOP_MAX
                     )
-                    if self._graph_chunks:
-                        # 顺序编号只给角标 [N] 用；chunk_id 必须保留 graph.py
-                        # 返回的真实 DocChunk UUID，前端点「查看溯源」才能查到原文。
-                        # 之前误写成 graph:{i} 合成 id，使 /api/sources 的 UUID 校验
-                        # 失败（400），图谱溯源抽屉打不开 —— 这是 T1 的遗留 bug。
-                        for i, g in enumerate(self._graph_chunks, len(all_sources) + 1):
-                            g["id"] = i
-                        all_sources.extend(self._format_sources(self._graph_chunks))
-                        yield {"event": "sources", "data": self._format_sources(self._graph_chunks)}
-                    # 8.5 complex 意图 → 图谱多跳推理，产出推理链路 + 追加沿途来源
-                    if use_multihop:
-                        chains, mh_chunks = await self.graph.multi_hop_reason(
-                            question, kb_id, self.db, settings.GRAPH_MULTI_HOP_MAX
-                        )
-                        if chains:
-                            graph_reasoning_text = "\n".join(chains)
-                            yield {"event": "thinking", "data": {
-                                "step": 0, "action": "graph_reason",
-                                "detail": f"图谱多跳推理链路（{len(chains)} 条）",
-                                "raw_reasoning": "",
-                            }}
-                        existing_ids = {s.get("chunk_id") for s in all_sources}
-                        for c in mh_chunks:
-                            if c["chunk_id"] not in existing_ids:
-                                c["id"] = len(all_sources) + 1
-                                all_sources.append(self._format_sources([c])[0])
-                                existing_ids.add(c["chunk_id"])
-                        if mh_chunks:
-                            yield {"event": "sources", "data": self._format_sources(mh_chunks)}
+                    if chains:
+                        graph_reasoning_text = "\n".join(chains)
+                        yield {"event": "thinking", "data": {
+                            "step": 0, "action": "graph_reason",
+                            "detail": f"图谱多跳推理链路（{len(chains)} 条）",
+                            "raw_reasoning": "",
+                        }}
+                    # 注意：all_sources 里是格式化后的 dict（键为 camelCase
+                    # chunkId），此前误用 snake_case chunk_id 取值恒为 None，
+                    # 去重形同虚设，多跳与图检索的重叠 chunk 会被重复入选
+                    existing_ids = {s.get("chunkId") for s in all_sources}
+                    for c in mh_chunks:
+                        if c["chunk_id"] not in existing_ids:
+                            c["id"] = len(all_sources) + 1
+                            source_content[c["id"]] = c.get("content") or c.get("snippet", "")
+                            all_sources.extend(self._format_sources([c]))
+                            existing_ids.add(c["chunk_id"])
+                    if mh_chunks:
+                        yield {"event": "sources", "data": list(all_sources)}
                 except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, skip graph enrichment if it fails)
-                    logger.warning("graph retrieve/multihop failed (skip inject): %s", e)
+                    logger.warning("graph multihop failed (skip inject): %s", e)
 
             # ── 构造共享状态 + 选择入口节点（LangGraph 的 start 边）──
             # 多模态:把文本 + 图片拼成 OpenAI 多模态 content blocks
@@ -495,13 +509,12 @@ class AgenticRAGAgent:
             user_content = self._build_user_content(question, files)
             st = _AgentState(question, kb_id)
             st.all_sources = all_sources
+            st.source_content = source_content
             st.intent = intent
             st.use_multihop = use_multihop
             st.graph_reasoning = graph_reasoning_text
 
-            # ── 加载会话历史 + 滚动摘要，注入上下文 ──
-            raw_history, summary = await self._load_session_history(session)
-            self._summary_text = summary or ""
+            # ── 会话历史已在三路并行前加载（供意图分类改写 query），此处仅装配决策上下文 ──
             st.messages = [
                 {"role": "system", "content": self._build_system_prompt()},
                 *raw_history,
@@ -514,17 +527,26 @@ class AgenticRAGAgent:
                 st.next = "_n_start_skip"          # 问候/常识 → 直接友好回答
             elif intent == "web_search":
                 if self._web_search_enabled is False:
-                    # 用户关闭联网 → 退化为普通业务路由，走知识库检索
+                    # 用户关闭联网 → 退化为 simple 快路，走知识库检索
                     intent = "simple"
-                    st.next = "_n_route"
+                    self._arm_simple_route(st, rewritten_query)
+                    st.next = "_n_start_simple"
                 else:
                     st.web_loop = False
                     st.next = "_n_web_search"      # 实时信息 → 搜一次即生成
+            elif intent == "simple":
+                # simple 快路：跳过 route LLM 决策，直接用改写后的 query 检索
+                # （意图分类已零成本产出检索词，省一次完整 tool_call 往返）
+                self._arm_simple_route(st, rewritten_query)
+                st.next = "_n_start_simple"
             else:
-                st.next = "_n_route"               # simple/complex 业务问题 → agent 决策循环
+                st.next = "_n_route"               # complex 业务问题 → agent 决策循环
 
             # ── 跑图：按 st.next 派发节点，直到 __end__ ──
             async for ev in self._run_agent_loop(st):
+                # ponytail: 累积 thinking 事件，供 assistant 落库（历史回显决策链）
+                if ev.get("event") == "thinking":
+                    st.thinking_steps.append(ev.get("data", {}))
                 yield ev
             final_answer_text = st.final_answer_text
 
@@ -537,6 +559,7 @@ class AgenticRAGAgent:
             assistant_msg = ChatMessage(
                 session_id=session.id, role="assistant",
                 content=final_answer_text, citations=citations, sources=st.all_sources,
+                thinking_steps=st.thinking_steps or None,
             )
             self.db.add(assistant_msg)
             await self.db.commit()
@@ -568,7 +591,29 @@ class AgenticRAGAgent:
                 "data": {"messageId": str(assistant_msg.id), "citations": citations, "sessionId": str(session.id)},
             }
 
+            # ── 答后增强：会话简洁标题（仅首轮改写）+ 相关追问建议 ──
+            # 两个短 LLM 调用并行执行；放在 done 之后以独立 follow_ups 事件
+            # 下发，不阻塞 done（其携带 messageId）；失败静默降级，绝不影响
+            # 已答完的流。打招呼/闲聊类提问不生成。
+            if not skip:
+                try:
+                    new_title, follow_ups = await asyncio.gather(
+                        self._suggest_title(session, question, final_answer_text),
+                        self._suggest_follow_ups(question, final_answer_text),
+                    )
+                    if new_title:
+                        session.title = new_title
+                        await self.db.commit()
+                    if new_title or follow_ups:
+                        yield {
+                            "event": "follow_ups",
+                            "data": {"questions": follow_ups, "sessionTitle": new_title},
+                        }
+                except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort enhancement, never fail the answered stream)
+                    logger.warning("follow_ups/title generation failed: %s", e)
+
         except Exception as e:  # noqa: BLE001  (intentional catch-all: top-level guard, convert any answer-stream error into an SSE error event)
+            logger.exception("stream_answer failed")
             record_ask_trace(
                 latency=time.perf_counter() - t0,
                 retrieved=retrieved,
@@ -578,7 +623,10 @@ class AgenticRAGAgent:
                 tokens_est=0,
                 is_error=True,
             )
-            yield {"event": "error", "data": {"message": str(e)}}
+            # 对外只暴露可控文案：HTTPException.detail 是自己写的中文提示可直出；
+            # 其余异常的内部细节（连接串/堆栈/上游报错）只进日志，防止经 SSE 泄漏
+            msg = e.detail if isinstance(e, HTTPException) else "服务暂时出现问题，请稍后重试"
+            yield {"event": "error", "data": {"message": msg}}
 
     # ------------------------------------------------------------------
     # LangGraph 风格图：节点 = 函数，边 = 返回的下一节点名，状态 = _AgentState
@@ -656,7 +704,7 @@ class AgenticRAGAgent:
             # 关键设计：一旦进入过 _n_retrieve，后续永远不再回 _n_route，
             # 直接去 _n_generate 收尾。LLM 的路由选择只在首次生效。
             is_greeting_or_math = (
-                _should_skip_retrieval(st.question)
+                should_skip_retrieval(st.question)
                 or bool(re.match(r'^[你好嗨嘿哈哟哇噢唉哼啊嗯哦\s\,\.\!\?\~\@\#\$\%\^\&\*\(\)]+$', st.question.strip()))
             )
 
@@ -722,17 +770,22 @@ class AgenticRAGAgent:
         query = st.route_result.arguments.get("query", st.question)
         top_k = self._top_k or settings.RAG_TOP_K
         retrieved = await self.retriever.retrieve(query, st.kb_id, top_k=top_k)
+        # 去重：图谱预检索/补充检索可能已命中相同 chunk，重复入选会撑大引用
+        # 列表与上下文（同一原文占两个角标）。按 chunk_id 过滤。
+        existing = {s.get("chunkId") for s in st.all_sources}
+        retrieved = [r for r in retrieved if r["chunk_id"] not in existing]
         if retrieved:
             # 连续编号，接在已有来源（图/联网预检索）之后，
             # 避免与图谱预检索已占用的 1..N 撞号导致引用错位
             for i, r in enumerate(retrieved, len(st.all_sources) + 1):
                 r["id"] = i
-            sources = self._format_sources(retrieved)
-            st.all_sources.extend(sources)
-            yield {"event": "sources", "data": sources}
-            context_text = self._sources_to_context(retrieved)
+                st.source_content[i] = r.get("content") or r.get("snippet", "")
+            st.all_sources.extend(self._format_sources(retrieved))
+            yield {"event": "sources", "data": list(st.all_sources)}
             st.messages.append({"role": "assistant", "content": f"[已调用检索 retrieve，针对「{query}」检索到 {len(retrieved)} 条相关文档]"})
-            st.messages.append({"role": "user", "content": f"检索结果：\n{context_text}\n\n基于以上信息，请直接给出最终回答。如果信息明显不足，才调用 supplement_search（大多数情况下直接回答即可）。"})
+            # 全文经 source_content 在 _n_generate 统一注入一次，这里不再复述，
+            # 避免同一批原文在上下文里出现两次（检索消息 + 来源资料）白费 token
+            st.messages.append({"role": "user", "content": "检索已完成。请基于来源资料直接给出最终回答。"})
         else:
             st.messages.append({"role": "assistant", "content": "[已调用 retrieve 工具，但未找到相关文档]"})
             st.messages.append({"role": "user", "content": "检索未找到相关结果。请基于已有信息生成回答。"})
@@ -744,14 +797,19 @@ class AgenticRAGAgent:
         gap = st.route_result.arguments.get("gap_description", "")
         top_k = self._top_k or settings.RAG_TOP_K
         retrieved = await self.retriever.retrieve(refined_query, st.kb_id, top_k=top_k)
+        # 同 _n_retrieve：按 chunk_id 去重，不重复收录已命中的 chunk
+        existing = {s.get("chunkId") for s in st.all_sources}
+        retrieved = [r for r in retrieved if r["chunk_id"] not in existing]
         if retrieved:
-            # 同 _n_retrieve：连续编号，避免与图谱预检索的 1..N 撞号
+            # 同 _n_retrieve：连续编号 + 记录全文，避免与已有来源撞号
             for i, r in enumerate(retrieved, len(st.all_sources) + 1):
                 r["id"] = i
-            sources = self._format_sources(retrieved)
-            st.all_sources.extend(sources)
-            yield {"event": "sources", "data": sources}
+                st.source_content[i] = r.get("content") or r.get("snippet", "")
+            st.all_sources.extend(self._format_sources(retrieved))
+            yield {"event": "sources", "data": list(st.all_sources)}
             context_text = self._sources_to_context(retrieved)
+            # 补充检索是唯一会回到 route 反思的路径：route 需要看到内容才能
+            # 判断「够不够」，故这里保留全文（与 _n_generate 的来源资料有意重复一轮）
             st.messages.append({"role": "assistant", "content": f"[已调用补充检索 supplement_search，针对「{gap}」检索到 {len(retrieved)} 条]"})
             st.messages.append({"role": "user", "content": f"补充检索结果：\n{context_text}\n\n结合之前所有信息，请直接给出最终回答。"})
         else:
@@ -766,7 +824,7 @@ class AgenticRAGAgent:
             st.next = "_n_generate" if st.retrieval_attempted else "_n_route"
             return
         # 兼容两条入口：agent 循环内（route_result 已设置，取 arguments.query）
-        # 与启发式直搜（_should_web_search 直接进本节点，route_result 为 None，退用原问题）
+        # 与启发式直搜（should_web_search 直接进本节点，route_result 为 None，退用原问题）
         query = st.route_result.arguments.get("query", st.question) if st.route_result else st.question
         searcher = WebSearcher()
         try:
@@ -778,8 +836,12 @@ class AgenticRAGAgent:
             for i, w in enumerate(web, len(st.all_sources) + 1):
                 w["id"] = i
                 w["chunk_id"] = f"web:{i}"
-            st.all_sources.extend(web)
-            yield {"event": "sources", "data": self._format_sources(web)}
+                st.source_content[i] = w.get("content") or w.get("snippet", "")
+            # 入库必须用格式化后的 camelCase dict（与 KB 来源一致），
+            # 此前直接 extend 原始 snake_case dict，检索记录页按 sourceType
+            # 统计联网来源时永远计不上
+            st.all_sources.extend(self._format_sources(web))
+            yield {"event": "sources", "data": list(st.all_sources)}
             context_text = self._sources_to_context(web)
             st.messages.append({"role": "assistant", "content": f"[已调用联网搜索 web_search，针对「{query}」检索到 {len(web)} 条网络结果]"})
             st.messages.append({"role": "user", "content": f"联网搜索结果：\n{context_text}\n\n结合以上信息（含知识库与联网结果），请直接给出最终回答。"})
@@ -802,9 +864,11 @@ class AgenticRAGAgent:
         # 重新发射 sources 事件，前端用最终裁剪后的列表替换展示
         if self._source_count and len(st.all_sources) > self._source_count:
             st.all_sources = st.all_sources[: self._source_count]
-            yield {"event": "sources", "data": self._format_sources(st.all_sources)}
+            # all_sources 已是格式化 dict，不能再过 _format_sources（键为
+            # camelCase，二次格式化会 KeyError）；直接发快照
+            yield {"event": "sources", "data": list(st.all_sources)}
         if st.all_sources:
-            ctx = self._sources_to_context(st.all_sources)
+            ctx = self._sources_to_context(st.all_sources, st.source_content)
             if st.graph_reasoning:
                 # 8.5：把图谱多跳推理链路作为独立段落拼进上下文，
                 # 让 LLM 在生成时能显式引用实体间关系（"据图谱，A 经由 B 影响 C"）。
@@ -816,6 +880,9 @@ class AgenticRAGAgent:
                     "请基于以上对话上下文及来源资料回答用户问题。"
                     "引用时使用 [1] [2] 标注编号；若某条标记为联网来源可注明「据联网信息」；"
                     "确实无来源覆盖时再如实说明。"
+                    "\n【排版】保持版面清爽：短答案用连贯语句，不必列点；"
+                    "仅在要点较多时用单层列表，避免多级嵌套与堆砌标题；"
+                    "加粗只留给关键术语，不要大段加粗；不要使用 emoji。"
                     + self._concise_suffix()
                 ),
             })
@@ -905,6 +972,37 @@ class AgenticRAGAgent:
         st.final_answer_text = full_answer
         st.next = "__end__"
 
+    async def _n_start_simple(self, st: "_AgentState") -> AsyncIterator[dict]:
+        """入口节点：simple 意图快路。跳过 route LLM 决策，直接检索。
+
+        检索词来自意图分类时零成本改写的 query（已预置在 route_result）；
+        发一条固定 thinking 事件保证前端决策链展示不断，随后直奔 _n_retrieve。
+        省掉原本 route 的完整 tool_call 往返（system+tools+历史），simple
+        问题首 token 明显变快。
+        """
+        st.step += 1
+        q = (st.route_result.arguments.get("query") if st.route_result else "") or st.question
+        yield {
+            "event": "thinking",
+            "data": {"step": st.step, "action": "retrieve",
+                     "detail": f"简单问题快路：直接检索知识库「{q[:40]}」",
+                     "raw_reasoning": ""},
+        }
+        st.next = "_n_retrieve"
+
+    def _arm_simple_route(self, st: "_AgentState", rewritten_query: str) -> None:
+        """为 simple 快路预置 route_result：_n_retrieve 天然从中取改写后的 query。
+
+        _n_retrieve 读 route_result.arguments["query"]（缺省回退原问题），
+        故只需伪造一条 retrieve 决策即可复用整条检索节点，零侵入。
+        """
+        st.route_result = ToolCallResult(
+            name="retrieve",
+            arguments={"query": (rewritten_query or "").strip() or st.question},
+            raw_text="",
+        )
+        st.action = "retrieve"
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -942,10 +1040,14 @@ class AgenticRAGAgent:
             for r in retrieved
         ]
 
-    def _sources_to_context(self, retrieved: list[dict]) -> str:
+    def _sources_to_context(self, retrieved: list[dict], content_by_id: "dict[int, str] | None" = None) -> str:
+        """把来源拼成 LLM 上下文。优先取 content_by_id 里的 chunk 全文——
+        all_sources 里的 SourceItemOut 只带 150 字 snippet，直接喂给模型
+        会严重限制回答质量（尤其图谱来源，全文只在这里进入生成环节）。
+        无全文时回退 content / snippet（联网来源只有 300 字摘要）。"""
         parts = []
         for r in retrieved:
-            body = r.get("content") or r.get("snippet", "")
+            body = (content_by_id or {}).get(r["id"]) or r.get("content") or r.get("snippet", "")
             parts.append(f"\n[{r['id']}] {r['title']} ({r['kb']})\n{body}")
         return "\n".join(parts)
 
@@ -978,89 +1080,6 @@ class AgenticRAGAgent:
             lines.append(f"- {m}")
         return "\n".join(lines)
 
-    async def _save_memory(self, question: str, answer: str) -> None:
-        """问答结束后，后台抽取并保存长期记忆（不阻塞已返回的 SSE 流）。
-
-        自己开一个独立 db session，与请求主 session 解耦，
-        这样即便生成器已 yield done 并随请求关闭主 session，记忆落库仍可进行。
-        """
-        if not (self.memory and self.user_id):
-            return
-        # 打招呼 / 闲聊无需记忆，省一次 LLM 调用
-        if _should_skip_retrieval(question):
-            return
-        try:
-            async with AsyncSessionLocal() as s:
-                memories = await self.memory.extract(self.llm, question, answer)
-                if memories:
-                    await self.memory.save(self.user_id, memories, s)
-        except Exception as e:  # noqa: BLE001  (intentional catch-all: background memory-save task, log and skip on failure)
-            logger.warning("memory save failed (skipped): %s", e)
-
-    async def _load_session_history(self, session) -> "tuple[list[dict], str | None]":
-        """返回 (保留区原始消息, 滚动摘要文本)。
-
-        保留最近 CONV_SUMMARY_KEEP_RECENT 条原始消息（细节不失真），
-        更早的已由后台 _roll_summary 压缩进 session.summary（长会话上下文）。
-        summary 取自 ChatSession.summary（由 _roll_summary 异步维护）。
-        排除当前轮刚 flush 的 user 消息。
-        """
-        result = await self.db.execute(
-            select(ChatMessage)
-            .where(ChatMessage.session_id == session.id)
-            .order_by(ChatMessage.created_at.asc())
-        )
-        all_msgs = result.scalars().all()
-
-        # 排除最后一条（本轮刚 flush 的 user message）；首条消息则无历史
-        if len(all_msgs) > 1:
-            all_msgs = all_msgs[:-1]
-        else:
-            return [], (session.summary or None)
-
-        n = len(all_msgs)
-        keep = settings.CONV_SUMMARY_KEEP_RECENT
-        if n <= keep:
-            # 全部作原始消息；若 session 已有旧摘要也一并带上
-            return self._msgs_to_llm(all_msgs), (session.summary or None)
-
-        recent = all_msgs[-keep:]
-        return self._msgs_to_llm(recent), (session.summary or None)
-
-    def _msgs_to_llm(self, msgs) -> list[dict]:
-        """把 ChatMessage 列表回构为 LLM messages（多模态 user 回构 content blocks）。"""
-        history: list[dict] = []
-        for msg in msgs:
-            if msg.role == "user":
-                if msg.attachments:
-                    content = self._build_user_content(msg.content or "", msg.attachments)
-                else:
-                    content = msg.content or ""
-                history.append({"role": "user", "content": content})
-            elif msg.role == "assistant":
-                if msg.content:
-                    history.append({"role": "assistant", "content": msg.content})
-        return history
-
-    @staticmethod
-    def _format_history_text(msgs) -> str:
-        """把一段历史消息拼成纯文本（给 LLM 做摘要用）。
-
-        多模态图片：只标注「附 N 张图片」，绝不塞 base64（太大且无意义）。
-        """
-        parts = []
-        for m in msgs:
-            if m.role == "user":
-                extra = ""
-                if m.attachments:
-                    n = len(m.attachments) if isinstance(m.attachments, list) else 0
-                    if n:
-                        extra = f"（附 {n} 张图片）"
-                parts.append(f"用户：{(m.content or '').strip()}{extra}")
-            elif m.role == "assistant" and m.content:
-                parts.append(f"助手：{m.content.strip()}")
-        return "\n".join(parts)
-
     def _summary_section(self) -> str:
         """把滚动摘要格式化成可注入 system prompt 的文本块（无摘要则返回空串）。"""
         if not getattr(self, "_summary_text", ""):
@@ -1069,130 +1088,3 @@ class AgenticRAGAgent:
             "\n\n## 对话历史摘要（较早对话已压缩，供你理解上下文）\n"
             + self._summary_text
         )
-
-    async def _roll_summary(self, session_id: uuid.UUID) -> None:
-        """后台滚动摘要：把窗口外的旧对话段压缩进 ChatSession.summary。
-
-        与 Mem0 的 _save_memory 同源模式——自己开独立 db session，
-        不阻塞已返回的 SSE 流；本轮 user+assistant 落库后才触发，
-        故能读到完整历史。下一轮提问时 summary 才被注入
-        （滚动摘要本就是给未来轮次用的）。
-
-        触发闸门（省成本）：
-        - 历史总条数 <= KEEP_RECENT：不摘要
-        - 窗口外、尚未摘要的段为空：跳过
-        - 非首次且累计新段 < STEP：跳过（每积累 STEP 条才重摘一次）
-        """
-        if not settings.CONV_SUMMARY_ENABLED:
-            return
-        try:
-            async with AsyncSessionLocal() as s:
-                sess = (
-                    await s.execute(
-                        select(ChatSession).where(ChatSession.id == session_id)
-                    )
-                ).scalar_one_or_none()
-                if not sess:
-                    return
-                msgs = (
-                    await s.execute(
-                        select(ChatMessage)
-                        .where(ChatMessage.session_id == session_id)
-                        .order_by(ChatMessage.created_at.asc())
-                    )
-                ).scalars().all()
-
-                n = len(msgs)
-                keep = settings.CONV_SUMMARY_KEEP_RECENT
-                if n <= keep:
-                    return  # 还不够长，无需摘要
-
-                window_start = n - keep  # 窗口外（需摘要）/ 窗口内（保留）分界
-                already = sess.summarized_count or 0
-                if window_start <= already:
-                    return  # 没有新窗口外消息需要摘要
-                new_segment_count = window_start - already
-                if already > 0 and new_segment_count < settings.CONV_SUMMARY_STEP:
-                    return  # 非首次：累计新段未达 STEP，先不重摘（省 LLM 调用）
-
-                segment_text = self._format_history_text(msgs[already:window_start])
-                if not segment_text.strip():
-                    # 边界前移，避免反复空尝试
-                    sess.summarized_count = window_start
-                    await s.commit()
-                    return
-
-                prompt = [
-                    {"role": "system", "content": _ROLL_SUMMARY_SYSTEM},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"[已有摘要]\n{sess.summary or '（无）'}\n\n"
-                            f"[本轮需要压缩的新对话]\n{segment_text}"
-                        ),
-                    },
-                ]
-                try:
-                    new_summary = (await self.llm.chat(prompt, temperature=0.2)).strip()
-                except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, skip summary if LLM fails)
-                    logger.warning("roll summary llm failed (skip): %s", e)
-                    return
-                if not new_summary:
-                    sess.summarized_count = window_start
-                    await s.commit()
-                    return
-
-                sess.summary = new_summary
-                sess.summarized_count = window_start
-                await s.commit()
-        except Exception as e:  # noqa: BLE001  (intentional catch-all: background summary task, log and skip on failure)
-            logger.warning("roll summary failed (skipped): %s", e)
-
-    @staticmethod
-    def _build_user_content(question: str, files: "list[dict] | None") -> "str | list[dict]":
-        """把文本 + 多模态文件拼成 OpenAI 多模态 content。
-
-        纯文本问题 → 返回 str;带图 → 返回 content blocks list
-        （text + image_url/data URI）。当前模型仅支持 image，故 audio/video
-        不拼进 LLM 消息（仅作为附件入库/回显），这里只处理 image。
-        """
-        if not files:
-            return question
-        blocks: list[dict] = []
-        if question.strip():
-            blocks.append({"type": "text", "text": question})
-        for f in files:
-            if f.get("kind") == "image":
-                # OSS 直传优先用 url（大模型直接拉取，省去大 base64 往返）；
-                # 否则回退旧 data URI 路径
-                if f.get("url"):
-                    blocks.append({
-                        "type": "image_url",
-                        "image_url": {"url": f["url"]},
-                    })
-                elif f.get("data_b64"):
-                    blocks.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{f['mime_type']};base64,{f['data_b64']}"},
-                    })
-        return blocks if blocks else question
-
-    async def _get_or_create_session(self, session_id: str | None, question: str) -> ChatSession:
-        if session_id:
-            # 前端传入的 session_id 可能非合法 UUID，先校验再查库，
-            # 否则 uuid.UUID() 抛 ValueError → 被顶层兜底成 500，应明确 400。
-            try:
-                sid = uuid.UUID(session_id)
-            except (ValueError, AttributeError, TypeError):
-                raise HTTPException(status_code=400, detail="无效的会话 ID") from None
-            result = await self.db.execute(select(ChatSession).where(ChatSession.id == sid))
-            s = result.scalar_one_or_none()
-            if s:
-                return s
-        # 隐式建会话（主聊天里直接提问、未指定 session_id 时）必须绑定
-        # user_id，否则 list_sessions 按 user_id 过滤会把该会话排除，
-        # 导致「回复能显示、sessionId 也返回了，却在历史列表里找不到」。
-        s = ChatSession(title=question[:50], user_id=self.user_id)
-        self.db.add(s)
-        await self.db.flush()
-        return s

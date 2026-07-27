@@ -93,10 +93,21 @@ async def ask(
                 detail=req.question[:200],
             )
             es = get_es()
-            if es.enabled and req.knowledge_base and await es.index_exists(req.knowledge_base):
-                retriever = ESRetriever(embedder, es, settings.RRF_K)
-            else:
-                # 未指定 KB 时，注入可访问范围做库级隔离过滤
+            retriever = None
+            if es.enabled:
+                if req.knowledge_base and await es.index_exists(req.knowledge_base):
+                    # 指定单库且索引已建 → ES 快路（kNN+BM25，免内存全量余弦）
+                    retriever = ESRetriever(embedder, es, settings.RRF_K)
+                elif accessible_kb_ids:
+                    # 「全部知识库」模式：ES 跨索引检索用户可访问的全部库，
+                    # 避免把全量 chunk 拉进内存算余弦（库多量大时是主要瓶颈）
+                    retriever = ESRetriever(
+                        embedder, es, settings.RRF_K,
+                        fallback_kb_ids=[str(k) for k in accessible_kb_ids],
+                    )
+            if retriever is None:
+                # ES 不可用 / 索引未建：回退 pgvector 内存混合检索，
+                # 未指定 KB 时注入可访问范围做库级隔离过滤
                 retriever = HybridRetriever(
                     embedder, gen_db, settings.RRF_K, kb_ids=accessible_kb_ids
                 )

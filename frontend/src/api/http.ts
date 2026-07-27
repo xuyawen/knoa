@@ -1,10 +1,6 @@
 // 鉴权统一走 HttpOnly Cookie（由浏览器自动随请求携带，JS 读不到，防 XSS 窃取）。
-// 因此这里不再注入 Authorization 头；跨域时 fetch 需 credentials:'include'（见 trackedFetch）。
+// 因此这里不注入 Authorization 头；跨域时 fetch 需 credentials:'include'（见 trackedFetch）。
 import { report } from '../lib/monitor'
-
-export function authHeaders(): Record<string, string> {
-  return {}
-}
 
 // 统一的 HTTP 错误转换：把后端非 2xx 响应转成「用户友好」的 Error。
 // 关键：5xx 不把后端原始内部错误回显给用户（可能含栈/路径），统一兜底文案；
@@ -34,6 +30,44 @@ export async function throwHttpError(resp: Response, fallback?: string): Promise
   // 后端若回显了 "HTTP xxx" 这类无意义文案，用友好映射覆盖
   if (/^HTTP \d+$/.test(detail)) detail = ''
   throw new Error(detail || defaultMsg)
+}
+
+// ── 统一请求封装 ──
+// 各 api 模块原先每个函数都重复「fetch → 判 resp.ok → throwHttpError → resp.json()」
+// 三段式样板，这里收敛为单点：json 选项自动带 Content-Type 并序列化请求体。
+
+export interface RequestOptions {
+  method?: string
+  /** 请求体对象，自动 JSON.stringify 并附带 Content-Type */
+  json?: unknown
+  signal?: AbortSignal
+}
+
+async function doFetch(url: string, opts?: RequestOptions): Promise<Response> {
+  const init: RequestInit = { method: opts?.method, signal: opts?.signal }
+  if (opts?.json !== undefined) {
+    init.headers = { 'Content-Type': 'application/json' }
+    init.body = JSON.stringify(opts.json)
+  }
+  const resp = await fetch(url, init)
+  if (!resp.ok) await throwHttpError(resp)
+  return resp
+}
+
+/** 发请求并解析 JSON 响应；非 2xx 抛用户友好 Error。 */
+export async function request<T>(url: string, opts?: RequestOptions): Promise<T> {
+  const resp = await doFetch(url, opts)
+  return resp.json() as Promise<T>
+}
+
+/** 发请求但不解析响应体（DELETE / 204 等无返回内容的接口）。 */
+export async function requestVoid(url: string, opts?: RequestOptions): Promise<void> {
+  await doFetch(url, opts)
+}
+
+/** 发请求返回原始 Response（下载 blob 等需要自行处理响应体的场景）。 */
+export async function requestRaw(url: string, opts?: RequestOptions): Promise<Response> {
+  return doFetch(url, opts)
 }
 
 // ── 统一 token 失效拦截 ──

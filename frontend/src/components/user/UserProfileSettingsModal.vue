@@ -1,18 +1,19 @@
 <script setup lang="ts">
-// 个人设置弹框：基本信息 / 安全设置 / 系统设置 三个 tab。
+// 个人设置弹框：基本信息 / 安全设置 两个 tab。
 // 复用于个人中心页面的"设置"按钮，以及顶部导航"账号设置"菜单。
+// 偏好配置（模型/语音/输入习惯）已并入「模型配置」页(/chat/model)，本弹框不再承载。
 import { computed, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
+import { errMsg } from '@/utils/errmsg'
 import { changePassword, updateUser } from '@/api/auth'
 import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
-import SystemSettingsPanel from './SystemSettingsPanel.vue'
 
 const props = withDefaults(
   defineProps<{
     show: boolean
-    initialTab?: 'info' | 'security' | 'system'
+    initialTab?: 'info' | 'security'
   }>(),
   { initialTab: 'info' },
 )
@@ -25,12 +26,10 @@ const ROLE_LABEL: Record<string, string> = { admin: '管理员', editor: '编辑
 const roleLabel = computed(() => ROLE_LABEL[auth.user?.role || 'viewer'] || auth.user?.role || '—')
 
 /* ---------- tab 状态 ---------- */
-const editTab = ref<'info' | 'security' | 'system'>(props.initialTab)
+const editTab = ref<'info' | 'security'>(props.initialTab)
 const editingInfo = ref(false)
 const infoDraft = ref({ displayName: '', email: '', department: '', employeeId: '' })
 const infoSaving = ref(false)
-const systemSettingsRef = ref<InstanceType<typeof SystemSettingsPanel> | null>(null)
-const systemSaving = ref(false)
 
 function syncInfoDraft() {
   const u = auth.user
@@ -62,16 +61,6 @@ function cancelEditInfo() {
   editingInfo.value = false
 }
 
-async function onSaveSystem() {
-  if (!systemSettingsRef.value) return
-  systemSaving.value = true
-  try {
-    await systemSettingsRef.value.onSave()
-  } finally {
-    systemSaving.value = false
-  }
-}
-
 async function saveInfo() {
   if (!auth.user) return
   infoSaving.value = true
@@ -85,8 +74,8 @@ async function saveInfo() {
     await auth.fetchMe()
     editingInfo.value = false
     toast.success('资料已更新')
-  } catch (e: any) {
-    toast.error(e?.message || '更新失败')
+  } catch (e: unknown) {
+    toast.error(errMsg(e, '更新失败'))
   } finally {
     infoSaving.value = false
   }
@@ -118,6 +107,7 @@ async function onSubmitPassword() {
     await changePassword(pwdOld.value, pwdNew.value)
     toast.success('密码修改成功')
     resetPwd()
+    emit('close')
   } catch (e) {
     toast.error(e instanceof Error ? e.message : '修改失败，请重试')
   } finally {
@@ -143,64 +133,72 @@ const pwdStrength = computed(() => {
     <div class="edit-tabs">
       <button
         v-for="t in [
-          { key: 'info', label: '基本信息' },
-          { key: 'security', label: '安全设置' },
-          { key: 'system', label: '系统设置' },
+          { key: 'info', label: '基本信息', icon: 'user' },
+          { key: 'security', label: '安全设置', icon: 'lock' },
         ]"
         :key="t.key"
         class="edit-tab"
         :class="{ active: editTab === t.key }"
-        @click="editTab = t.key as 'info' | 'security' | 'system'"
+        @click="editTab = t.key as 'info' | 'security'"
       >
-        {{ t.label }}
+        <Icon :name="t.icon" :size="14" /> {{ t.label }}
       </button>
     </div>
 
     <!-- 基本信息 -->
     <div v-if="editTab === 'info'" class="edit-body">
-      <div class="info-grid">
-        <div class="info-item">
-          <span class="info-key">用户名</span>
-          <span class="info-val">{{ auth.user?.username || '—' }}</span>
+      <div class="info-group">
+        <div class="info-group-title">基本资料</div>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-key">显示名称</span>
+            <span v-if="!editingInfo" class="info-val">{{ auth.user?.displayName || '未设置' }}</span>
+            <input v-else v-model="infoDraft.displayName" class="info-input" maxlength="50" placeholder="未设置" />
+          </div>
+          <div class="info-item">
+            <span class="info-key">邮箱</span>
+            <span v-if="!editingInfo" class="info-val">{{ auth.user?.email || '未设置' }}</span>
+            <input v-else v-model="infoDraft.email" class="info-input" type="email" placeholder="未设置" />
+          </div>
+          <div class="info-item">
+            <span class="info-key">部门</span>
+            <span v-if="!editingInfo" class="info-val">{{ auth.user?.department || '未设置' }}</span>
+            <input v-else v-model="infoDraft.department" class="info-input" placeholder="未设置" />
+          </div>
+          <div class="info-item">
+            <span class="info-key">工号</span>
+            <span v-if="!editingInfo" class="info-val">{{ auth.user?.employeeId || '未设置' }}</span>
+            <input v-else v-model="infoDraft.employeeId" class="info-input" placeholder="未设置" />
+          </div>
         </div>
-        <div class="info-item">
-          <span class="info-key">显示名称</span>
-          <span v-if="!editingInfo" class="info-val">{{ auth.user?.displayName || '未设置' }}</span>
-          <input v-else v-model="infoDraft.displayName" class="info-input" maxlength="50" placeholder="未设置" />
-        </div>
-        <div class="info-item">
-          <span class="info-key">邮箱</span>
-          <span v-if="!editingInfo" class="info-val">{{ auth.user?.email || '未设置' }}</span>
-          <input v-else v-model="infoDraft.email" class="info-input" type="email" placeholder="未设置" />
-        </div>
-        <div class="info-item">
-          <span class="info-key">部门</span>
-          <span v-if="!editingInfo" class="info-val">{{ auth.user?.department || '未设置' }}</span>
-          <input v-else v-model="infoDraft.department" class="info-input" placeholder="未设置" />
-        </div>
-        <div class="info-item">
-          <span class="info-key">工号</span>
-          <span v-if="!editingInfo" class="info-val">{{ auth.user?.employeeId || '未设置' }}</span>
-          <input v-else v-model="infoDraft.employeeId" class="info-input" placeholder="未设置" />
-        </div>
-        <div class="info-item">
-          <span class="info-key">角色权限</span>
-          <span class="info-val"><span class="role-tag" :class="roleLabel === '管理员' ? 'r-admin' : roleLabel === '编辑者' ? 'r-editor' : 'r-viewer'">{{ roleLabel }}</span></span>
-        </div>
-        <div class="info-item">
-          <span class="info-key">账号状态</span>
-          <span class="info-val">
-            <span class="dot-status" :class="auth.user?.isActive ? 'on' : 'off'" />
-            {{ auth.user?.isActive ? '启用' : '停用' }}
-          </span>
-        </div>
-        <div class="info-item">
-          <span class="info-key">注册时间</span>
-          <span class="info-val">{{ auth.user?.createdAt ? new Date(auth.user.createdAt).toLocaleDateString('zh-CN') : '—' }}</span>
-        </div>
-        <div class="info-item">
-          <span class="info-key">用户 ID</span>
-          <span class="info-val id-copy">{{ auth.user?.id || '—' }}</span>
+      </div>
+
+      <div class="info-group">
+        <div class="info-group-title">账号信息（只读）</div>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-key">用户名</span>
+            <span class="info-val">{{ auth.user?.username || '—' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-key">角色权限</span>
+            <span class="info-val"><span class="role-tag" :class="roleLabel === '管理员' ? 'r-admin' : roleLabel === '编辑者' ? 'r-editor' : 'r-viewer'">{{ roleLabel }}</span></span>
+          </div>
+          <div class="info-item">
+            <span class="info-key">账号状态</span>
+            <span class="info-val">
+              <span class="dot-status" :class="auth.user?.isActive ? 'on' : 'off'" />
+              {{ auth.user?.isActive ? '启用' : '停用' }}
+            </span>
+          </div>
+          <div class="info-item">
+            <span class="info-key">注册时间</span>
+            <span class="info-val">{{ auth.user?.createdAt ? new Date(auth.user.createdAt).toLocaleDateString('zh-CN') : '—' }}</span>
+          </div>
+          <div class="info-item full">
+            <span class="info-key">用户 ID</span>
+            <span class="info-val id-copy" :title="auth.user?.id">{{ auth.user?.id || '—' }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -237,11 +235,6 @@ const pwdStrength = computed(() => {
       </div>
     </form>
 
-    <!-- 系统设置 -->
-    <div v-else class="edit-body">
-      <SystemSettingsPanel ref="systemSettingsRef" />
-    </div>
-
     <template #foot>
       <template v-if="editTab === 'info'">
         <button v-if="!editingInfo" class="btn btn-ghost" @click="emit('close')">关闭</button>
@@ -255,16 +248,10 @@ const pwdStrength = computed(() => {
           </button>
         </template>
       </template>
-      <template v-else-if="editTab === 'security'">
+      <template v-else>
         <button class="btn btn-ghost" @click="emit('close')">关闭</button>
         <button class="btn btn-primary" :disabled="saving" @click="onSubmitPassword">
           <Icon v-if="saving" name="loader" :size="14" class="spin" /> 确认修改
-        </button>
-      </template>
-      <template v-else>
-        <button class="btn btn-ghost" @click="emit('close')">关闭</button>
-        <button class="btn btn-primary" :disabled="systemSaving" @click="onSaveSystem">
-          <Icon v-if="systemSaving" name="loader" :size="14" class="spin" /> 保存设置
         </button>
       </template>
     </template>
@@ -282,6 +269,10 @@ const pwdStrength = computed(() => {
 }
 .edit-tab {
   flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 8px 12px;
   border-radius: var(--radius-md);
   border: none;
@@ -302,12 +293,24 @@ const pwdStrength = computed(() => {
 }
 .edit-body { min-height: 360px; }
 
+.info-group + .info-group { margin-top: 24px; }
+.info-group-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
 .info-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px 28px;
 }
-.info-item { display: flex; flex-direction: column; gap: 7px; }
+.info-item { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.info-item.full { grid-column: 1 / -1; }
 .info-key {
   font-size: 11.5px;
   font-weight: 600;
@@ -321,7 +324,14 @@ const pwdStrength = computed(() => {
   font-weight: 500;
   min-height: 22px;
 }
-.id-copy { font-family: monospace; font-size: 13px; color: var(--text-tertiary); }
+.id-copy {
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .info-input {
   padding: 7px 11px;
   border-radius: var(--radius-md);
@@ -357,7 +367,7 @@ const pwdStrength = computed(() => {
 .dot-status.on { background: var(--success); box-shadow: 0 0 6px color-mix(in srgb, var(--success) 50%, transparent); }
 .dot-status.off { background: var(--danger); }
 
-.sec-form { display: flex; flex-direction: column; gap: 18px; max-width: 420px; }
+.sec-form { display: flex; flex-direction: column; gap: 18px; }
 .sec-field { display: flex; flex-direction: column; gap: 7px; }
 .sec-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
 .req { color: var(--danger); }

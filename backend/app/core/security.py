@@ -89,13 +89,46 @@ async def revoke_token(jti: str, ttl: int) -> None:
 
 
 async def is_token_revoked(jti: str) -> bool:
-    """检查 jti 是否已被注销；无法连 Redis 时视为未吊销，保证可用性。"""
+    """检查 jti 是否已被注销。
+
+    Redis 不可用时：生产环境 fail-closed（视为已吊销，避免已注销令牌
+    在黑名单不可查期间复活）；开发/测试环境 fail-open 保证可用性。
+    与 login_rate_limit「生产 Redis 是硬依赖」的策略保持一致。
+    """
     if not jti:
         return False
     try:
         return await get_redis().redis.exists(f"knoa:revoked:{jti}") == 1
-    except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, treat as not revoked if redis unavailable)
+    except Exception:  # noqa: BLE001  (intentional catch-all: redis unavailable → fail-closed in prod, fail-open in dev/test)
+        if settings.APP_ENV == "production":
+            logger.warning("revocation check unavailable, fail-closed (prod)")
+            return True
         return False
+
+
+async def revoke_user_tokens_before(user_id: str) -> None:
+    """改密后按用户吊销：记录时间戳，iat 早于该时刻的令牌全部失效。
+
+    TTL = 令牌最长寿命：更早的令牌届时已自然过期，键可安全消失。
+    Redis 不可用时静默降级（与 revoke_token 一致）。
+    """
+    try:
+        await get_redis().redis.set(
+            f"knoa:pwdrevoked:{user_id}",
+            str(int(time.time())),
+            ex=settings.JWT_EXPIRE_MINUTES * 60,
+        )
+    except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, degrade silently if redis unavailable)
+        logger.warning("revoke user tokens failed (redis unavailable?)")
+
+
+async def is_token_stale(user_id: str, iat: int) -> bool:
+    """改密吊销检查：签发时间早于该用户最近一次改密时刻的令牌视为失效。"""
+    try:
+        v = await get_redis().redis.get(f"knoa:pwdrevoked:{user_id}")
+        return v is not None and iat < int(v)
+    except Exception:  # noqa: BLE001  (intentional catch-all: same fail-closed/fail-open policy as is_token_revoked)
+        return settings.APP_ENV == "production"
 
 
 def extract_token(request: Request) -> str | None:
@@ -120,9 +153,16 @@ async def get_current_user(
     if not token:
         raise HTTPException(status_code=401, detail="未提供认证令牌")
     payload = decode_access_token(token)
+    # 防御性取值：缺 sub 的畸形令牌应明确 401，而非 KeyError 兑成 500
+    sub = payload.get("sub")
+    if not sub:
+        raise HTTPException(status_code=401, detail="无效令牌")
     if await is_token_revoked(payload.get("jti", "")):
         raise HTTPException(status_code=401, detail="令牌已吊销")
-    user = await db.scalar(select(User).where(User.id == payload["sub"]))
+    # 改密吊销：密码修改后，此前签发的全部令牌立即失效
+    if await is_token_stale(sub, int(payload.get("iat", 0))):
+        raise HTTPException(status_code=401, detail="凭证已失效，请重新登录")
+    user = await db.scalar(select(User).where(User.id == sub))
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="用户不存在或已停用")
     return user
@@ -218,24 +258,19 @@ async def get_accessible_kb_ids(db: AsyncSession, user: User) -> list[str]:
     - admin 角色：可见全部库；
     - 其余用户：在 kb_permission 中有记录者 + 遗留「开放库」（该库无任何权限记录）可见；
       严格隔离库（已有他人权限记录但自己不在其中）不可见。
-    语义与 get_kb_permission_level 的「遗留开放库」规则保持一致。
+    语义与 get_kb_permission_level 的「遗留开放库」规则保持一致；
+    非 admin 分支用单条 EXISTS 查询完成（原先拆成 3 次全量查询 + 内存集合运算）。
     """
     if await _is_kb_super_admin(db, user):
         rows = (await db.execute(select(KnowledgeBase.id))).scalars().all()
         return [str(x) for x in rows]
-    all_kb_ids = [
-        str(x) for x in (await db.execute(select(KnowledgeBase.id))).scalars().all()
-    ]
-    user_perm_kbs = {
-        str(r[0])
-        for r in (
-            await db.execute(
-                select(KBPermission.kb_id).where(KBPermission.user_id == user.id)
-            )
-        ).all()
-    }
-    strict_kb_ids = {str(r[0]) for r in (await db.execute(select(KBPermission.kb_id))).all()}
-    return [
-        kb for kb in all_kb_ids
-        if kb in user_perm_kbs or kb not in strict_kb_ids
-    ]
+    user_perm = (
+        select(KBPermission.id)
+        .where(KBPermission.kb_id == KnowledgeBase.id, KBPermission.user_id == user.id)
+        .exists()
+    )
+    any_perm = select(KBPermission.id).where(KBPermission.kb_id == KnowledgeBase.id).exists()
+    rows = (
+        await db.execute(select(KnowledgeBase.id).where(user_perm | ~any_perm))
+    ).scalars().all()
+    return [str(x) for x in rows]

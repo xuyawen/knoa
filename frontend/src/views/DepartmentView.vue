@@ -9,6 +9,7 @@ import DataTable from '@/components/ui/DataTable.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
+import { errMsg } from '@/utils/errmsg'
 import {
   getDepartments,
   createDepartment,
@@ -51,8 +52,8 @@ async function loadDepts() {
   loading.value = true
   try {
     rawTree.value = await getDepartments()
-  } catch (e: any) {
-    toast.error(`加载部门失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`加载部门失败：${errMsg(e)}`)
   } finally {
     loading.value = false
   }
@@ -138,8 +139,8 @@ async function save() {
     }
     showModal.value = false
     await loadDepts()
-  } catch (e: any) {
-    toast.error(`操作失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`操作失败：${errMsg(e)}`)
   } finally {
     saving.value = false
   }
@@ -158,8 +159,8 @@ async function confirmDelete() {
     await deleteDepartment(d.id)
     toast.success(`已删除：${d.name}`)
     await loadDepts()
-  } catch (e: any) {
-    toast.error(`删除失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`删除失败：${errMsg(e)}`)
   }
 }
 </script>
@@ -169,10 +170,6 @@ async function confirmDelete() {
     <div class="card dept-card">
     <!-- 标题栏 -->
     <div class="dept-head">
-      <h3 class="dept-title">部门管理</h3>
-      <button v-if="auth.isAdmin" class="btn btn-primary btn-sm" @click="openCreate">
-        <Icon name="plus" :size="13" /> 新增部门
-      </button>
     </div>
 
     <!-- 工具栏 -->
@@ -180,6 +177,9 @@ async function confirmDelete() {
       <span class="dept-count">共 {{ totalDepts }} 个部门</span>
       <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDepts()">
         <Icon name="refresh" :size="15" :class="{ spin: loading }" />
+      </button>
+      <button v-if="auth.isAdmin" class="btn btn-primary btn-sm" style="margin-left:auto" @click="openCreate">
+        <Icon name="plus" :size="13" /> 新增部门
       </button>
     </div>
 

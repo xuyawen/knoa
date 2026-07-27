@@ -90,10 +90,11 @@ class HybridRetriever:
         now = time.monotonic()
         entry = _BM25_CACHE.get(key)
         if entry and now - entry["ts"] < _BM25_TTL:
-            # 命中缓存：复用已分词好的 BM25 与过滤后的 chunk 列表
+            # 命中缓存：复用已分词好的 BM25、过滤后的 chunk 列表与向量矩阵
             chunks = entry["chunks"]
             self._bm25 = entry["bm25"]
             self._bm25_chunks = chunks
+            chunk_embeddings = entry["matrix"]
         else:
             raw = await self._load_chunks(kb_id)
             if not raw:
@@ -108,14 +109,16 @@ class HybridRetriever:
             if not valid:
                 return []
             chunks = valid
+            # 向量矩阵随缓存一起固化：不然每次请求都要把 N×D 的 embedding
+            # 列表重新堆成 numpy 数组，大库下是纯浪费
+            chunk_embeddings = np.array([c["embedding"] for c in chunks])
             # 构建 BM25（jieba 分词是大头，靠缓存避免每请求重算）
             tokenized = [list(jieba.cut_for_search(c["content"])) for c in chunks]
             self._bm25 = BM25Okapi(tokenized)
             self._bm25_chunks = chunks
-            _BM25_CACHE[key] = {"ts": now, "chunks": chunks, "bm25": self._bm25}
+            _BM25_CACHE[key] = {"ts": now, "chunks": chunks, "bm25": self._bm25, "matrix": chunk_embeddings}
 
         # 1. 向量检索 (numpy 余弦相似度, 归一化向量直接点积)
-        chunk_embeddings = np.array([c["embedding"] for c in chunks])
         cosine_scores = chunk_embeddings @ query_vec  # 归一化向量点积 = 余弦
         vector_ranked = sorted(
             enumerate(cosine_scores), key=lambda x: x[1], reverse=True
@@ -155,7 +158,9 @@ class HybridRetriever:
             add_chunk(idx, rank, 1.0 - float(score))
         for rank, (idx, _) in enumerate(bm25_ranked):
             if idx < len(chunks):
-                add_chunk(idx, rank, 0.0)
+                # 仅关键词命中（无向量相似度）：distance 置 1.0 使 confidence=0，
+                # 前端对 0 值只显示「相关」，不会误报「100% 相关」
+                add_chunk(idx, rank, 1.0)
 
         # 排序取 top_k（RRF 原始顺序，留作重排对比基线）
         pre_ids = sorted(rrf_scores, key=rrf_scores.get, reverse=True)[:top_k]

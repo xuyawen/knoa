@@ -31,7 +31,7 @@ class Document(Base):
     __tablename__ = "document"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    kb_id: Mapped[str] = mapped_column(ForeignKey("knowledge_base.id"))
+    kb_id: Mapped[str] = mapped_column(ForeignKey("knowledge_base.id"), index=True)
     title: Mapped[str] = mapped_column(String(200))
     source_path: Mapped[str] = mapped_column(String(500))
     content_md: Mapped[str] = mapped_column(Text)
@@ -67,7 +67,7 @@ class DocChunk(Base):
     __tablename__ = "doc_chunk"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("document.id"))
+    document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("document.id"), index=True)
     kb_id: Mapped[str] = mapped_column(ForeignKey("knowledge_base.id"), index=True)
     chunk_index: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(Text)
@@ -102,6 +102,9 @@ class ChatMessage(Base):
     citations: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     sources: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     attachments: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # 思考过程（Agentic RAG 决策链）：仅 assistant 回答落库，user 为 None。
+    # 历史会话回显用，避免"重新打开会话思考过程消失"。
+    thinking_steps: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
 

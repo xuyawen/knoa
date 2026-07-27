@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import paginate
 from app.core.security import get_current_user
-from app.db import ChatMessage, ChatSession, User
+from app.db import ChatMessage, ChatSession, MessageFeedback, User
 from app.deps import get_db
 from app.models.chat import (
     RecordOut,
@@ -27,22 +27,32 @@ async def list_records(
     user: User = Depends(get_current_user),
 ):
     """检索记录分页：返回当前用户的问答对（user 提问 + 紧跟的 assistant 回答），
-    按会话更新时间倒序，支持按来源类型过滤（kb/web/graph）。
+    按提问时间倒序，支持按来源类型过滤（kb/web/graph）。
 
-    核心查询用 PostgreSQL DISTINCT ON 把每条 user 消息与它之后最近的 assistant
-    消息配对；来源过滤在 Python 侧对 JSONB sources 做计数（避免 SQL 层解 JSON）。
+    每条 user 消息用 LATERAL 子查询配对其后最早的 assistant 回答——
+    旧实现的 `a.created_at > u.created_at` range join 会在单会话内产生
+    二次方笛卡尔积再由 DISTINCT ON 去重，消息一多就慢；来源过滤用
+    JSONB 包含运算符在 SQL 侧完成，分页与计数不再把全量拉进内存。
     """
     user_id = str(user.id)
 
-    # 用原生 SQL 做「user→紧邻 assistant」配对。
-    # PostgreSQL DISTINCT ON (u.id) 保证每条 user 消息只取 created_at 最小的那条 assistant 回答，
-    # 即用户提问后「紧跟」的第一条回答。外层再按会话时间倒序做全局排序。
-    sql = text("""
-        SELECT * FROM (
-            SELECT DISTINCT ON (u.id)
+    # 来源类型过滤：sources 是 JSONB 数组，@> '[{...}]' 表示「数组中任一
+    # 元素包含该键值」。graph 额外兼容 graph-multihop（多跳推理来源）。
+    # 取自固定字典（非用户输入），拼接安全。
+    source_filter = {
+        "kb": 'AND a.sources @> \'[{"sourceType": "kb"}]\'::jsonb',
+        "web": 'AND a.sources @> \'[{"sourceType": "web"}]\'::jsonb',
+        "graph": (
+            'AND (a.sources @> \'[{"sourceType": "graph"}]\'::jsonb'
+            ' OR a.sources @> \'[{"sourceType": "graph-multihop"}]\'::jsonb)'
+        ),
+    }.get(f, "")
+
+    sql = text(f"""
+        SELECT *, COUNT(*) OVER() AS total_count FROM (
+            SELECT
                 s.id           AS session_id,
                 s.title        AS session_title,
-                s.updated_at   AS session_updated,
                 u.id           AS user_msg_id,
                 u.content      AS question,
                 a.content      AS answer,
@@ -50,73 +60,54 @@ async def list_records(
                 u.created_at   AS q_created
             FROM chat_message u
             JOIN chat_session s ON s.id = u.session_id
-            JOIN chat_message a ON a.session_id = u.session_id
-                AND a.role = 'assistant'
-                AND a.created_at > u.created_at
+            JOIN LATERAL (
+                SELECT m.content, m.sources
+                FROM chat_message m
+                WHERE m.session_id = u.session_id
+                  AND m.role = 'assistant'
+                  AND m.created_at > u.created_at
+                ORDER BY m.created_at ASC
+                LIMIT 1
+            ) a ON true
             WHERE s.user_id = :user_id
               AND u.role = 'user'
-            ORDER BY u.id, a.created_at ASC
+              {source_filter}
         ) paired
-        ORDER BY paired.session_updated DESC, paired.q_created ASC
+        ORDER BY paired.q_created DESC
+        LIMIT :limit OFFSET :offset
     """)
 
-    result = await db.execute(sql, {"user_id": user_id})
+    result = await db.execute(
+        sql, {"user_id": user_id, "limit": size, "offset": (page - 1) * size}
+    )
     rows = result.mappings().all()
+    # 窗口 COUNT 在 LIMIT 之前计算，任一行都携带全量 total
+    total = int(rows[0]["total_count"]) if rows else 0
 
-    # 来源过滤 + 字段映射
-    filtered = []
+    out = []
     for r in rows:
         sources = r["sources"] or []
-        kb_c = sum(1 for s in sources if s.get("sourceType") == "kb")
-        web_c = sum(1 for s in sources if s.get("sourceType") == "web")
-        graph_c = sum(1 for s in sources if s.get("sourceType") in ("graph", "graph-multihop"))
-
-        if f == "kb" and kb_c == 0:
-            continue
-        if f == "web" and web_c == 0:
-            continue
-        if f == "graph" and graph_c == 0:
-            continue
-
-        updated = r["session_updated"]
-        filtered.append(
-            {
-                "session_id": str(r["session_id"]),
-                "session_title": r["session_title"] or "（新会话）",
-                "question": r["question"],
-                "answer": r["answer"],
-                "sources": sources,
-                "source_count": len(sources),
-                "kb_count": kb_c,
-                "web_count": web_c,
-                "graph_count": graph_c,
-                "created_at": updated.isoformat() if updated else "",
-                "_sort_key": (updated, r["q_created"]),
-            }
+        q_created = r["q_created"]
+        out.append(
+            RecordOut(
+                id=str(r["user_msg_id"]),
+                session_id=str(r["session_id"]),
+                session_title=r["session_title"] or "（新会话）",
+                question=r["question"],
+                answer=r["answer"],
+                sources=sources,
+                source_count=len(sources),
+                kb_count=sum(1 for s in sources if s.get("sourceType") == "kb"),
+                web_count=sum(1 for s in sources if s.get("sourceType") == "web"),
+                graph_count=sum(
+                    1 for s in sources if s.get("sourceType") in ("graph", "graph-multihop")
+                ),
+                # 记录时间 = 提问时间（旧实现误用会话 updated_at，导致
+                # 「修改过标题/后续又聊过的会话」里所有记录都显示最后活跃日）
+                created_at=q_created.isoformat() if q_created else "",
+            )
         )
-
-    total = len(filtered)
-    # 手动分页（已在内存中完成过滤）
-    start = (page - 1) * size
-    page_items = filtered[start : start + size]
     pages = max(1, (total + size - 1) // size) if total else 1
-
-    out = [
-        RecordOut(
-            id=f'{item["session_id"]}-{idx}',
-            session_id=item["session_id"],
-            session_title=item["session_title"],
-            question=item["question"],
-            answer=item["answer"],
-            sources=item["sources"],
-            source_count=item["source_count"],
-            kb_count=item["kb_count"],
-            web_count=item["web_count"],
-            graph_count=item["graph_count"],
-            created_at=item["created_at"],
-        )
-        for idx, item in enumerate(page_items)
-    ]
     return {
         "items": out,
         "total": total,
@@ -250,6 +241,7 @@ async def get_session(
                 citations=m.citations,
                 sources=m.sources,
                 attachments=m.attachments,
+                thinking_steps=m.thinking_steps,
             )
             for m in msgs
         ],
@@ -271,9 +263,99 @@ async def delete_session(
     )
     if session is None:
         raise HTTPException(status_code=404, detail="会话不存在")
+    # message_feedback.message_id 外键无 ON DELETE CASCADE，
+    # 必须先清反馈行，否则删消息会触发 FK 违约 500
+    msg_ids = (
+        await db.execute(
+            select(ChatMessage.id).where(ChatMessage.session_id == session_id)
+        )
+    ).scalars().all()
+    if msg_ids:
+        await db.execute(delete(MessageFeedback).where(MessageFeedback.message_id.in_(msg_ids)))
     # 先删消息，再删会话
     await db.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
     await db.execute(delete(ChatSession).where(ChatSession.id == session_id))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/sessions/{session_id}/messages")
+async def clear_session_messages(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """清空会话全部消息（前端「清空对话」按钮）：保留会话壳，删除所有消息。
+
+    同时重置滚动摘要边界（summary / summarized_count）——否则旧摘要会继续
+    注入后续提问的上下文，出现「界面清空了、模型还记得旧内容」的割裂。
+    """
+    session = await db.scalar(
+        select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.user_id == str(user.id),
+        )
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    msg_ids = (
+        await db.execute(
+            select(ChatMessage.id).where(ChatMessage.session_id == session_id)
+        )
+    ).scalars().all()
+    if msg_ids:
+        await db.execute(delete(MessageFeedback).where(MessageFeedback.message_id.in_(msg_ids)))
+        await db.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
+    session.summary = None
+    session.summarized_count = 0
+    await db.commit()
+    return {"ok": True}
+
+
+@router.patch("/sessions/{session_id}")
+async def rename_session(
+    session_id: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """重命名会话（侧边栏铅笔按钮）；仅限自己的会话。"""
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="标题不能为空")
+    session = await db.scalar(
+        select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.user_id == str(user.id),
+        )
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    session.title = title[:60]
+    await db.commit()
+    return {"ok": True, "title": session.title}
+
+
+@router.delete("/messages/{message_id}")
+async def delete_message(
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """删除单条消息（前端「重新生成」先移除旧回答再重问）。
+
+    仅能删除自己会话里的消息（join 会话归属校验）。
+    """
+    msg = await db.scalar(
+        select(ChatMessage)
+        .join(ChatSession, ChatSession.id == ChatMessage.session_id)
+        .where(ChatMessage.id == message_id, ChatSession.user_id == str(user.id))
+    )
+    if msg is None:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    # 同会话删除：message_feedback 外键无级联，必须先清反馈行
+    await db.execute(delete(MessageFeedback).where(MessageFeedback.message_id == msg.id))
+    await db.execute(delete(ChatMessage).where(ChatMessage.id == msg.id))
     await db.commit()
     return {"ok": True}
 
@@ -299,6 +381,14 @@ async def batch_delete_sessions(
     owned_ids = [str(x) for x in owned]
     if not owned_ids:
         return {"ok": True, "deleted": 0}
+    # 同 delete_session：先清反馈行（外键无级联），再级联删除消息
+    msg_ids = (
+        await db.execute(
+            select(ChatMessage.id).where(ChatMessage.session_id.in_(owned_ids))
+        )
+    ).scalars().all()
+    if msg_ids:
+        await db.execute(delete(MessageFeedback).where(MessageFeedback.message_id.in_(msg_ids)))
     # 级联删除消息
     await db.execute(
         delete(ChatMessage).where(ChatMessage.session_id.in_(owned_ids))

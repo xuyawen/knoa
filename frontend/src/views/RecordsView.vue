@@ -3,14 +3,22 @@
 // 展示每次提问 + 回答的元数据快照：引用来源类型、反馈、时间，可展开看引用与摘要。
 // 服务端分页（GET /api/records），不再一次性拉全部会话。
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import { useToastStore } from '@/stores/toast'
+import { errMsg } from '@/utils/errmsg'
 import { getRecords, getDocument } from '@/api'
 import type { RecordItem, SourceItem, DocumentDetail } from '@/types/api'
 
 const toast = useToastStore()
+const router = useRouter()
+
+/** 跳回该记录所属的对话继续追问。 */
+function openSession(id: string) {
+  router.push({ path: '/chat/new', query: { session: id } })
+}
 
 // ── 分页状态 ──
 const records = ref<RecordItem[]>([])
@@ -35,8 +43,8 @@ async function openDocDetail(s: SourceItem) {
   docDetail.value = null
   try {
     docDetail.value = await getDocument(s.kbId, s.docId)
-  } catch (e: any) {
-    toast.error(`加载文档失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`加载文档失败：${errMsg(e)}`)
   } finally {
     docDetailLoading.value = false
   }
@@ -58,8 +66,8 @@ async function loadRecords() {
     })
     records.value = res.items
     total.value = res.total
-  } catch (e: any) {
-    toast.error(`加载检索记录失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`加载检索记录失败：${errMsg(e)}`)
     records.value = []
     total.value = 0
   } finally {
@@ -141,9 +149,10 @@ onMounted(loadRecords)
             </div>
 
             <div v-if="expandedId === r.id" class="record-card-body">
-              <div class="record-session-tag">
+              <div class="record-session-tag session-link" title="打开该对话继续追问" @click.stop="openSession(r.sessionId)">
                 <Icon name="folder" :size="12" />
                 {{ r.sessionTitle }}
+                <Icon name="arrow-up-right" :size="11" />
               </div>
 
               <div v-if="r.sources?.length" class="record-sources-list">
@@ -295,6 +304,8 @@ onMounted(loadRecords)
 
 .record-card-body { padding: 0 18px 18px; border-top: 1px solid var(--border-deep); animation: fadeIn 0.2s ease-out; }
 .record-session-tag { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; margin-top: 12px; background: var(--bg-subtle); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-secondary); }
+.session-link { cursor: pointer; transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.session-link:hover { background: var(--brand-soft); color: var(--brand); }
 
 .record-sources-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .record-source-item {

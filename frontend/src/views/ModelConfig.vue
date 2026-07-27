@@ -1,28 +1,35 @@
 <script setup lang="ts">
 // 模型配置 — 独立页面（遵循「一个页面一个文件」原则）。
-// 配置真值在服务端（/api/settings 的 modelPrefs + preferredModel），前端不再用 localStorage。
+// 配置真值在服务端（/api/settings），前端不再用 localStorage。
+// 原「系统设置」页已并入本页「个人偏好」区块：侧边栏仅保留本菜单入口。
 import { ref, computed, onMounted } from 'vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
+import Icon from '@/components/ui/Icon.vue'
 import { useToastStore } from '@/stores/toast'
-import { useModelConfig, DEFAULT_MODEL_PREFS } from '@/composables/useModelConfig'
+import { useAuthStore } from '@/stores/auth'
+import { useModelConfig, DEFAULT_MODEL_PREFS, MODEL_OPTIONS, VOICE_OPTIONS } from '@/composables/useModelConfig'
+import { useTtsPreview } from '@/composables/useTtsPreview'
 
 const toast = useToastStore()
+const auth = useAuthStore()
 const { state, load, save } = useModelConfig()
+const { previewLoading, previewPlaying, previewVoice } = useTtsPreview()
+
+// ════════════════════════════════════════
+// Section 0 — 个人偏好（原「系统设置」页并入：模型 / 语音 / 输入习惯）
+// ════════════════════════════════════════
+const modelName = ref('')
+const ttsEnabled = ref(false)
+const ttsVoiceType = ref(Number(DEFAULT_MODEL_PREFS.ttsVoiceType))
+const enterToSend = ref(Boolean(DEFAULT_MODEL_PREFS.enterToSend))
 
 // ════════════════════════════════════════
 // Section 1 — 生成参数
 // ════════════════════════════════════════
-const modelName = ref('agnes-2.0-flash')
 const temperature = ref(Number(DEFAULT_MODEL_PREFS.temp))
 const topP = ref(Number(DEFAULT_MODEL_PREFS.topP))
 const maxTokens = ref(Number(DEFAULT_MODEL_PREFS.maxTokens))
 
-const modelOptions = [
-  { value: 'agnes-2.0-flash', label: 'agnes-2.0-flash（快速，适合日常问答）' },
-  { value: 'agnes-2.0-pro', label: 'agnes-2.0-pro（强力，适合复杂推理）' },
-  { value: 'gpt-4o', label: 'GPT-4o（OpenAI）' },
-  { value: 'deepseek-chat', label: 'DeepSeek Chat' },
-]
 const tokenOptions = [
   { value: 1000, label: '1000（简短回答）' },
   { value: 2000, label: '2000（默认）' },
@@ -68,7 +75,10 @@ const charCount = computed(() => systemPrompt.value.length)
 // 从服务端加载已保存配置，填充表单（单一真值在服务端）
 onMounted(async () => {
   await load()
-  if (state.preferredModel) modelName.value = state.preferredModel
+  modelName.value = state.preferredModel
+  ttsEnabled.value = state.ttsEnabled
+  ttsVoiceType.value = Number(state.prefs.ttsVoiceType) || 1004
+  enterToSend.value = state.prefs.enterToSend !== false
   temperature.value = Number(state.prefs.temp)
   topP.value = Number(state.prefs.topP)
   maxTokens.value = Number(state.prefs.maxTokens)
@@ -96,14 +106,23 @@ function saveAll() {
     systemPrompt: systemPrompt.value,
     showThinking: showThinking.value,
     conciseMode: conciseMode.value,
+    ttsVoiceType: Number(ttsVoiceType.value) || 1004,
+    enterToSend: enterToSend.value,
   }
-  save(modelName.value, modelPrefs)
-    .then(() => toast.success('模型配置已保存'))
+  save(modelName.value || null, modelPrefs, ttsEnabled.value)
+    .then(() => {
+      // 同步用户快照，Chat 的朗读按钮随 ttsEnabled 即时生效
+      void auth.fetchMe()
+      toast.success('配置已保存')
+    })
     .catch((e: unknown) => toast.error(e instanceof Error ? e.message : '保存失败，请重试'))
 }
 
 function resetDefaults() {
-  modelName.value = 'agnes-2.0-flash'
+  modelName.value = ''
+  ttsEnabled.value = false
+  ttsVoiceType.value = 1004
+  enterToSend.value = true
   temperature.value = 0.3
   topP.value = 0.9
   maxTokens.value = 2000
@@ -122,6 +141,78 @@ function resetDefaults() {
   <div class="secondary-page">
     <div class="config-grid">
 
+      <!-- ── Section 0：个人偏好（原「系统设置」页并入） ── -->
+      <section class="card config-section">
+        <div class="section-head">
+          <h3 class="section-title">
+            <span class="section-icon pref">P</span>
+            个人偏好
+          </h3>
+          <p class="section-desc">模型选择、语音播报与输入习惯，与下方参数一同保存</p>
+        </div>
+
+        <div class="cfg-form">
+          <div class="cfg-row">
+            <label class="cfg-label">问答模型</label>
+            <div class="cfg-control">
+              <CustomSelect v-model="modelName" :options="MODEL_OPTIONS" />
+              <span class="cfg-note">所有问答默认使用该模型；选「系统默认」则跟随管理员配置</span>
+            </div>
+          </div>
+
+          <div class="cfg-row">
+            <label class="cfg-label">语音播报</label>
+            <div class="cfg-control cfg-switch-row">
+              <button
+                class="toggle-switch"
+                :class="{ on: ttsEnabled }"
+                @click="ttsEnabled = !ttsEnabled"
+                role="switch"
+                :aria-checked="ttsEnabled"
+              >
+                <span class="toggle-knob" />
+              </button>
+              <span class="cfg-note">{{ ttsEnabled ? '开启：AI 回答下方出现朗读按钮，可一键播报' : '关闭：回答不展示朗读按钮' }}</span>
+            </div>
+          </div>
+
+          <div v-if="ttsEnabled" class="cfg-row">
+            <label class="cfg-label">播报音色</label>
+            <div class="cfg-control">
+              <div class="voice-row">
+                <CustomSelect v-model="ttsVoiceType" :options="VOICE_OPTIONS" />
+                <button
+                  type="button"
+                  class="btn btn-outline btn-sm preview-btn"
+                  :disabled="previewLoading"
+                  @click="previewVoice(Number(ttsVoiceType) || undefined)"
+                >
+                  <Icon :name="previewPlaying ? 'square' : 'volume'" :size="14" />
+                  {{ previewLoading ? '合成中…' : previewPlaying ? '停止' : '试听' }}
+                </button>
+              </div>
+              <span class="cfg-note">选择发音人，可先试听再保存</span>
+            </div>
+          </div>
+
+          <div class="cfg-row">
+            <label class="cfg-label">Enter 发送</label>
+            <div class="cfg-control cfg-switch-row">
+              <button
+                class="toggle-switch"
+                :class="{ on: enterToSend }"
+                @click="enterToSend = !enterToSend"
+                role="switch"
+                :aria-checked="enterToSend"
+              >
+                <span class="toggle-knob" />
+              </button>
+              <span class="cfg-note">{{ enterToSend ? '开启：对话页 Enter 直接发送、Shift+Enter 换行' : '关闭：Enter 换行、Ctrl+Enter 发送' }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ── Section 1：生成参数 ── -->
       <section class="card config-section">
         <div class="section-head">
@@ -133,14 +224,6 @@ function resetDefaults() {
         </div>
 
         <div class="cfg-form">
-          <div class="cfg-row">
-            <label class="cfg-label">模型</label>
-            <div class="cfg-control">
-              <CustomSelect v-model="modelName" :options="modelOptions" />
-              <span class="cfg-note">选择推理模型，不同模型速度和效果差异较大</span>
-            </div>
-          </div>
-
           <div class="cfg-row">
             <label class="cfg-label">温度</label>
             <div class="cfg-control">
@@ -301,7 +384,7 @@ function resetDefaults() {
         <div class="status-grid">
           <div class="status-item">
             <span class="status-label">推理模型</span>
-            <span class="status-value">{{ modelName }}</span>
+            <span class="status-value">{{ modelName || '系统默认' }}</span>
           </div>
           <div class="status-item">
             <span class="status-label">Embedding 模型</span>
@@ -377,6 +460,7 @@ function resetDefaults() {
   flex-shrink: 0;
 }
 .section-icon.gen { background: linear-gradient(135deg, #0958d9, #1677ff); }
+.section-icon.pref { background: linear-gradient(135deg, #b45309, #f59e0b); }
 .section-icon.ret { background: linear-gradient(135deg, #15803d, #22c55e); }
 .section-icon.sty { background: linear-gradient(135deg, #7c3aed, #a78bfa); }
 .section-icon.info {
@@ -430,6 +514,18 @@ function resetDefaults() {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+.voice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.voice-row .select { width: 200px; }
+.preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 /* ── 滑块 ── */
@@ -493,12 +589,12 @@ function resetDefaults() {
   align-self: flex-start;
 }
 .cfg-badge.pending {
-  background: #fff7e6;
-  color: #ad6800;
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 .cfg-badge.active {
-  background: #f0fdf4;
-  color: #15803d;
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 /* ── 文本框 ── */

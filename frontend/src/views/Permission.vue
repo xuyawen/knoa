@@ -10,6 +10,7 @@ import DataTable from '@/components/ui/DataTable.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
+import { errMsg } from '@/utils/errmsg'
 import { getRoles, getUserList, createUser, updateUser, deleteUser } from '@/api/auth'
 import type { Paginated, RoleOut, UserOut, UserCreate, UserUpdate } from '@/types/api'
 
@@ -21,8 +22,8 @@ const roles = ref<RoleOut[]>([])
 async function loadRoles() {
   try {
     roles.value = await getRoles()
-  } catch (e: any) {
-    toast.error(`加载角色失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`加载角色失败：${errMsg(e)}`)
   }
 }
 const roleNameMap = computed<Record<string, string>>(() => {
@@ -52,9 +53,9 @@ async function loadUsers(resetPage = false) {
       roleFilter.value === 'all' ? null : roleFilter.value,
       searchQuery.value.trim() || null,
     )
-  } catch (e: any) {
+  } catch (e: unknown) {
     usersData.value = null
-    toast.error(`加载用户列表失败：${e?.message || e}`)
+    toast.error(`加载用户列表失败：${errMsg(e)}`)
   } finally {
     loading.value = false
   }
@@ -163,8 +164,8 @@ async function save() {
     }
     showModal.value = false
     await loadUsers()
-  } catch (e: any) {
-    toast.error(`操作失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`操作失败：${errMsg(e)}`)
   } finally {
     saving.value = false
   }
@@ -187,8 +188,8 @@ async function confirmDelete() {
     await deleteUser(u.id)
     toast.success(`已删除：${u.username}`)
     await loadUsers()
-  } catch (e: any) {
-    toast.error(`删除失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    toast.error(`删除失败：${errMsg(e)}`)
   }
 }
 
@@ -207,12 +208,6 @@ const roleSelectOptions = computed(() =>
     <div class="perm-body">
       <!-- 用户管理 -->
       <section class="card perm-users">
-        <div class="perm-h-row">
-          <h3 class="perm-h">用户与角色</h3>
-          <button v-if="auth.isAdmin" class="btn btn-primary btn-sm" @click="openCreate">
-            <Icon name="plus" :size="13" /> 新建用户
-          </button>
-        </div>
 
         <div class="toolbar">
           <div class="search-box">
@@ -224,6 +219,11 @@ const roleSelectOptions = computed(() =>
           <button class="icon-btn" title="刷新" :disabled="loading" @click="() => loadUsers()">
             <Icon name="refresh" :size="15" :class="{ spin: loading }" />
           </button>
+          <div class="perm-h-row" style="margin-left:auto">
+            <button v-if="auth.isAdmin" class="btn btn-primary btn-sm" @click="openCreate">
+              <Icon name="plus" :size="13" /> 新建用户
+            </button>
+          </div>
         </div>
 
         <DataTable

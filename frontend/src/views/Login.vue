@@ -145,7 +145,7 @@ async function handleLogin() {
   display: flex;
   width: 100%;
   min-height: 100vh;
-  background: #fff;
+  background: var(--bg-surface);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
@@ -154,7 +154,7 @@ async function handleLogin() {
   display: flex;
   flex-direction: column;
   padding: 40px;
-  background: #f2f4f7;
+  background: var(--bg-subtle);
   position: relative;
   min-width: 760px;
   min-height: 760px;
@@ -170,8 +170,8 @@ async function handleLogin() {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: #014db2;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-on-brand);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -184,7 +184,7 @@ async function handleLogin() {
   font-family: 'Inter', sans-serif;
   font-size: 14px;
   font-weight: 500;
-  color: #0a1628;
+  color: var(--text-primary);
 }
 
 .brand-text {
@@ -195,7 +195,7 @@ async function handleLogin() {
   font-family: 'Outfit', sans-serif;
   font-size: 40px;
   font-weight: 700;
-  color: #0a1628;
+  color: var(--text-primary);
   line-height: 1.2;
   margin: 0;
 }
@@ -204,7 +204,7 @@ async function handleLogin() {
   margin-top: 12px;
   font-size: 14px;
   font-weight: 400;
-  color: #6b7280;
+  color: var(--text-secondary);
   line-height: 1.75;
 }
 
@@ -231,21 +231,21 @@ async function handleLogin() {
   top: 400px;
   width: 540px;
   height: 36px;
-  background: linear-gradient(180deg, #e4eaf3, #dce3ee);
+  background: linear-gradient(180deg, var(--bg-subtle), var(--border));
 }
 
 .platform-middle {
   top: 372px;
   width: 420px;
   height: 28px;
-  background: linear-gradient(180deg, #edf1f7, #e5ebf2);
+  background: linear-gradient(180deg, var(--bg-subtle), var(--bg-page));
 }
 
 .platform-top {
   top: 350px;
   width: 300px;
   height: 22px;
-  background: linear-gradient(180deg, #fbfcfe, #f4f7fb);
+  background: linear-gradient(180deg, var(--bg-surface-2), var(--bg-page));
 }
 
 .cube-scene {
@@ -277,12 +277,12 @@ async function handleLogin() {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #6b7280;
+  color: var(--text-secondary);
   box-shadow: 0 4px 16px rgba(10, 23, 40, 0.06);
   animation: fy 3.2s ease-in-out infinite;
   transition: color 0.3s, border-color 0.3s, box-shadow 0.3s;
@@ -290,8 +290,8 @@ async function handleLogin() {
 
 /* 鼠标移入方块：四周图标圈点亮成品牌蓝并加速浮动放大 */
 .cube-scene:hover ~ .icon-circle {
-  color: #014db2;
-  border-color: #cfe0f7;
+  color: var(--brand);
+  border-color: var(--brand-soft);
   box-shadow: 0 8px 22px rgba(1, 77, 178, 0.18);
   animation-name: fy-hover;
   animation-duration: 1.7s;
@@ -358,7 +358,7 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   gap: 16px;
-  background: #fff;
+  background: var(--bg-surface);
   min-width: 420px;
   min-height: 760px;
   padding: 40px;
@@ -368,9 +368,9 @@ async function handleLogin() {
   width: 420px;
   padding: 40px;
   border-radius: 16px;
-  background: #fff;
-  border: 1px solid #eaeaea;
-  box-shadow: 0 12px 32px rgba(10, 23, 40, 0.08);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-pop);
 }
 
 .card-header {
@@ -384,14 +384,14 @@ async function handleLogin() {
   font-family: 'Outfit', sans-serif;
   font-size: 28px;
   font-weight: 700;
-  color: #0a1628;
+  color: var(--text-primary);
   margin: 0;
 }
 
 .card-subtitle {
   font-size: 14px;
   font-weight: 400;
-  color: #6b7280;
+  color: var(--text-secondary);
   margin: 0;
 }
 
@@ -410,7 +410,7 @@ async function handleLogin() {
 .field-label {
   font-size: 13px;
   font-weight: 500;
-  color: #0a1628;
+  color: var(--text-primary);
 }
 
 .field-input {
@@ -419,9 +419,9 @@ async function handleLogin() {
   padding: 0 14px;
   font-size: 14px;
   font-weight: 400;
-  color: #0a1628;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   outline: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -429,12 +429,12 @@ async function handleLogin() {
 }
 
 .field-input::placeholder {
-  color: #9ca3af;
+  color: var(--text-placeholder);
 }
 
 .field-input:focus {
-  border-color: #014db2;
-  box-shadow: 0 0 0 3px rgba(1, 77, 178, 0.12);
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
 }
 
 /* 待开发（上线后）：记住我 / 忘记密码 样式
@@ -501,8 +501,8 @@ async function handleLogin() {
   height: 48px;
   border-radius: 8px;
   border: none;
-  background: #014db2;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-on-brand);
   font-family: 'Outfit', sans-serif;
   font-size: 15px;
   font-weight: 600;
@@ -512,7 +512,7 @@ async function handleLogin() {
 }
 
 .btn-login:hover {
-  background: #0d5fd1;
+  background: var(--brand-hover);
 }
 
 .btn-login:disabled {
@@ -570,7 +570,7 @@ async function handleLogin() {
 .footer-note {
   font-size: 12px;
   font-weight: 400;
-  color: #9ca3af;
+  color: var(--text-placeholder);
   text-align: center;
   margin: 0;
 }

@@ -6,34 +6,37 @@ import { useAuthStore } from '@/stores/auth'
 // Cookie 还原（仅一次）；还原失败跳登录页（带 redirect 回跳参数）。
 // 每个左侧子菜单项都是一条真实嵌套路由，各自对应一个独立视图组件，
 // 因此每个菜单项都对应一个可收藏、URL 独立的完整页面。
+//
+// 懒加载策略：Login 与 AppLayout 静态导入（首屏必经，避免二次请求闪烁），
+// 其余业务视图全部 `() => import(...)` 按路由分包，首包只含登录与布局骨架。
 import Login from '@/views/Login.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import DashboardOverview from '@/views/DashboardOverview.vue'
-import DashboardAnalytics from '@/views/DashboardAnalytics.vue'
-import DashboardDocs from '@/views/DashboardDocs.vue'
-import DashboardUsers from '@/views/DashboardUsers.vue'
-import DashboardPopular from '@/views/DashboardPopular.vue'
-import Announcements from '@/views/Announcements.vue'
-import Search from '@/views/Search.vue'
-import SearchHistory from '@/views/SearchHistory.vue'
-import Chat from '@/views/Chat.vue'
-import RecordsView from '@/views/RecordsView.vue'
-import ModelConfig from '@/views/ModelConfig.vue'
-import GraphGlobal from '@/views/GraphGlobal.vue'
-import GraphNodes from '@/views/GraphNodes.vue'
-import GraphRelations from '@/views/GraphRelations.vue'
-import GraphStats from '@/views/GraphStats.vue'
-import Permission from '@/views/Permission.vue'
-import RoleManage from '@/views/RoleManage.vue'
-import DepartmentView from '@/views/DepartmentView.vue'
-import Profile from '@/views/Profile.vue'
-import MemoryManage from '@/views/MemoryManage.vue'
-import Settings from '@/views/Settings.vue'
-import DocumentsMine from '@/views/DocumentsMine.vue'
-import DocumentsPublic from '@/views/DocumentsPublic.vue'
-import DocumentsDepartment from '@/views/DocumentsDepartment.vue'
-import DocumentsArchive from '@/views/DocumentsArchive.vue'
-import NotFound from '@/views/NotFound.vue'
+
+const DashboardOverview = () => import('@/views/DashboardOverview.vue')
+const DashboardAnalytics = () => import('@/views/DashboardAnalytics.vue')
+const DashboardDocs = () => import('@/views/DashboardDocs.vue')
+const DashboardUsers = () => import('@/views/DashboardUsers.vue')
+const DashboardPopular = () => import('@/views/DashboardPopular.vue')
+const Announcements = () => import('@/views/Announcements.vue')
+const Search = () => import('@/views/Search.vue')
+const SearchHistory = () => import('@/views/SearchHistory.vue')
+const Chat = () => import('@/views/Chat.vue')
+const RecordsView = () => import('@/views/RecordsView.vue')
+const ModelConfig = () => import('@/views/ModelConfig.vue')
+const GraphGlobal = () => import('@/views/GraphGlobal.vue')
+const GraphNodes = () => import('@/views/GraphNodes.vue')
+const GraphRelations = () => import('@/views/GraphRelations.vue')
+const GraphStats = () => import('@/views/GraphStats.vue')
+const Permission = () => import('@/views/Permission.vue')
+const RoleManage = () => import('@/views/RoleManage.vue')
+const DepartmentView = () => import('@/views/DepartmentView.vue')
+const Profile = () => import('@/views/Profile.vue')
+const MemoryManage = () => import('@/views/MemoryManage.vue')
+const DocumentsMine = () => import('@/views/DocumentsMine.vue')
+const DocumentsPublic = () => import('@/views/DocumentsPublic.vue')
+const DocumentsDepartment = () => import('@/views/DocumentsDepartment.vue')
+const DocumentsArchive = () => import('@/views/DocumentsArchive.vue')
+const NotFound = () => import('@/views/NotFound.vue')
 
 // 子菜单分区 -> 路由段 + 默认 section
 const routes: RouteRecordRaw[] = [
@@ -80,7 +83,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'permission/departments', name: 'perm-departments', component: DepartmentView, meta: { title: '系统管理', icon: 'team' } },
       { path: 'profile', name: 'profile', component: Profile, meta: { title: '个人中心', icon: 'user' } },
       { path: 'memories', name: 'memories', component: MemoryManage, meta: { title: '个人中心', icon: 'brain-circuit' } },
-      { path: 'settings', name: 'settings', component: Settings, meta: { title: '系统设置', icon: 'settings' } },
+      // 原「系统设置」页已并入「模型配置」(/chat/model)，旧路径重定向兼容书签
+      { path: 'settings', redirect: '/chat/model' },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFound },

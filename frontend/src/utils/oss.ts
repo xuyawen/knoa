@@ -8,6 +8,7 @@
  * 后端只在 .env 里配置 OSS_*，AccessKey 不落前端。
  */
 import { getOssSign } from '@/api'
+import { errMsg } from '@/utils/errmsg'
 
 export interface OssSign {
   accessKeyId: string
@@ -29,8 +30,8 @@ export async function uploadToOss(file: File, prefix = 'uploads'): Promise<OssUp
   let sign: OssSign
   try {
     sign = await getOssSign(prefix, file.name)
-  } catch (e: any) {
-    throw new Error(`获取 OSS 签名失败：${e?.message || e}`)
+  } catch (e: unknown) {
+    throw new Error(`获取 OSS 签名失败：${errMsg(e)}`)
   }
 
   const form = new FormData()

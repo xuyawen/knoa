@@ -1,4 +1,5 @@
 """Phase 2 鉴权路由：登录、当前用户、用户管理（仅 admin）。"""
+import asyncio
 import uuid
 
 import logging
@@ -16,6 +17,7 @@ from app.core.security import (
     get_role_permissions,
     require_permission,
     revoke_token,
+    revoke_user_tokens_before,
 )
 from app.core.rbac import Perm
 from app.db import ChatSession, KBPermission, Memory, Role, User
@@ -93,7 +95,9 @@ async def login_rate_limit(request: Request) -> None:
 
     Redis 不可用时放行（不阻断登录），仅告警，避免限流组件自身成为单点。
     """
-    fwd = request.headers.get("X-Forwarded-For", "")
+    fwd = request.headers.get("X-Forwarded-For", "") if settings.TRUST_PROXY else ""
+    # 仅在显式信任反代（TRUST_PROXY）时才采纳 XFF，否则用直连对端地址，
+    # 防止客户端伪造 X-Forwarded-For 无限重置自己的限流桶。
     client_ip = fwd.split(",")[0].strip() or (request.client.host if request.client else "unknown")
     key = f"knoa:login:rl:{client_ip}"
     try:
@@ -116,12 +120,16 @@ async def login_rate_limit(request: Request) -> None:
 @router.post("/auth/login", response_model=TokenOut, dependencies=[Depends(login_rate_limit)])
 async def login(payload: LoginIn, response: Response, db: AsyncSession = Depends(get_db)):
     user = await db.scalar(select(User).where(User.username == payload.username))
-    # 时序侧信道防护：无论用户是否存在，都执行一次恒定耗时的 PBKDF2 校验，
+    # 时序侧信道防护：无论用户是否存在，都执行一次等效的 PBKDF2 校验，
     # 使「存在/不存在」「密码对错」路径响应时间趋同，防止攻击者通过耗时枚举有效用户名。
+    # PBKDF2 60 万次迭代是 0.3~0.6s 的纯 CPU 计算，必须丢进线程池，
+    # 否则会卡死事件循环、阻塞全部并发请求（含 SSE 流）。
     if user is None:
-        User.verify_password(payload.password, DUMMY_HASH)
+        # 注意必须经实例调用：旧写法 User.verify_password(pwd, DUMMY_HASH) 的实参
+        # 会整体左移（pwd 被当成 self），PBKDF2 根本不执行，时序防护形同虚设。
+        await asyncio.to_thread(User().verify_password, payload.password, DUMMY_HASH)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
-    if not user.verify_password(payload.password) or not user.is_active:
+    if not await asyncio.to_thread(user.verify_password, payload.password) or not user.is_active:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = create_access_token(str(user.id), user.username, user.role)
     _set_auth_cookie(response, token)
@@ -154,11 +162,16 @@ async def me(user: User = Depends(get_current_user)):
 @router.put("/auth/change-password")
 async def change_password(
     payload: ChangePasswordIn,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current: User = Depends(get_current_user),
 ):
-    """用户自行修改密码（验证旧密码 + 设置新密码）。"""
-    if not current.verify_password(payload.old_password):
+    """用户自行修改密码（验证旧密码 + 设置新密码）。
+
+    改密后吊销该用户此前签发的全部令牌（防泄露口令对应的旧会话继续有效），
+    并给本人下发新 Cookie，当前会话无感延续。
+    """
+    if not await asyncio.to_thread(current.verify_password, payload.old_password):
         raise HTTPException(status_code=400, detail="原密码不正确")
     if payload.old_password == payload.new_password:
         raise HTTPException(status_code=400, detail="新密码不能与原密码相同")
@@ -166,8 +179,12 @@ async def change_password(
     fresh = await db.scalar(select(User).where(User.id == current.id))
     if fresh is None:
         raise HTTPException(status_code=404, detail="用户不存在")
-    fresh.password_hash = User.hash_password(payload.new_password)
+    fresh.password_hash = await asyncio.to_thread(User.hash_password, payload.new_password)
     await db.commit()
+    # 吊销此前全部令牌，再签新令牌（iat >= 吊销时刻，不会被自己吊销掉）
+    await revoke_user_tokens_before(str(fresh.id))
+    token = create_access_token(str(fresh.id), fresh.username, fresh.role)
+    _set_auth_cookie(response, token)
     return {"detail": "密码修改成功"}
 
 
@@ -219,7 +236,7 @@ async def create_user(
     u = User(
         id=uuid.uuid4(),
         username=payload.username,
-        password_hash=User.hash_password(payload.password),
+        password_hash=await asyncio.to_thread(User.hash_password, payload.password),
         display_name=payload.display_name,
         role_id=role_id,
         email=payload.email,
@@ -271,15 +288,20 @@ async def update_user(
         u.department = payload.department
     if payload.employee_id is not None:
         u.employee_id = payload.employee_id
+    pwd_reset = False
     if await _is_admin(current, db):
         if payload.role_id is not None:
             u.role_id = await _resolve_role_id(db, payload.role_id)
         if payload.is_active is not None:
             u.is_active = payload.is_active
         if payload.password:
-            u.password_hash = User.hash_password(payload.password)
+            u.password_hash = await asyncio.to_thread(User.hash_password, payload.password)
+            pwd_reset = True
     await db.commit()
     await db.refresh(u)
+    if pwd_reset:
+        # admin 重置他人密码：同样吊销该用户此前的全部令牌（commit 成功后才吊销）
+        await revoke_user_tokens_before(str(u.id))
     return _to_out(u)
 
 

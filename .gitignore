@@ -37,6 +37,9 @@ deploy/nginx/certbot/
 deploy/backup/*.sql.gz
 deploy/backup/*.sql
 
+# local AI coding tool cache
+.qoder/
+
 review/
 
 # interview prep materials (user-only, NEVER commit to git)

@@ -5,7 +5,7 @@ import { useGraphData } from '@/composables/useGraphData'
 import '@/assets/graph.css'
 
 const {
-  stats, typeBars, hotNodes, recentNodes, nodeColor, selectedId,
+  stats, typeBars, hotNodes, recentNodes, nodeColor,
 } = useGraphData()
 </script>
 
@@ -46,7 +46,7 @@ const {
         <div class="card stat-block">
           <div class="section-title">热门知识点 Top 5</div>
           <div class="hot-list">
-            <div v-for="(item, i) in hotNodes" :key="item.id" class="hot-item" @click="selectedId = item.id">
+            <div v-for="(item, i) in hotNodes" :key="item.id" class="hot-item">
               <span class="hot-rank" :class="{ top3: i < 3 }">{{ i + 1 }}</span>
               <span class="hot-dot" :style="{ background: nodeColor(item.kbId) }"></span>
               <span class="hot-name">{{ item.label }}</span>
@@ -57,7 +57,7 @@ const {
         <div class="card stat-block">
           <div class="section-title">最近新增的实体</div>
           <div class="recent-list">
-            <div v-for="n in recentNodes" :key="n.id" class="recent-item" @click="selectedId = n.id">
+            <div v-for="n in recentNodes" :key="n.id" class="recent-item">
               <span class="recent-icon" :style="{ background: nodeColor(n.kbId) + '18', color: nodeColor(n.kbId) }">
                 <Icon name="graph" :size="13" />
               </span>
@@ -70,3 +70,9 @@ const {
     </div>
   </div>
 </template>
+
+<style scoped>
+.stat-grid {
+  margin-bottom: 0;
+}
+</style>
