@@ -4,7 +4,7 @@ import { fileURLToPath, URL } from 'node:url'
 
 // frontend2.0 dev server.
 // Port 5175 to avoid collisions (5173 blocked, 5174 used by legacy frontend).
-// Proxy /api to the backend (HTTPS self-signed -> secure:false) and strip
+// Proxy /api to the backend (plain HTTP, no TLS) and strip
 // content-encoding so SSE streams are not buffered (see project memory).
 export default defineConfig({
   plugins: [vue()],
@@ -17,9 +17,8 @@ export default defineConfig({
     port: 5175,
     proxy: {
       '/api': {
-        target: 'https://localhost:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
-        secure: false,
         configure: (proxy) => {
           proxy.on('proxyRes', (proxyRes) => {
             delete (proxyRes.headers as Record<string, unknown>)['content-encoding']

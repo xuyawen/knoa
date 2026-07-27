@@ -23,7 +23,7 @@ import urllib.request
 import urllib.error
 import re
 
-BASE = "https://localhost:8000"
+BASE = "http://localhost:8000"
 LOGIN = "/api/auth/login"
 ASK = "/api/ask"
 USER = "admin"

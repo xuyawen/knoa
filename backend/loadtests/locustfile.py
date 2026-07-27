@@ -9,7 +9,7 @@
 运行（在 backend/ 下）：
     uv sync --extra load
     uv run --extra load locust -f loadtests/locustfile.py \
-        --host https://localhost:8000 -u 50 -r 10 -t 1m
+        --host http://localhost:8000 -u 50 -r 10 -t 1m
 
 说明：
 - 后端本地为自签 HTTPS，脚本默认 https + client.verify=False；
@@ -31,7 +31,7 @@ SSE_TIMEOUT = 60.0
 
 
 class KnoaUser(HttpUser):
-    host = "https://localhost:8000"
+    host = "http://localhost:8000"
     wait_time = between(0.5, 2.0)
 
     def on_start(self):

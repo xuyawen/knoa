@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     # HTTPS (TLS) — 自签证书用于本地开发；生产由 nginx 做 TLS 终止
     SSL_CERT_FILE: str = "certs/cert.pem"
     SSL_KEY_FILE: str = "certs/key.pem"
-    SSL_ENABLED: bool = True           # 本地开发启用 HTTPS，生产可由 nginx 反代后关
+    SSL_ENABLED: bool = False          # 项目仅走 HTTP，不使用 HTTPS（无 TLS 终止）
     # 对象存储（Phase 3 T3 文档解析管线）
     # local = 落本地磁盘（沙箱/开发默认，零依赖）；s3 = MinIO/S3 兼容（httpx + 手写 SigV4）
     OBJECT_STORE: str = "local"
