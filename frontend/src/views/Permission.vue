@@ -8,6 +8,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
+import DepartmentSelect from '@/components/ui/DepartmentSelect.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
@@ -99,12 +100,12 @@ function roleClass(r: string) {
 const showModal = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
-const form = ref({ username: '', displayName: '', roleId: '', password: '', isActive: true, email: '', department: '', employeeId: '' })
+const form = ref({ username: '', displayName: '', roleId: '', password: '', isActive: true, email: '', departmentId: '', employeeId: '' })
 
 function openCreate() {
   editingId.value = null
   const def = roles.value[0]?.id ?? ''
-  form.value = { username: '', displayName: '', roleId: def, password: '', isActive: true, email: '', department: '', employeeId: '' }
+  form.value = { username: '', displayName: '', roleId: def, password: '', isActive: true, email: '', departmentId: '', employeeId: '' }
   showModal.value = true
 }
 function openEdit(u: UserOut) {
@@ -116,7 +117,7 @@ function openEdit(u: UserOut) {
     password: '',
     isActive: u.isActive,
     email: u.email || '',
-    department: u.department || '',
+    departmentId: u.departmentId || '',
     employeeId: u.employeeId || '',
   }
   showModal.value = true
@@ -143,7 +144,7 @@ async function save() {
         roleId: form.value.roleId,
         isActive: form.value.isActive,
         email: form.value.email || null,
-        department: form.value.department || null,
+        departmentId: form.value.departmentId || null,
         employeeId: form.value.employeeId || null,
       }
       if (form.value.password) payload.password = form.value.password
@@ -156,7 +157,7 @@ async function save() {
         displayName: form.value.displayName || null,
         roleId: form.value.roleId,
         email: form.value.email || null,
-        department: form.value.department || null,
+        departmentId: form.value.departmentId || null,
         employeeId: form.value.employeeId || null,
       }
       await createUser(payload)
@@ -289,7 +290,7 @@ const roleSelectOptions = computed(() =>
       </div>
       <div class="form-row">
         <label class="form-label">部门</label>
-        <input v-model="form.department" class="form-input" placeholder="可选" />
+        <DepartmentSelect v-model="form.departmentId" width="100%" />
       </div>
       <div class="form-row">
         <label class="form-label">工号</label>

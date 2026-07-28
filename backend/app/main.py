@@ -255,6 +255,9 @@ async def observability(request: Request, call_next):
 
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+# tasks 路由须先于 knowledge 注册：/api/documents/tasks 是静态路由，
+# 若晚于 /api/documents/{doc_id}（动态）注册会被其抢匹配，导致 tasks 被当 UUID → 500
+app.include_router(tasks.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(trending.router, prefix="/api")
 app.include_router(ask.router, prefix="/api")
@@ -268,7 +271,6 @@ app.include_router(settings_router.router, prefix="/api")
 app.include_router(tts_router.router, prefix="/api")
 app.include_router(graph.router, prefix="/api")
 app.include_router(departments.router, prefix="/api")
-app.include_router(tasks.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
 app.include_router(operations.router, prefix="/api")
 app.include_router(announcements.router, prefix="/api")

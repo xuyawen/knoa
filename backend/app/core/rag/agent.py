@@ -41,6 +41,7 @@ import logging
 import re
 import time
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -270,6 +271,35 @@ class AgenticRAGAgent(SessionMemoryMixin):
             return "complex"
         return "simple"
 
+    async def _maybe_record_gap(self, db, kb_id: str, question: str) -> None:
+        """知识缺口信号：图检索无命中且该 KB 有图谱节点 → 记录 gap。
+
+        限流：同用户同 KB 60s 内不重复写。best-effort，失败不影响主流程。
+        """
+        try:
+            from app.db import KGGapSignal, KGNode
+            # 确认该 KB 有图谱节点（非空图）
+            has_nodes = await db.scalar(select(KGNode.id).where(KGNode.kb_id == kb_id).limit(1))
+            if not has_nodes:
+                return
+            # 限流：60s 内同用户同 KB 不重复写
+            from datetime import timedelta
+            from app.database import AsyncSessionLocal
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+            recent = await db.scalar(
+                select(KGGapSignal.id).where(
+                    KGGapSignal.kb_id == kb_id,
+                    KGGapSignal.user_id == self.user_id,
+                    KGGapSignal.created_at >= cutoff,
+                ).limit(1)
+            )
+            if recent:
+                return
+            db.add(KGGapSignal(kb_id=kb_id, question=question[:500], user_id=self.user_id))
+            await db.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("gap signal write skipped: %s", e)
+
     async def _suggest_title(self, session, question: str, answer: str) -> "str | None":
         """会话首轮问答时用 LLM 生成简洁标题（≤15 字），替代「问题前 50 字」默认标题。
 
@@ -450,9 +480,13 @@ class AgenticRAGAgent(SessionMemoryMixin):
                     return []
                 try:
                     async with AsyncSessionLocal() as gdb:
-                        return await self.graph.retrieve_related_chunks(
+                        chunks = await self.graph.retrieve_related_chunks(
                             question, kb_id, gdb, settings.GRAPH_TOP_K
                         )
+                        # 知识缺口信号：图检索返回空 且 该 KB 有图谱节点（非空图）→ 记录 gap
+                        if not chunks and self.user_id:
+                            await self._maybe_record_gap(gdb, kb_id, question)
+                        return chunks
                 except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort, skip graph enrichment if it fails)
                     logger.warning("graph retrieve failed (skip inject): %s", e)
                     return []
@@ -462,18 +496,9 @@ class AgenticRAGAgent(SessionMemoryMixin):
             )
             use_multihop = intent == "complex"
 
-            # ── 并行召回的图谱相关 chunk 编号入来源 ──
+            # ── 并行召回的图谱相关 chunk 暂存，等 _n_retrieve 合并 rerank ──
             if graph_chunks:
                 self._graph_chunks = graph_chunks
-                # 顺序编号只给角标 [N] 用；chunk_id 必须保留 graph.py 返回的
-                # 真实 DocChunk UUID，前端点「查看溯源」才能查到原文。
-                for i, g in enumerate(graph_chunks, len(all_sources) + 1):
-                    g["id"] = i
-                    source_content[i] = g.get("content") or g.get("snippet", "")
-                all_sources.extend(self._format_sources(graph_chunks))
-                # sources 事件发「全量快照」：前端以最后一份为准（覆盖式），
-                # 增量发送会让先到的图谱来源被后续批次覆盖丢失
-                yield {"event": "sources", "data": list(all_sources)}
 
             # ── 8.5 complex 意图 → 图谱多跳推理，产出推理链路 + 追加沿途来源 ──
             if use_multihop and self.graph and settings.GRAPH_ENABLED and kb_id and not skip:
@@ -770,6 +795,33 @@ class AgenticRAGAgent(SessionMemoryMixin):
         query = st.route_result.arguments.get("query", st.question)
         top_k = self._top_k or settings.RAG_TOP_K
         retrieved = await self.retriever.retrieve(query, st.kb_id, top_k=top_k)
+
+        # ── 图谱 chunk 合并 + 统一 rerank ──
+        # 把暂存的图谱检索结果与向量检索结果合并，按 chunk_id 去重，
+        # 然后一起过 reranker，保证两路来源统一排序。
+        if self._graph_chunks:
+            existing_cids = {r["chunk_id"] for r in retrieved}
+            for gc in self._graph_chunks:
+                if gc["chunk_id"] not in existing_cids:
+                    retrieved.append(gc)
+                    existing_cids.add(gc["chunk_id"])
+            # 统一 rerank（如果 reranker 启用）
+            if hasattr(self.retriever, 'reranker') and self.retriever.reranker.enabled and len(retrieved) > 1:
+                candidates = [
+                    {
+                        "cid": r["chunk_id"],
+                        "content": r.get("content") or r.get("snippet", ""),
+                        "vector_score": r.get("confidence", 0.5),
+                        "bm25_score": 0.0,
+                    }
+                    for r in retrieved
+                ]
+                reranked = self.retriever.reranker.rerank(query, candidates, top_k)
+                reranked_cids = [c["cid"] for c in reranked]
+                by_cid = {r["chunk_id"]: r for r in retrieved}
+                retrieved = [by_cid[cid] for cid in reranked_cids if cid in by_cid]
+            self._graph_chunks = []  # 消费完毕，清空避免重复注入
+
         # 去重：图谱预检索/补充检索可能已命中相同 chunk，重复入选会撑大引用
         # 列表与上下文（同一原文占两个角标）。按 chunk_id 过滤。
         existing = {s.get("chunkId") for s in st.all_sources}
@@ -923,7 +975,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
             # 无任何检索结果时基于 st.messages 回答（保留多模态图片 + 历史）
             quick_msgs = [
                 {"role": "system", "content": (
-                    "你是「知海 Knoa」，一个跨境电商运营知识助手。"
+                    "你是「知海 Knoa」，一个企业级知识助手，面向公司各部门（如跨境电商、财务、产品、实施等）提供知识问答。"
                     "请简洁友好地回答用户的问题。不要自我介绍或罗列功能。"
                 ) + self._memory_section() + self._summary_section()},
                 *list(st.messages)[1:],  # 跳过 system，保留 history + user(含图)
@@ -955,7 +1007,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
         user_content = user_turn["content"] if user_turn else st.question
         quick_messages = [
             {"role": "system", "content": (
-                "你是「知海 Knoa」，一个跨境电商运营知识助手。"
+                "你是「知海 Knoa」，一个企业级知识助手，面向公司各部门（如跨境电商、财务、产品、实施等）提供知识问答。"
                 "用户问了一个知识库无法覆盖的常识/实时类问题（如天气、时间、股价等），"
                 "请友好简洁地回答。如果确实不知道，就直说。不要自我介绍或罗列功能。"
             ) + self._memory_section()},

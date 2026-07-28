@@ -1,8 +1,8 @@
-"""知识图谱只读接口 — 供 frontend 的「知识图谱」视图渲染真实图数据。
+"""知识图谱接口 — 读取 + 编辑（CRUD / 合并 / 溯源 / 缺口信号）。
 
-只读：仅查询 kg_node / kg_edge，不暴露任何写操作。可选 kb_id 过滤单库，
-limit 防止超大规模拖垮前端渲染。节点按创建时间倒序取最近 limit 个，
-边只保留「两端节点都在返回集内」的，避免出现悬空脏边。
+读取：查询 kg_node / kg_edge，可选 kb_id 过滤单库，limit 防超大规模拖垮前端。
+写入：创建/修改/删除实体和关系、合并同义实体。写操作要求 KB edit 权限，
+合并/删除要求 admin。所有写操作主动失效图检索缓存。
 
 关键设计：
 - 实体以 (kb_id, label) 去重，边端点也按 (kb_id, label) 解析，
@@ -10,23 +10,20 @@ limit 防止超大规模拖垮前端渲染。节点按创建时间倒序取最�
 - stats（nodeCount/edgeCount/typeCounts/kbCount）按「过滤后的全集」聚合，
   不受渲染采样 limit 截断影响，大图谱下统计依然准确；
 - 边查询用 from_label/to_label IN (节点 labels) 预筛，避免边表全表加载。
-
-P4 扩展：
-- GET /api/graph/hot-nodes  热门实体 TopN（按度数近似热度）
-- GET /api/graph/recent      最近更新实体 TopN（按 created_at）
-- GET /api/graph/export      导出完整 {nodes,edges}（json / gexf）
-- GET /api/graph 现真正消费 node_type / biz_category / from / to 过滤参数
 """
+import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import Select, func, or_, select
+from pydantic import BaseModel, Field
+from sqlalchemy import Select, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_user, get_accessible_kb_ids
-from app.db import KGEdge, KGNode, KnowledgeBase, User
+from app.core.security import get_current_user, get_accessible_kb_ids, get_kb_permission_level
+from app.core.graph import _invalidate_graph
+from app.db import DocChunk, Document, KGEdge, KGGapSignal, KGNode, KnowledgeBase, User
 from app.deps import get_db
 
 router = APIRouter()
@@ -38,6 +35,7 @@ def _node_out(n: KGNode) -> dict[str, Any]:
         "label": n.label,
         "type": n.type,
         "kbId": n.kb_id,
+        "chunkId": str(n.chunk_id) if n.chunk_id else None,
         "createdAt": n.created_at.isoformat() if n.created_at else None,
     }
 
@@ -48,7 +46,7 @@ def _edge_out(e: KGEdge, id_by_key: dict[tuple[str, str], str]) -> dict[str, Any
     t = id_by_key.get((e.kb_id, e.to_label))
     if not (s and t):
         return None
-    return {"source": s, "target": t, "relation": e.relation}
+    return {"id": str(e.id), "source": s, "target": t, "relation": e.relation}
 
 
 def _parse_iso(v: str | None, name: str) -> datetime | None:
@@ -301,3 +299,405 @@ def _to_gexf(nodes: list[dict], edges: list[dict]) -> str:
 
 def _xml(s: str) -> str:
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+# ======================================================================
+# Phase 1: 实体溯源
+# ======================================================================
+
+
+@router.get("/graph/nodes/{node_id}/source")
+async def graph_node_source(
+    node_id: str,
+    db: AsyncSession = Depends(get_db),
+    _current: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """返回实体节点的源文档/chunk 信息，供前端溯源跳转。"""
+    try:
+        nid = _uuid.UUID(node_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的节点 ID")
+    node = await db.get(KGNode, nid)
+    if not node:
+        raise HTTPException(status_code=404, detail="实体不存在")
+    # 权限：用户必须能访问该 KB
+    allowed = await get_accessible_kb_ids(db, _current)
+    if node.kb_id not in allowed:
+        raise HTTPException(status_code=403, detail="无权访问该知识库")
+    # 查 chunk + 文档
+    chunk = await db.get(DocChunk, node.chunk_id) if node.chunk_id else None
+    if not chunk:
+        return {"docId": None, "docTitle": None, "kbId": node.kb_id, "chunkContent": None, "chunkIndex": None}
+    doc = await db.get(Document, chunk.document_id)
+    return {
+        "docId": str(chunk.document_id),
+        "docTitle": doc.title if doc else None,
+        "kbId": node.kb_id,
+        "chunkContent": chunk.content[:1000] if chunk.content else None,
+        "chunkIndex": chunk.chunk_index,
+    }
+
+
+# ======================================================================
+# Phase 2: 图谱编辑 CRUD + 合并
+# ======================================================================
+
+
+class _NodeCreate(BaseModel):
+    label: str = Field(..., min_length=1, max_length=200)
+    type: str | None = Field(default=None, max_length=50)
+    kb_id: str = Field(..., alias="kbId")
+    chunk_id: str | None = Field(default=None, alias="chunkId")
+
+    model_config = {"populate_by_name": True}
+
+
+class _NodeUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=200)
+    type: str | None = Field(default=None, max_length=50)
+
+
+class _EdgeCreate(BaseModel):
+    from_id: str = Field(..., alias="fromId")
+    to_id: str = Field(..., alias="toId")
+    relation: str = Field(..., min_length=1, max_length=100)
+
+    model_config = {"populate_by_name": True}
+
+
+class _MergeRequest(BaseModel):
+    kb_id: str = Field(..., alias="kbId")
+    source_ids: list[str] = Field(..., alias="sourceIds", min_length=1)
+    target_label: str = Field(..., alias="targetLabel", min_length=1, max_length=200)
+    target_type: str | None = Field(default=None, alias="targetType", max_length=50)
+
+    model_config = {"populate_by_name": True}
+
+
+async def _require_kb_write(db: AsyncSession, user: User, kb_id: str, level: str = "edit") -> None:
+    """校验用户对指定 KB 的写权限，不足则 403。"""
+    user_level = await get_kb_permission_level(db, kb_id, user)
+    from app.core.security import LEVEL_ORDER
+    if user_level is None or LEVEL_ORDER.get(user_level, 0) < LEVEL_ORDER.get(level, 0):
+        raise HTTPException(status_code=403, detail=f"需要该知识库的 {level} 权限")
+
+
+@router.post("/graph/nodes", status_code=201)
+async def create_graph_node(
+    body: _NodeCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """创建实体节点。同 KB 同 label 已存在则 409。"""
+    await _require_kb_write(db, user, body.kb_id, "edit")
+    # 去重检查
+    existing = await db.scalar(
+        select(KGNode.id).where(KGNode.kb_id == body.kb_id, KGNode.label == body.label)
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail=f"实体 '{body.label}' 已存在")
+    # chunk_id 可选：不传则取该 KB 任意一个 chunk（占位）
+    chunk_id = None
+    if body.chunk_id:
+        chunk_id = _uuid.UUID(body.chunk_id)
+    else:
+        chunk_id = await db.scalar(select(DocChunk.id).where(DocChunk.kb_id == body.kb_id).limit(1))
+    if not chunk_id:
+        raise HTTPException(status_code=400, detail="该知识库无任何文档 chunk，无法创建实体")
+    # 向量化 label（复用 embedder）
+    from app.deps import get_embedder
+    embedder = get_embedder()
+    embedding = (await embedder.embed([body.label]))[0]
+    node = KGNode(
+        kb_id=body.kb_id,
+        label=body.label,
+        type=body.type,
+        chunk_id=chunk_id,
+        embedding=embedding,
+    )
+    db.add(node)
+    await db.flush()
+    _invalidate_graph(body.kb_id)
+    return _node_out(node)
+
+
+@router.put("/graph/nodes/{node_id}")
+async def update_graph_node(
+    node_id: str,
+    body: _NodeUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """修改实体的 label / type。"""
+    try:
+        nid = _uuid.UUID(node_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的节点 ID")
+    node = await db.get(KGNode, nid)
+    if not node:
+        raise HTTPException(status_code=404, detail="实体不存在")
+    await _require_kb_write(db, user, node.kb_id, "edit")
+    old_label = node.label
+    if body.label is not None and body.label != node.label:
+        # 检查新 label 不重复
+        dup = await db.scalar(
+            select(KGNode.id).where(KGNode.kb_id == node.kb_id, KGNode.label == body.label)
+        )
+        if dup:
+            raise HTTPException(status_code=409, detail=f"实体 '{body.label}' 已存在")
+        node.label = body.label
+        # 同步更新边的 from_label / to_label
+        await db.execute(
+            update(KGEdge).where(KGEdge.kb_id == node.kb_id, KGEdge.from_label == old_label)
+            .values(from_label=body.label)
+        )
+        await db.execute(
+            update(KGEdge).where(KGEdge.kb_id == node.kb_id, KGEdge.to_label == old_label)
+            .values(to_label=body.label)
+        )
+        # 重新向量化
+        from app.deps import get_embedder
+        embedder = get_embedder()
+        node.embedding = (await embedder.embed([body.label]))[0]
+    if body.type is not None:
+        node.type = body.type
+    await db.flush()
+    _invalidate_graph(node.kb_id)
+    return _node_out(node)
+
+
+@router.delete("/graph/nodes/{node_id}", status_code=204)
+async def delete_graph_node(
+    node_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    """删除实体（级联删除关联边）。需要 admin 权限。"""
+    try:
+        nid = _uuid.UUID(node_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的节点 ID")
+    node = await db.get(KGNode, nid)
+    if not node:
+        raise HTTPException(status_code=404, detail="实体不存在")
+    await _require_kb_write(db, user, node.kb_id, "admin")
+    # 级联删边
+    await db.execute(
+        delete(KGEdge).where(
+            KGEdge.kb_id == node.kb_id,
+            or_(KGEdge.from_label == node.label, KGEdge.to_label == node.label),
+        )
+    )
+    await db.delete(node)
+    await db.flush()
+    _invalidate_graph(node.kb_id)
+
+
+@router.post("/graph/edges", status_code=201)
+async def create_graph_edge(
+    body: _EdgeCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """创建关系边。两端节点必须存在且同 KB。"""
+    try:
+        from_id = _uuid.UUID(body.from_id)
+        to_id = _uuid.UUID(body.to_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的节点 ID")
+    from_node = await db.get(KGNode, from_id)
+    to_node = await db.get(KGNode, to_id)
+    if not from_node or not to_node:
+        raise HTTPException(status_code=404, detail="端点实体不存在")
+    if from_node.kb_id != to_node.kb_id:
+        raise HTTPException(status_code=400, detail="不能跨知识库建立关系")
+    await _require_kb_write(db, user, from_node.kb_id, "edit")
+    # 去重
+    dup = await db.scalar(
+        select(KGEdge.id).where(
+            KGEdge.kb_id == from_node.kb_id,
+            KGEdge.from_label == from_node.label,
+            KGEdge.to_label == to_node.label,
+            KGEdge.relation == body.relation,
+        )
+    )
+    if dup:
+        raise HTTPException(status_code=409, detail="该关系已存在")
+    edge = KGEdge(
+        kb_id=from_node.kb_id,
+        from_label=from_node.label,
+        to_label=to_node.label,
+        relation=body.relation,
+    )
+    db.add(edge)
+    await db.flush()
+    _invalidate_graph(from_node.kb_id)
+    return {"id": str(edge.id), "source": str(from_node.id), "target": str(to_node.id), "relation": edge.relation}
+
+
+@router.delete("/graph/edges/{edge_id}", status_code=204)
+async def delete_graph_edge(
+    edge_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    """删除关系边。需要 admin 权限。"""
+    try:
+        eid = _uuid.UUID(edge_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的边 ID")
+    edge = await db.get(KGEdge, eid)
+    if not edge:
+        raise HTTPException(status_code=404, detail="关系不存在")
+    await _require_kb_write(db, user, edge.kb_id, "admin")
+    await db.delete(edge)
+    await db.flush()
+    _invalidate_graph(edge.kb_id)
+
+
+@router.post("/graph/merge")
+async def merge_graph_nodes(
+    body: _MergeRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """合并多个同义实体为一个 target。边重定向，源节点删除。需要 admin。"""
+    await _require_kb_write(db, user, body.kb_id, "admin")
+    # 加载源节点
+    source_uuids = []
+    for sid in body.source_ids:
+        try:
+            source_uuids.append(_uuid.UUID(sid))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"无效的节点 ID: {sid}")
+    sources = list((await db.execute(
+        select(KGNode).where(KGNode.id.in_(source_uuids), KGNode.kb_id == body.kb_id)
+    )).scalars().all())
+    if not sources:
+        raise HTTPException(status_code=404, detail="未找到源实体")
+    source_labels = {n.label for n in sources}
+
+    # 查找或创建 target
+    target = await db.scalar(
+        select(KGNode).where(KGNode.kb_id == body.kb_id, KGNode.label == body.target_label)
+    )
+    if not target:
+        # 用第一个源节点的 chunk_id 和 embedding
+        first = sources[0]
+        target = KGNode(
+            kb_id=body.kb_id,
+            label=body.target_label,
+            type=body.target_type or first.type,
+            chunk_id=first.chunk_id,
+            embedding=first.embedding,
+        )
+        db.add(target)
+        await db.flush()
+    else:
+        if body.target_type:
+            target.type = body.target_type
+
+    # 重定向边：from_label / to_label 在 source_labels 中的 → 改为 target_label
+    # 排除自环（target 指向 target）
+    await db.execute(
+        update(KGEdge)
+        .where(KGEdge.kb_id == body.kb_id, KGEdge.from_label.in_(source_labels))
+        .values(from_label=body.target_label)
+    )
+    await db.execute(
+        update(KGEdge)
+        .where(KGEdge.kb_id == body.kb_id, KGEdge.to_label.in_(source_labels))
+        .values(to_label=body.target_label)
+    )
+    # 删除自环边（from == to == target_label）
+    await db.execute(
+        delete(KGEdge).where(
+            KGEdge.kb_id == body.kb_id,
+            KGEdge.from_label == body.target_label,
+            KGEdge.to_label == body.target_label,
+        )
+    )
+    # 删除重复边（同 from+to+relation 只保留一条）
+    # 简化处理：加载所有 target 相关边，内存去重
+    related_edges = list((await db.execute(
+        select(KGEdge).where(
+            KGEdge.kb_id == body.kb_id,
+            or_(KGEdge.from_label == body.target_label, KGEdge.to_label == body.target_label),
+        )
+    )).scalars().all())
+    seen_triples: set[tuple[str, str, str]] = set()
+    for e in related_edges:
+        key = (e.from_label, e.to_label, e.relation)
+        if key in seen_triples:
+            await db.delete(e)
+        else:
+            seen_triples.add(key)
+
+    # 删除源节点（不包含 target 本身）
+    for s in sources:
+        if s.label != body.target_label:
+            await db.delete(s)
+    await db.flush()
+    _invalidate_graph(body.kb_id)
+    return {"merged": len(sources), "target": _node_out(target)}
+
+
+# ======================================================================
+# Phase 4: 知识缺口信号
+# ======================================================================
+
+
+@router.get("/graph/gaps")
+async def get_graph_gaps(
+    kb_id: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _current: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """知识缺口列表：按问题聚合频次，返回 Top N。"""
+    allowed = await get_accessible_kb_ids(db, _current)
+    q = select(
+        KGGapSignal.question,
+        KGGapSignal.kb_id,
+        func.count(KGGapSignal.id).label("count"),
+        func.max(KGGapSignal.created_at).label("last_at"),
+    ).group_by(KGGapSignal.question, KGGapSignal.kb_id)
+    if kb_id:
+        if kb_id not in allowed:
+            raise HTTPException(status_code=403, detail="无权访问该知识库")
+        q = q.where(KGGapSignal.kb_id == kb_id)
+    else:
+        q = q.where(KGGapSignal.kb_id.in_(allowed))
+    q = q.order_by(func.count(KGGapSignal.id).desc()).limit(limit)
+    rows = (await db.execute(q)).all()
+    return [
+        {
+            "question": r.question,
+            "kbId": r.kb_id,
+            "count": r.count,
+            "lastAt": r.last_at.isoformat() if r.last_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.delete("/graph/gaps", status_code=204)
+async def clear_graph_gaps(
+    kb_id: str | None = Query(default=None),
+    question: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _current: User = Depends(get_current_user),
+) -> None:
+    """标记缺口已处理（删除记录）。可按 kb_id + question 精确删，或不传参清空全部可见。"""
+    allowed = await get_accessible_kb_ids(db, _current)
+    q = delete(KGGapSignal)
+    if kb_id:
+        if kb_id not in allowed:
+            raise HTTPException(status_code=403, detail="无权访问该知识库")
+        q = q.where(KGGapSignal.kb_id == kb_id)
+    else:
+        q = q.where(KGGapSignal.kb_id.in_(allowed))
+    if question:
+        q = q.where(KGGapSignal.question == question)
+    await db.execute(q)
+    await db.flush()

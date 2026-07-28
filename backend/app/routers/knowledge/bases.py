@@ -11,12 +11,14 @@ from app.core.graph import GraphStore
 from app.core.rbac import Perm
 from app.core.security import (
     LEVEL_ORDER,
+    _is_kb_super_admin,
+    dept_ancestors,
     require_kb_access,
     require_permission,
     get_current_user,
 )
 from app.core.storage import get_object_store
-from app.db import DocChunk, Document, DocumentTask, KBPermission, KnowledgeBase, User
+from app.db import Department, DocChunk, Document, DocumentTask, KBDeptGrant, KBPermission, KnowledgeBase, User
 from app.deps import get_db, get_es
 from app.models.knowledge import (
     CamelModel,
@@ -48,6 +50,22 @@ class KBMemberItem(CamelModel):
 
 class KBMembersUpdate(CamelModel):
     members: list[KBMemberItem]
+
+
+class KBDeptGrantItem(CamelModel):
+    deptId: str
+    level: str  # view | edit | admin
+
+
+class KBDeptGrantsUpdate(CamelModel):
+    grants: list[KBDeptGrantItem]
+
+
+class KBDeptGrantOut(CamelModel):
+    id: str
+    deptId: str
+    deptName: str
+    level: str
 
 
 async def _kb_members(db: AsyncSession, kb_id: str) -> list[dict]:
@@ -84,31 +102,60 @@ async def get_knowledge_bases(
     kbs = result.scalars().all()
 
     # 库级权限：一次性聚合查询，替代原先「每库调一次 get_kb_permission_level」的 N+1
-    # （非 admin 用户下，原来每个 KB 触发 1~2 次 DB 查询）。
-    # perm_map: kb_id -> 用户自身最高权限；strict_kbs: 存在任意权限记录的库（严格隔离）。
+    # 合并语义：个人显式优先 → 部门继承 → 开放库兜底 / 严格库拒绝。
     perm_map: dict[str, str] = {}
     strict_kbs: set[str] = set()
-    if user.role != "admin":
+    is_super = await _is_kb_super_admin(db, user)
+    if not is_super:
+        kb_ids = [kb.id for kb in kbs]
+        # 1) 个人授权
         perms = (
             await db.execute(
                 select(KBPermission).where(
-                    KBPermission.kb_id.in_([kb.id for kb in kbs]),
+                    KBPermission.kb_id.in_(kb_ids),
                     KBPermission.user_id == user.id,
                 )
             )
         ).scalars().all()
+        personal_map: dict[str, str] = {}
         for p in perms:
-            cur = perm_map.get(p.kb_id)
+            cur = personal_map.get(p.kb_id)
             if cur is None or LEVEL_ORDER.get(p.level, 0) > LEVEL_ORDER.get(cur, 0):
-                perm_map[p.kb_id] = p.level
+                personal_map[p.kb_id] = p.level
+        # 2) 部门授权（沿祖先链批量查）
+        dept_map: dict[str, str] = {}
+        if user.department_id:
+            ancestors = await dept_ancestors(db, user.department_id)
+            dept_rows = (
+                await db.execute(
+                    select(KBDeptGrant).where(
+                        KBDeptGrant.kb_id.in_(kb_ids),
+                        KBDeptGrant.dept_id.in_(ancestors),
+                    )
+                )
+            ).scalars().all()
+            for g in dept_rows:
+                cur = dept_map.get(g.kb_id)
+                if cur is None or LEVEL_ORDER.get(g.level, 0) > LEVEL_ORDER.get(cur, 0):
+                    dept_map[g.kb_id] = g.level
+        # 3) 合并：个人优先，否则部门最高
+        for kid in kb_ids:
+            if kid in personal_map:
+                perm_map[kid] = personal_map[kid]
+            elif kid in dept_map:
+                perm_map[kid] = dept_map[kid]
+        # 4) 严格库集合：存在任意授权记录（个人或部门）的库
         any_rows = (
             await db.execute(
-                select(KBPermission.kb_id).where(
-                    KBPermission.kb_id.in_([kb.id for kb in kbs])
-                )
+                select(KBPermission.kb_id).where(KBPermission.kb_id.in_(kb_ids))
             )
         ).scalars().all()
-        strict_kbs = set(any_rows)
+        any_dept_rows = (
+            await db.execute(
+                select(KBDeptGrant.kb_id).where(KBDeptGrant.kb_id.in_(kb_ids))
+            )
+        ).scalars().all()
+        strict_kbs = set(any_rows) | set(any_dept_rows)
 
     # 一次聚合查询替代「每库 3 次查询」的 N+1 模式：
     # 按 kb_id 汇总 文档数 / 最新更新时间 / 待复核数。
@@ -146,7 +193,7 @@ async def get_knowledge_bases(
         # 库级权限过滤（权限已上方一次性聚合算出，避免每库一次查询的 N+1）：
         #  - admin / 用户在 perm_map 中有记录 / 遗留开放库（无任何权限记录）→ 可见
         #  - 严格隔离库（存在他人权限记录但用户无记录）→ 不可见
-        if user.role != "admin" and kb.id not in perm_map and kb.id in strict_kbs:
+        if not is_super and kb.id not in perm_map and kb.id in strict_kbs:
             continue
 
         stat = stats_map.get(kb.id)
@@ -323,13 +370,202 @@ async def set_kb_members(
         ).scalar_one_or_none()
         if u is None:
             raise HTTPException(status_code=400, detail=f"用户不存在: {uid}")
-    if not any(lv == "admin" for lv in seen.values()):
-        raise HTTPException(status_code=400, detail="知识库至少需保留一名 admin 成员")
+    # admin 校验：个人 admin 或 部门 admin 任一存在即通过
+    has_admin = any(lv == "admin" for lv in seen.values())
+    if not has_admin:
+        dept_admin = await db.scalar(
+            select(KBDeptGrant.id).where(
+                KBDeptGrant.kb_id == kb_id, KBDeptGrant.level == "admin"
+            ).limit(1)
+        )
+        has_admin = dept_admin is not None
+    if not has_admin:
+        raise HTTPException(status_code=400, detail="知识库至少需保留一名 admin 成员（个人或部门）")
     await db.execute(delete(KBPermission).where(KBPermission.kb_id == kb_id))
     for uid, lv in seen.items():
         db.add(KBPermission(kb_id=kb_id, user_id=uid, level=lv))
     await db.commit()
     return {"members": await _kb_members(db, kb_id)}
+
+
+@router.get("/knowledge-bases/{kb_id}/dept-grants", response_model=dict)
+async def list_kb_dept_grants(
+    kb_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_kb_access("admin")),
+):
+    """列出某知识库的部门授权记录（库 admin 或全局 admin 可见）。"""
+    rows = (
+        await db.execute(
+            select(KBDeptGrant, Department)
+            .join(Department, Department.id == KBDeptGrant.dept_id)
+            .where(KBDeptGrant.kb_id == kb_id)
+        )
+    ).all()
+    grants = [
+        KBDeptGrantOut(
+            id=str(g.id),
+            deptId=str(g.dept_id),
+            deptName=d.name,
+            level=g.level,
+        ).model_dump(by_alias=True)
+        for g, d in rows
+    ]
+    return {"grants": grants}
+
+
+@router.put("/knowledge-bases/{kb_id}/dept-grants", response_model=dict)
+async def set_kb_dept_grants(
+    kb_id: str,
+    payload: KBDeptGrantsUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_kb_access("admin")),
+):
+    """覆盖式设置某 KB 的部门授权。库 admin 或全局 admin 可操作。
+
+    - deptId 必须存在；level 须为 view/edit/admin。
+    - 同一部门按最高级别去重。
+    """
+    seen: dict[uuid.UUID, str] = {}
+    for g in payload.grants:
+        try:
+            did = uuid.UUID(g.deptId)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"非法的 deptId: {g.deptId}") from None
+        if g.level not in LEVEL_ORDER:
+            raise HTTPException(status_code=400, detail=f"非法的权限级别: {g.level}")
+        if did not in seen or LEVEL_ORDER[g.level] > LEVEL_ORDER[seen[did]]:
+            seen[did] = g.level
+    # 校验部门存在
+    for did in seen:
+        dept = (
+            await db.execute(select(Department).where(Department.id == did))
+        ).scalar_one_or_none()
+        if dept is None:
+            raise HTTPException(status_code=400, detail=f"部门不存在: {did}")
+    await db.execute(delete(KBDeptGrant).where(KBDeptGrant.kb_id == kb_id))
+    for did, lv in seen.items():
+        db.add(KBDeptGrant(kb_id=kb_id, dept_id=did, level=lv))
+    await db.commit()
+    # 返回最新列表
+    return await list_kb_dept_grants(kb_id, db=db, _=_)
+
+
+class EffectiveMemberOut(CamelModel):
+    userId: str
+    username: str
+    displayName: str | None = None
+    level: str
+    source: str  # "direct" | "dept:部门名"
+
+
+@router.get("/knowledge-bases/{kb_id}/effective-members", response_model=dict)
+async def list_kb_effective_members(
+    kb_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_kb_access("admin")),
+):
+    """预览某 KB 的有效权限合并结果（个人 + 部门继承），带来源标签。
+
+    合并语义：个人显式优先——有个人记录用个人的，否则取部门继承。
+    """
+    # 1) 个人授权
+    personal_rows = (
+        await db.execute(
+            select(KBPermission, User)
+            .join(User, User.id == KBPermission.user_id)
+            .where(KBPermission.kb_id == kb_id)
+        )
+    ).all()
+    # 个人最高级别去重
+    personal_map: dict[uuid.UUID, tuple[str, User]] = {}
+    for p, u in personal_rows:
+        cur = personal_map.get(u.id)
+        if cur is None or LEVEL_ORDER.get(p.level, 0) > LEVEL_ORDER.get(cur[0], 0):
+            personal_map[u.id] = (p.level, u)
+
+    # 2) 部门授权 → 展开到用户（一次性加载部门树，避免 N+1）
+    dept_grant_rows = (
+        await db.execute(
+            select(KBDeptGrant, Department)
+            .join(Department, Department.id == KBDeptGrant.dept_id)
+            .where(KBDeptGrant.kb_id == kb_id)
+        )
+    ).all()
+    # 全量拉取部门树，内存建 children map
+    all_depts = (await db.execute(select(Department.id, Department.parent_id))).all()
+    children_map: dict[uuid.UUID | None, list[uuid.UUID]] = {}
+    for did, pid in all_depts:
+        children_map.setdefault(pid, []).append(did)
+
+    def _descendants(dept_id: uuid.UUID) -> list[uuid.UUID]:
+        """BFS 求后代部门（含自身），复用内存 children_map。"""
+        result: list[uuid.UUID] = []
+        stack = [dept_id]
+        seen: set[uuid.UUID] = set()
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            result.append(cur)
+            stack.extend(children_map.get(cur, []))
+        return result
+
+    # 按部门展开找用户，个人优先
+    dept_user_map: dict[uuid.UUID, tuple[str, str, User]] = {}  # uid -> (level, dept_name, user)
+    # 收集所有授权部门的后代 id，一次性查用户
+    grant_descendants: list[tuple[str, str, list[uuid.UUID]]] = []  # (level, dept_name, desc_ids)
+    all_desc_ids: set[uuid.UUID] = set()
+    for g, dept in dept_grant_rows:
+        desc = _descendants(g.dept_id)
+        grant_descendants.append((g.level, dept.name, desc))
+        all_desc_ids.update(desc)
+    # 单次查询所有相关部门的用户
+    users_by_dept: dict[uuid.UUID, list[User]] = {}
+    if all_desc_ids:
+        all_users = (
+            await db.execute(
+                select(User).where(User.department_id.in_(all_desc_ids))
+            )
+        ).scalars().all()
+        for u in all_users:
+            users_by_dept.setdefault(u.department_id, []).append(u)
+    # 内存中分配
+    for level, dept_name, desc in grant_descendants:
+        for did in desc:
+            for u in users_by_dept.get(did, []):
+                if u.id in personal_map:
+                    continue  # 个人优先，跳过
+                cur = dept_user_map.get(u.id)
+                if cur is None or LEVEL_ORDER.get(level, 0) > LEVEL_ORDER.get(cur[0], 0):
+                    dept_user_map[u.id] = (level, dept_name, u)
+
+    # 3) 合并输出
+    members: list[dict] = []
+    for uid, (lv, u) in personal_map.items():
+        members.append(
+            EffectiveMemberOut(
+                userId=str(u.id),
+                username=u.username,
+                displayName=u.display_name,
+                level=lv,
+                source="direct",
+            ).model_dump(by_alias=True)
+        )
+    for uid, (lv, dept_name, u) in dept_user_map.items():
+        members.append(
+            EffectiveMemberOut(
+                userId=str(u.id),
+                username=u.username,
+                displayName=u.display_name,
+                level=lv,
+                source=f"dept:{dept_name}",
+            ).model_dump(by_alias=True)
+        )
+    # 按级别降序、用户名稳定排序
+    members.sort(key=lambda m: (-LEVEL_ORDER.get(m["level"], 0), m["username"]))
+    return {"members": members}
 
 
 async def _delete_kb_cascade(db: AsyncSession, kb_id: str) -> None:
@@ -367,8 +603,9 @@ async def _delete_kb_cascade(db: AsyncSession, kb_id: str) -> None:
         except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, ignore object-store delete error)
             pass
         await db.delete(doc)
-    # 清库级权限
+    # 清库级权限（个人 + 部门）
     await db.execute(delete(KBPermission).where(KBPermission.kb_id == kb_id))
+    await db.execute(delete(KBDeptGrant).where(KBDeptGrant.kb_id == kb_id))
     # 删库本身
     await db.execute(delete(KnowledgeBase).where(KnowledgeBase.id == kb_id))
     await db.commit()

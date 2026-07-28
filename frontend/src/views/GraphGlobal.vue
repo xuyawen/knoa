@@ -15,7 +15,12 @@ const {
   stats, maxDegree, avgDegree,
   selectedNode, selectedNeighbors, typeBars, hotNodes, recentNodes,
   tx, ty, k, fetchGraph, onExport, resetAll, resetView,
+  sourceInfo, sourceLoading, loadSource, removeNode,
+  focusNodeId, focusedNodeIds, enterFocus, exitFocus,
 } = useGraphData()
+
+/* ---- 源文档弹窗 ---- */
+const sourceModalVisible = ref(false)
 
 /* ---- 力导向布局 ---- */
 interface LNode { id: string; x: number; y: number; r: number }
@@ -254,7 +259,7 @@ function zoom(dir: number) {
             <!-- 边 -->
             <g class="edges" fill="none">
               <template v-for="(e, i) in (graph?.edges || [])" :key="'e' + i">
-                <g v-if="posMap[e.source] && posMap[e.target]" :class="{ dim: edgeDim(e) }">
+                <g v-if="posMap[e.source] && posMap[e.target] && (!focusedNodeIds || (focusedNodeIds.has(e.source) && focusedNodeIds.has(e.target)))" :class="{ dim: edgeDim(e) }">
                   <line
                     :x1="posMap[e.source].x" :y1="posMap[e.source].y"
                     :x2="posMap[e.target].x" :y2="posMap[e.target].y"
@@ -277,6 +282,7 @@ function zoom(dir: number) {
             <g class="nodes">
               <g
                 v-for="n in lNodes"
+                v-show="!focusedNodeIds || focusedNodeIds.has(n.id)"
                 :key="n.id"
                 :transform="`translate(${posMap[n.id].x},${posMap[n.id].y})`"
                 :class="{ dim: nodeDim(n.id) }"
@@ -285,12 +291,23 @@ function zoom(dir: number) {
                 @pointerleave="hoveredId = null"
                 @pointerdown="onNodeDown($event, n.id)"
                 @click="selectedId = n.id"
+                @dblclick="focusNodeId === n.id ? exitFocus() : enterFocus(n.id)"
               >
+                <!-- 聚焦发光环 -->
+                <circle
+                  v-if="focusNodeId === n.id"
+                  :r="n.r + 6"
+                  fill="none"
+                  stroke="var(--brand, #3B82F6)"
+                  stroke-width="1.5"
+                  opacity=".5"
+                  class="focus-glow"
+                />
                 <circle
                   :r="n.r"
                   :fill="nodeColor(nodeById[n.id]?.kbId || '')"
-                  :stroke="selectedId === n.id ? '#0F172A' : '#fff'"
-                  :stroke-width="selectedId === n.id ? 2.5 : 1.5"
+                  :stroke="selectedId === n.id || focusNodeId === n.id ? 'var(--brand, #3B82F6)' : 'rgba(255,255,255,.45)'"
+                  :stroke-width="selectedId === n.id || focusNodeId === n.id ? 2.5 : 1"
                 />
                 <text class="node-label" :y="n.r + 12" text-anchor="middle">{{ nodeById[n.id]?.label }}</text>
               </g>
@@ -313,7 +330,8 @@ function zoom(dir: number) {
             <span class="leg-line"><i class="leg-arrow"></i> 关系</span>
           </div>
         </div>
-        <p v-if="graph && graph.nodes.length" class="canvas-hint">拖拽节点可移动 · 滚轮缩放 · 拖拽空白处平移 · 点击查看详情</p>
+        <p v-if="graph && graph.nodes.length" class="canvas-hint">拖拽节点可移动 · 滚轮缩放 · 双击节点进入聚焦模式 · 点击查看详情</p>
+
       </div>
 
       <!-- 右：数据面板 -->
@@ -361,22 +379,65 @@ function zoom(dir: number) {
             <span class="dn-label">关联实体：</span>
             <span v-for="(nb, i) in selectedNeighbors" :key="i" class="dn-chip">{{ nb }}</span>
           </div>
+          <!-- 操作按钮 -->
+          <div class="detail-actions">
+            <button class="btn btn-outline btn-sm" @click="loadSource(selectedNode.id); sourceModalVisible = true">
+              <Icon name="file" :size="12" /> 源文档
+            </button>
+            <button class="btn btn-sm" :class="focusNodeId === selectedNode.id ? 'btn-primary' : 'btn-outline'" @click="focusNodeId === selectedNode.id ? exitFocus() : enterFocus(selectedNode.id)">
+              <Icon name="search" :size="12" /> 聚焦
+            </button>
+            <button class="btn btn-outline btn-sm" @click="$router.push({ path: '/chat', query: { q: `请解释 ${selectedNode.label} 及其相关概念`, kb: selectedNode.kbId } })">
+              <Icon name="message" :size="12" /> 提问
+            </button>
+            <button class="btn btn-ghost btn-sm detail-btn-danger" @click="removeNode(selectedNode.id)">
+              <Icon name="trash" :size="12" /> 删除
+            </button>
+          </div>
         </div>
+
+    <!-- 源文档弹窗 -->
+    <Teleport to="body">
+      <div v-if="sourceModalVisible" class="source-modal-mask" @click.self="sourceModalVisible = false">
+        <div class="source-modal-box">
+          <div class="source-modal-head">
+            <span class="source-modal-title">源文档</span>
+            <button class="icon-btn" @click="sourceModalVisible = false"><Icon name="x" :size="14" /></button>
+          </div>
+          <div v-if="sourceLoading" class="source-modal-body source-modal-loading">加载中…</div>
+          <div v-else-if="sourceInfo" class="source-modal-body">
+            <div class="source-modal-doc">{{ sourceInfo.docTitle || '未知文档' }}</div>
+            <pre class="source-modal-text">{{ sourceInfo.chunkContent || '无内容' }}</pre>
+            <router-link v-if="sourceInfo.docId" :to="`/documents?kb=${sourceInfo.kbId}&doc=${sourceInfo.docId}`" class="source-modal-link" @click="sourceModalVisible = false">
+              → 查看完整源文档
+            </router-link>
+          </div>
+          <div class="source-modal-foot">
+            <button class="btn btn-primary btn-sm" @click="sourceModalVisible = false">关闭</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
 
         <div class="section-block">
           <div class="section-title">实体类型分布</div>
-          <div class="type-bars">
+          <div v-if="typeBars.length" class="type-bars">
             <div v-for="(t, i) in typeBars" :key="i" class="type-bar">
               <span class="tb-label">{{ t.label }}</span>
               <span class="tb-track"><i class="tb-fill" :style="{ width: t.pct + '%' }"></i></span>
               <span class="tb-count">{{ t.count }}</span>
             </div>
           </div>
+          <div v-else class="graph-empty-state">
+            <Icon name="archive" :size="22" />
+            <span>暂无实体类型数据</span>
+          </div>
         </div>
 
         <div class="section-block">
           <div class="section-title">热门知识点 Top 5</div>
-          <div class="hot-list">
+          <div v-if="hotNodes.length" class="hot-list">
             <div v-for="(item, i) in hotNodes" :key="item.id" class="hot-item" @click="selectedId = item.id" @mouseenter="hoveredId = item.id" @mouseleave="hoveredId = null">
               <span class="hot-rank" :class="{ top3: i < 3 }">{{ i + 1 }}</span>
               <span class="hot-dot" :style="{ background: nodeColor(item.kbId) }"></span>
@@ -384,11 +445,15 @@ function zoom(dir: number) {
               <span class="hot-count">度数 <strong>{{ item.degree }}</strong></span>
             </div>
           </div>
+          <div v-else class="graph-empty-state">
+            <Icon name="archive" :size="22" />
+            <span>暂无热门知识点</span>
+          </div>
         </div>
 
         <div class="section-block">
           <div class="section-title">最近新增的实体</div>
-          <div class="recent-list">
+          <div v-if="recentNodes.length" class="recent-list">
             <div v-for="n in recentNodes" :key="n.id" class="recent-item" @click="selectedId = n.id" @mouseenter="hoveredId = n.id" @mouseleave="hoveredId = null">
               <span class="recent-icon" :style="{ background: nodeColor(n.kbId) + '18', color: nodeColor(n.kbId) }">
                 <Icon name="graph" :size="13" />
@@ -396,6 +461,10 @@ function zoom(dir: number) {
               <span class="recent-name">{{ n.label }}</span>
               <span class="recent-time">{{ (n.createdAt || '').slice(5, 10) }}</span>
             </div>
+          </div>
+          <div v-else class="graph-empty-state">
+            <Icon name="archive" :size="22" />
+            <span>暂无新增实体</span>
           </div>
         </div>
       </aside>

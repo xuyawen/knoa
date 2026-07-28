@@ -15,12 +15,12 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.rbac import PERMISSION_KEYS, Perm
-from app.db import Department, Document, KBPermission, KnowledgeBase, RolePermission, User
+from app.db import Department, Document, KBDeptGrant, KBPermission, KnowledgeBase, RolePermission, User
 from app.deps import get_db, get_redis
 
 logger = logging.getLogger("knoa.security")
@@ -211,32 +211,10 @@ async def get_kb_permission_level(
 ) -> str | None:
     """返回用户对某 KB 的最高权限级别；None 表示无权限。
 
-    - admin 角色（_is_kb_super_admin）隐式拥有全部 KB 的 admin 级。
-    - 若 KB 完全没有任何权限记录（遗留种子库），视为对全体已登录用户开放 view。
-    - 若 KB 已有权限记录但当前用户不在其中，则返回 None（严格隔离）。
+    统一调用 compute_kb_effective_level（合并个人 + 部门授权）。
+    保留本函数作为外部 API 兼容层。
     """
-    if await _is_kb_super_admin(db, user):
-        return "admin"
-    rows = (
-        await db.execute(
-            select(KBPermission).where(
-                KBPermission.kb_id == kb_id, KBPermission.user_id == user.id
-            )
-        )
-    ).scalars().all()
-    if rows:
-        return max(rows, key=lambda p: LEVEL_ORDER.get(p.level, 0)).level
-    # 该用户无记录：判断 KB 是否处于"严格模式"（已有他人权限）
-    any_perm = await db.scalar(
-        select(KBPermission.id).where(KBPermission.kb_id == kb_id).limit(1)
-    )
-    if any_perm is None:
-        # 遗留开放库（无任何权限记录）：仅隐式开放 view（只读）。
-        # 写操作（edit/admin）必须显式授权——否则"建库忘加权限记录"会让所有
-        # DOC_EDIT 角色用户都能改/删全库文档（含他人 private），叠加文档级
-        # scope 后这个坑更危险。超管仍由 _is_kb_super_admin 走 admin 不受影响。
-        return "view"
-    return None         # 严格库，当前用户未被授权
+    return await compute_kb_effective_level(db, kb_id, user)
 
 
 def require_kb_access(min_level: str = "view"):
@@ -258,25 +236,133 @@ def require_kb_access(min_level: str = "view"):
 async def get_accessible_kb_ids(db: AsyncSession, user: User) -> list[str]:
     """返回当前用户对 view+ 可见的全部 KB id（用于「未指定 KB 时」的检索范围限定）。
 
-    - admin 角色：可见全部库；
-    - 其余用户：在 kb_permission 中有记录者 + 遗留「开放库」（该库无任何权限记录）可见；
-      严格隔离库（已有他人权限记录但自己不在其中）不可见。
-    语义与 get_kb_permission_level 的「遗留开放库」规则保持一致；
-    非 admin 分支用单条 EXISTS 查询完成（原先拆成 3 次全量查询 + 内存集合运算）。
+    统一语义：个人授权 + 部门继承 + 遗留开放库。
     """
     if await _is_kb_super_admin(db, user):
         rows = (await db.execute(select(KnowledgeBase.id))).scalars().all()
         return [str(x) for x in rows]
+    # 个人授权的库
     user_perm = (
         select(KBPermission.id)
         .where(KBPermission.kb_id == KnowledgeBase.id, KBPermission.user_id == user.id)
         .exists()
     )
-    any_perm = select(KBPermission.id).where(KBPermission.kb_id == KnowledgeBase.id).exists()
+    # 部门授权的库（沿祖先链匹配）
+    has_dept = bool(user.department_id)
+    dept_clause = None
+    if has_dept:
+        ancestors = await dept_ancestors(db, user.department_id)
+        dept_clause = (
+            select(KBDeptGrant.id)
+            .where(KBDeptGrant.kb_id == KnowledgeBase.id, KBDeptGrant.dept_id.in_(ancestors))
+            .exists()
+        )
+    # 遗留开放库（无任何授权记录）
+    any_personal = select(KBPermission.id).where(KBPermission.kb_id == KnowledgeBase.id).exists()
+    any_dept = select(KBDeptGrant.id).where(KBDeptGrant.kb_id == KnowledgeBase.id).exists()
+    open_kb = not_(or_(any_personal, any_dept))
+    # 合并：个人授权 | 部门授权（若有） | 开放库
+    conditions = [user_perm, open_kb]
+    if dept_clause is not None:
+        conditions.append(dept_clause)
+    condition = or_(*conditions)
     rows = (
-        await db.execute(select(KnowledgeBase.id).where(user_perm | ~any_perm))
+        await db.execute(select(KnowledgeBase.id).where(condition))
     ).scalars().all()
     return [str(x) for x in rows]
+
+
+# ---------------------------------------------------------------------------
+# 部门树工具（库级部门授权用）
+# ---------------------------------------------------------------------------
+
+
+async def dept_ancestors(db: AsyncSession, dept_id: uuid.UUID) -> list[uuid.UUID]:
+    """返回本人部门 + 所有祖先部门 id（向上链）。
+
+    库级部门授权匹配用：用户沿自己的祖先链向上找，看是否有某个祖先被授权。
+    等价于"授权给父部门 → 子部门用户继承"。
+    """
+    rows = (await db.execute(select(Department.id, Department.parent_id))).all()
+    parent_map: dict[uuid.UUID, uuid.UUID | None] = {did: pid for did, pid in rows}
+    chain: list[uuid.UUID] = []
+    cur: uuid.UUID | None = dept_id
+    while cur is not None and cur not in chain:
+        chain.append(cur)
+        cur = parent_map.get(cur)
+    return chain
+
+
+async def dept_descendants(db: AsyncSession, dept_id: uuid.UUID) -> list[uuid.UUID]:
+    """返回本人部门 + 所有后代部门 id（向下 BFS）。
+
+    用于展开部门授权覆盖的用户范围：授权给父部门 → 子部门用户继承。
+    """
+    rows = (await db.execute(select(Department.id, Department.parent_id))).all()
+    children: dict[uuid.UUID | None, list[uuid.UUID]] = {}
+    for did, pid in rows:
+        children.setdefault(pid, []).append(did)
+    result: list[uuid.UUID] = []
+    stack = [dept_id]
+    seen: set[uuid.UUID] = set()
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        result.append(cur)
+        stack.extend(children.get(cur, []))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 统一库级权限计算（消除散落）
+# ---------------------------------------------------------------------------
+
+
+async def compute_kb_effective_level(
+    db: AsyncSession, kb_id: str, user: User
+) -> str | None:
+    """计算用户对某 KB 的有效权限级别（合并个人 + 部门授权）。
+
+    合并语义：个人显式优先——有个人记录用个人的（哪怕低于部门），
+    无个人记录则取部门祖先链上的最高授权。删除个人记录 = 回归部门继承。
+    """
+    if await _is_kb_super_admin(db, user):
+        return "admin"
+    # 1) 个人授权（优先）
+    personal_rows = (
+        await db.execute(
+            select(KBPermission.level).where(
+                KBPermission.kb_id == kb_id, KBPermission.user_id == user.id
+            )
+        )
+    ).scalars().all()
+    if personal_rows:
+        return max(personal_rows, key=lambda lv: LEVEL_ORDER.get(lv, 0))
+    # 2) 部门授权（继承）
+    if user.department_id:
+        ancestors = await dept_ancestors(db, user.department_id)
+        dept_rows = (
+            await db.execute(
+                select(KBDeptGrant.level).where(
+                    KBDeptGrant.kb_id == kb_id,
+                    KBDeptGrant.dept_id.in_(ancestors),
+                )
+            )
+        ).scalars().all()
+        if dept_rows:
+            return max(dept_rows, key=lambda lv: LEVEL_ORDER.get(lv, 0))
+    # 3) 开放库兆底 / 严格库拒绝
+    any_personal = await db.scalar(
+        select(KBPermission.id).where(KBPermission.kb_id == kb_id).limit(1)
+    )
+    any_dept = await db.scalar(
+        select(KBDeptGrant.id).where(KBDeptGrant.kb_id == kb_id).limit(1)
+    )
+    if any_personal is None and any_dept is None:
+        return "view"  # 遗留开放库（无任何授权记录）
+    return None  # 严格库，当前用户未被授权
 
 
 # ---------------------------------------------------------------------------

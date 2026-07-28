@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import paginate
-from app.core.security import get_accessible_kb_ids, get_current_user
+from app.core.security import _is_kb_super_admin, get_accessible_kb_ids, get_current_user
 from app.db import Document, DocumentTask
 from app.deps import get_db
 from app.models.common import PaginatedOut
@@ -45,9 +45,10 @@ async def list_tasks(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    allowed = set(await get_accessible_kb_ids(db, user))
-    # 非 admin 且无任何可见 KB 时直接返回空分页
-    if user.role != "admin" and not allowed:
+    is_super = await _is_kb_super_admin(db, user)
+    allowed = set() if is_super else set(await get_accessible_kb_ids(db, user))
+    # 非超管且无任何可见 KB 时直接返回空分页
+    if not is_super and not allowed:
         return {"items": [], "total": 0, "page": page, "page_size": size, "pages": 1}
 
     stmt = select(DocumentTask, Document.title).outerjoin(
@@ -60,7 +61,7 @@ async def list_tasks(
             raise HTTPException(status_code=400, detail="document_id 非法") from None
     if kb_id:
         stmt = stmt.where(DocumentTask.kb_id == kb_id)
-    if user.role != "admin":
+    if not is_super:
         stmt = stmt.where(DocumentTask.kb_id.in_(allowed))
     stmt = stmt.order_by(DocumentTask.created_at.desc())
 
@@ -96,7 +97,7 @@ async def get_task(
     if row is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     t, title = row
-    if user.role != "admin":
+    if not await _is_kb_super_admin(db, user):
         allowed = set(await get_accessible_kb_ids(db, user))
         if t.kb_id not in allowed:
             raise HTTPException(status_code=403, detail="无权查看该任务")

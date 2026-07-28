@@ -232,6 +232,9 @@ async def upload_document(
     审核通过后再由 approve 接口触发 ingest_existing 真正摄入。
     前端把文件读成 base64（content_b64）提交；文本文件仍兼容旧的 content 字段。
     """
+    logger.info("[upload] START | user=%s(%s) | kb=%s | filename=%s",
+                user.display_name, user.id, kb_id, payload.filename)
+
     kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
@@ -244,30 +247,45 @@ async def upload_document(
     #    b) content_b64：二进制 base64（向后兼容旧前端流程）
     #    c) content：纯文本（md/txt 直传）
     source_path: str | None = None
+    source_mode = "none"
     if payload.file_url:
+        source_mode = "file_url"
         try:
             from app.core.oss import normalize_url
             from app.core.rag.fetchers import fetch_url_bytes
             source_path = normalize_url(payload.file_url)  # SSRF 校验：必须是本 OSS 桶地址
+            logger.info("[upload] fetch start | url=%s | normalized=%s", payload.file_url[:120], source_path[:120])
             raw = await fetch_url_bytes(source_path, max_bytes=settings.OSS_MAX_SIZE or 100 * 1024 * 1024)
+            logger.info("[upload] fetch ok | bytes=%d", len(raw))
         except ValueError as e:
+            logger.error("[upload] fetch ValueError | url=%s | err=%s", payload.file_url[:120], e)
             raise HTTPException(status_code=400, detail=f"file_url 非法：{e}") from e
         except Exception as e:  # noqa: BLE001  (intentional catch-all: convert any OSS fetch failure to 502)
+            logger.error("[upload] fetch FAILED | type=%s | url=%s | err=%s",
+                         type(e).__name__, payload.file_url[:120], e)
             raise HTTPException(status_code=502, detail=f"从 OSS 拉取文件失败：{e}") from e
     elif payload.content_b64:
+        source_mode = "content_b64"
         try:
             # 大文件 base64 解码是纯 CPU 操作（百 MB 级可达百毫秒），移出事件循环
             raw = await asyncio.to_thread(base64.b64decode, payload.content_b64, validate=True)
+            logger.info("[upload] b64 decoded | bytes=%d", len(raw))
         except Exception:  # noqa: BLE001  (intentional catch-all: return 422 if content_b64 not valid base64)
             raise HTTPException(status_code=422, detail="content_b64 不是合法 base64") from None
     elif payload.content is not None:
+        source_mode = "content"
         raw = payload.content.encode("utf-8")
+        logger.info("[upload] plain text | chars=%d | bytes=%d", len(payload.content), len(raw))
     else:
+        logger.warning("[upload] no payload provided | has_file_url=%s | has_content_b64=%s | has_content=%s",
+                       bool(payload.file_url), bool(payload.content_b64), payload.content is not None)
         raise HTTPException(status_code=422, detail="content / content_b64 / file_url 至少提供其一")
 
     # 1b) 大小防护：解码后原始字节上限（OSS 直传走 OSS_MAX_SIZE，旧流程保持 20MB）
     MAX_UPLOAD_BYTES = settings.OSS_MAX_SIZE or (20 * 1024 * 1024)
+    logger.info("[upload] size check | mode=%s | bytes=%d | limit=%d", source_mode, len(raw), MAX_UPLOAD_BYTES)
     if len(raw) > MAX_UPLOAD_BYTES:
+        logger.warning("[upload] size REJECTED | bytes=%d > limit=%d", len(raw), MAX_UPLOAD_BYTES)
         raise HTTPException(status_code=413, detail="文件过大，单篇上传上限超限")
 
     # 2) 原始文件落存储：OSS 直传场景 source_path 已是可访问 URL（不重复落本地库），
@@ -277,8 +295,11 @@ async def upload_document(
     if source_path is None:
         store = get_object_store()
         object_key = f"uploads/{kb_id}/{uuid.uuid4().hex}_{filename}"
+        logger.info("[upload] store.put | key=%s | bytes=%d", object_key, len(raw))
         await store.put(object_key, raw)
         source_path = object_key
+    else:
+        logger.info("[upload] skip store (OSS direct) | source_path=%s", source_path[:120])
 
     # 3) 按扩展名解析：文本走原 parse_document；图片/音频/视频走多模态解析器。
     #    解析失败则清理已存的原始文件并回 415（仅本地存储时才需清理）。
@@ -291,21 +312,27 @@ async def upload_document(
 
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     text_exts = {"md", "markdown", "txt", "docx", "pdf"}
+    logger.info("[upload] parse | ext=%s | filename=%s", ext, filename)
     if ext in text_exts:
         try:
             # pdf/docx 解析是重 CPU 操作（大文档可达秒级），移出事件循环，
             # 否则会阻塞全部并发请求（含 SSE 流心跳）
             parsed = await asyncio.to_thread(parse_document, filename, raw)
+            logger.info("[upload] parse ok | ext=%s | text_len=%d", ext, len(parsed.text))
         except UnsupportedFormatError as e:
+            logger.error("[upload] parse FAILED (UnsupportedFormat) | ext=%s | err=%s", ext, e)
             await _cleanup()
             raise HTTPException(status_code=415, detail=str(e)) from e
     elif ext in IMAGE_EXTS | AUDIO_EXTS | VIDEO_EXTS:
         try:
             parsed = await parse_multimodal(filename, raw, get_llm())
+            logger.info("[upload] multimodal parse ok | ext=%s", ext)
         except UnsupportedFormatError as e:
+            logger.error("[upload] multimodal parse FAILED | ext=%s | err=%s", ext, e)
             await _cleanup()
             raise HTTPException(status_code=415, detail=str(e)) from e
     else:
+        logger.warning("[upload] unsupported format | ext=%s", ext)
         await _cleanup()
         raise HTTPException(
             status_code=415,
@@ -318,6 +345,7 @@ async def upload_document(
     scope = payload.scope or "public"
     if scope not in ("private", "department", "public"):
         scope = "public"
+    logger.info("[upload] create doc | title=%s | scope=%s | filename=%s", title[:60], scope, filename)
     doc = Document(
         kb_id=kb_id,
         title=title,
@@ -367,6 +395,8 @@ async def upload_document(
     db.add(task)
     await db.commit()
     await db.refresh(doc)
+    logger.info("[upload] SUCCESS | doc_id=%s | title=%s | status=%s | scope=%s | file_size=%d",
+                doc.id, doc.title[:60], doc.status, doc.scope, doc.file_size)
     await record_operation(db, user, "upload", related_doc_id=str(doc.id), detail=filename)
 
     return doc_out(doc)

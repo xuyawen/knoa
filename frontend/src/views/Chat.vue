@@ -702,6 +702,11 @@ onMounted(async () => {
   // 支持从检索记录页等带 ?session=xxx 跳转进来打开对应对话
   const sid = route.query.session
   if (typeof sid === 'string' && sid) await selectSession(sid)
+  // 支持从图谱「提问」按钮带 ?q=xxx&kb=yyy 跳转：自动选库 + 预填问题
+  const qParam = route.query.q
+  if (typeof qParam === 'string' && qParam) inputText.value = qParam
+  const kbParam = route.query.kb
+  if (typeof kbParam === 'string' && kbParam) selectedKb.value = kbParam
 })
 watch(messages, () => scrollToBottom(), { deep: false })
 </script>

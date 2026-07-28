@@ -23,6 +23,28 @@ export interface KBMembersUpdate {
   members: { userId: string; level: 'view' | 'edit' | 'admin' }[]
 }
 
+/** 部门授权记录。 */
+export interface KBDeptGrant {
+  id: string
+  deptId: string
+  deptName: string
+  level: 'view' | 'edit' | 'admin'
+}
+
+/** 全量设置部门授权（覆盖式）。 */
+export interface KBDeptGrantsUpdate {
+  grants: { deptId: string; level: 'view' | 'edit' | 'admin' }[]
+}
+
+/** 有效权限预览条目（合并个人 + 部门继承）。 */
+export interface EffectiveMember {
+  userId: string
+  username: string
+  displayName: string | null
+  level: 'view' | 'edit' | 'admin'
+  source: string  // "direct" | "dept:部门名"
+}
+
 /** 长期记忆条目（个人记忆管理页）。 */
 export interface MemoryItem {
   id: string
@@ -211,15 +233,17 @@ export interface FeedbackPayload {
   rating: 'up' | 'down'
 }
 
-/* ===== 知识图谱（只读 /api/graph） ===== */
+/* ===== 知识图谱（/api/graph） ===== */
 export interface GraphNode {
   id: string
   label: string
   type: string | null
   kbId: string
+  chunkId?: string | null
   createdAt?: string | null
 }
 export interface GraphEdge {
+  id?: string
   source: string   // GraphNode.id
   target: string   // GraphNode.id
   relation: string
@@ -247,6 +271,31 @@ export interface GraphFilter {
   bizCategory?: string
   from?: string   // ISO 日期，created_at >=
   to?: string     // ISO 日期，created_at <=
+}
+
+/** 实体溯源信息（GET /api/graph/nodes/{id}/source）。 */
+export interface GraphNodeSource {
+  docId: string | null
+  docTitle: string | null
+  kbId: string
+  chunkContent: string | null
+  chunkIndex: number | null
+}
+
+/** 实体合并请求。 */
+export interface GraphMergeRequest {
+  kbId: string
+  sourceIds: string[]
+  targetLabel: string
+  targetType?: string | null
+}
+
+/** 知识缺口信号。 */
+export interface KGGapSignal {
+  question: string
+  kbId: string
+  count: number
+  lastAt: string | null
 }
 
 export interface KnowledgeBasesResponse {

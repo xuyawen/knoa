@@ -14,7 +14,10 @@ import type {
   GraphData,
   GraphFilter,
   GraphHotNode,
+  GraphMergeRequest,
   GraphNode,
+  GraphNodeSource,
+  KGGapSignal,
   DashboardMetrics,
   TrendResponse,
   DocCategory,
@@ -39,6 +42,9 @@ import type {
   RecordsResponse,
   KBMember,
   KBMembersUpdate,
+  KBDeptGrant,
+  KBDeptGrantsUpdate,
+  EffectiveMember,
   MemoryItem,
 } from '@/types/api'
 import { TokenExpiredError, request, requestVoid, requestRaw } from './http'
@@ -72,6 +78,27 @@ export async function setKbMembers(kbId: string, payload: KBMembersUpdate): Prom
     method: 'PUT',
     json: payload,
   })
+  return data.members
+}
+
+/** 列出某知识库的部门授权记录。 */
+export async function getKbDeptGrants(kbId: string): Promise<KBDeptGrant[]> {
+  const data = await request<{ grants: KBDeptGrant[] }>(`/api/knowledge-bases/${kbId}/dept-grants`)
+  return data.grants
+}
+
+/** 覆盖式设置某知识库的部门授权。 */
+export async function setKbDeptGrants(kbId: string, payload: KBDeptGrantsUpdate): Promise<KBDeptGrant[]> {
+  const data = await request<{ grants: KBDeptGrant[] }>(`/api/knowledge-bases/${kbId}/dept-grants`, {
+    method: 'PUT',
+    json: payload,
+  })
+  return data.grants
+}
+
+/** 预览某知识库的有效权限合并结果（个人 + 部门继承）。 */
+export async function getKbEffectiveMembers(kbId: string): Promise<EffectiveMember[]> {
+  const data = await request<{ members: EffectiveMember[] }>(`/api/knowledge-bases/${kbId}/effective-members`)
   return data.members
 }
 
@@ -333,6 +360,58 @@ export async function exportGraph(format: 'json' | 'gexf' = 'json', kbId?: strin
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+/** 实体溯源：获取节点的源文档/chunk 信息。 */
+export async function getGraphNodeSource(nodeId: string): Promise<GraphNodeSource> {
+  return request(`/api/graph/nodes/${nodeId}/source`)
+}
+
+/** 创建实体节点。 */
+export async function createGraphNode(body: { label: string; type?: string; kbId: string; chunkId?: string }): Promise<GraphNode> {
+  return request('/api/graph/nodes', { method: 'POST', json: body })
+}
+
+/** 修改实体节点。 */
+export async function updateGraphNode(nodeId: string, body: { label?: string; type?: string }): Promise<GraphNode> {
+  return request(`/api/graph/nodes/${nodeId}`, { method: 'PUT', json: body })
+}
+
+/** 删除实体节点（级联删边）。 */
+export async function deleteGraphNode(nodeId: string): Promise<void> {
+  return request(`/api/graph/nodes/${nodeId}`, { method: 'DELETE' })
+}
+
+/** 创建关系边。 */
+export async function createGraphEdge(body: { fromId: string; toId: string; relation: string }): Promise<{ id: string }> {
+  return request('/api/graph/edges', { method: 'POST', json: body })
+}
+
+/** 删除关系边。 */
+export async function deleteGraphEdge(edgeId: string): Promise<void> {
+  return request(`/api/graph/edges/${edgeId}`, { method: 'DELETE' })
+}
+
+/** 合并实体。 */
+export async function mergeGraphNodes(body: GraphMergeRequest): Promise<{ merged: number }> {
+  return request('/api/graph/merge', { method: 'POST', json: body })
+}
+
+/** 知识缺口列表。 */
+export async function getGraphGaps(kbId?: string | null, limit = 20): Promise<KGGapSignal[]> {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  if (kbId) params.set('kb_id', kbId)
+  return request(`/api/graph/gaps?${params.toString()}`)
+}
+
+/** 标记缺口已处理。 */
+export async function clearGraphGaps(kbId?: string | null, question?: string): Promise<void> {
+  const params = new URLSearchParams()
+  if (kbId) params.set('kb_id', kbId)
+  if (question) params.set('question', question)
+  const qs = params.toString()
+  return request(`/api/graph/gaps${qs ? `?${qs}` : ''}`, { method: 'DELETE' })
 }
 
 /**

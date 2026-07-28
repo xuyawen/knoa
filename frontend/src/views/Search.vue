@@ -134,7 +134,7 @@ function fmtTime(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 function scopeLabel(scope: string): string {
-  const map: Record<string, string> = { public: '公开', department: '部门可见', private: '仅本人可见' }
+  const map: Record<string, string> = { public: '公开', department: '部门可见', private: '本人可见' }
   return map[scope] || scope
 }
 

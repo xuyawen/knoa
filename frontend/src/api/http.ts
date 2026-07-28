@@ -29,7 +29,9 @@ export async function throwHttpError(resp: Response, fallback?: string): Promise
   }
   // 后端若回显了 "HTTP xxx" 这类无意义文案，用友好映射覆盖
   if (/^HTTP \d+$/.test(detail)) detail = ''
-  throw new Error(detail || defaultMsg)
+  const err = new Error(detail || defaultMsg) as Error & { status: number }
+  err.status = resp.status
+  throw err
 }
 
 // ── 统一请求封装 ──

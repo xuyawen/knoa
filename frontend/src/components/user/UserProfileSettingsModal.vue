@@ -9,6 +9,7 @@ import { errMsg } from '@/utils/errmsg'
 import { changePassword, updateUser } from '@/api/auth'
 import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
+import DepartmentSelect from '@/components/ui/DepartmentSelect.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -28,7 +29,7 @@ const roleLabel = computed(() => ROLE_LABEL[auth.user?.role || 'viewer'] || auth
 /* ---------- tab 状态 ---------- */
 const editTab = ref<'info' | 'security'>(props.initialTab)
 const editingInfo = ref(false)
-const infoDraft = ref({ displayName: '', email: '', department: '', employeeId: '' })
+const infoDraft = ref({ displayName: '', email: '', departmentId: '', employeeId: '' })
 const infoSaving = ref(false)
 
 function syncInfoDraft() {
@@ -36,7 +37,7 @@ function syncInfoDraft() {
   infoDraft.value = {
     displayName: u?.displayName || '',
     email: u?.email || '',
-    department: u?.department || '',
+    departmentId: u?.departmentId || '',
     employeeId: u?.employeeId || '',
   }
 }
@@ -68,7 +69,7 @@ async function saveInfo() {
     await updateUser(auth.user.id, {
       displayName: infoDraft.value.displayName.trim() || null,
       email: infoDraft.value.email.trim() || null,
-      department: infoDraft.value.department.trim() || null,
+      departmentId: infoDraft.value.departmentId || null,
       employeeId: infoDraft.value.employeeId.trim() || null,
     })
     await auth.fetchMe()
@@ -163,7 +164,7 @@ const pwdStrength = computed(() => {
           <div class="info-item">
             <span class="info-key">部门</span>
             <span v-if="!editingInfo" class="info-val">{{ auth.user?.department || '未设置' }}</span>
-            <input v-else v-model="infoDraft.department" class="info-input" placeholder="未设置" />
+            <DepartmentSelect v-else v-model="infoDraft.departmentId" width="240px" />
           </div>
           <div class="info-item">
             <span class="info-key">工号</span>
@@ -291,7 +292,7 @@ const pwdStrength = computed(() => {
   font-weight: 600;
   box-shadow: var(--shadow-sm);
 }
-.edit-body { min-height: 360px; }
+.edit-body { height: 440px; overflow-y: auto; }
 
 .info-group + .info-group { margin-top: 24px; }
 .info-group-title {

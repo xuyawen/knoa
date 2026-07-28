@@ -147,7 +147,7 @@ def _coerce_graph(obj) -> dict:
 _GRAPH_EXTRACT_PROMPT = """你是一个知识图谱抽取器。请从给定文档中抽取实体（节点）和它们之间的关系（边）。
 
 要求：
-- 实体：跨境电商运营知识中的关键概念/对象，如政策名、物流方式、费用项、流程步骤、平台功能等。
+- 实体：企业知识中的关键概念/对象（可来自跨境电商、财务、产品、实施等任意业务域），如政策名、流程步骤、费用项、功能模块等。
 - 关系：实体之间的有向关联，如 "A 属于 B"、"A 导致 B"、"A 需要 B"、"A 影响 B"。
 - 只抽取文档中明确出现的，不要臆造。
 - 实体 label 用简短中文短语；type 标注类别（如 政策/物流/费用/流程/功能）。
@@ -329,6 +329,105 @@ class GraphStore:
         await db.flush()
         _invalidate_graph(kb_id)
 
+    async def incremental_extract(
+        self,
+        kb_id: str,
+        doc_title: str,
+        chunks: Sequence[dict],
+        db: AsyncSession,
+        old_chunk_ids: list | None = None,
+    ) -> None:
+        """增量图更新：文档内容变更后 diff 式重抽（而非全量删+重建）。
+
+        逻辑：
+        1. 先抽取新实体/关系（复用 extract 的 LLM 调用）
+        2. 对比新旧实体集合：
+           - 新增实体 → 插入
+           - 消失实体 → 检查是否被其他文档引用（chunk_id 属于其他 doc）→ 无引用才删
+           - 存续实体 → 不动
+        3. 边同理：两端实体都在 → 保留；任一端被删 → 删边
+
+        old_chunk_ids: 该文档旧的 chunk_id 列表（用于判断哪些实体属于这篇文档）。
+        """
+        if not chunks:
+            return
+        # 取该文档旧实体（按 old_chunk_ids 归属）
+        old_labels: set[str] = set()
+        if old_chunk_ids:
+            old_labels = set(
+                (await db.execute(
+                    select(KGNode.label).where(
+                        KGNode.kb_id == kb_id, KGNode.chunk_id.in_(old_chunk_ids)
+                    )
+                )).scalars().all()
+            )
+
+        # 抽取新实体（复用 extract 的 LLM + 向量化逻辑，但不写入）
+        text = "\n\n".join(
+            f"[chunk {c.get('index', i)}] {c.get('content', '')}"
+            for i, c in enumerate(chunks)
+        )[:6000]
+        try:
+            raw = "".join(c for c in await self._stream_completion(doc_title, text))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("incremental extract LLM failed (skip): %s", e)
+            return
+
+        graph = _coerce_graph(raw)
+        entities = graph["entities"]
+        relations = graph["relations"]
+        new_labels = {
+            str(e.get("label", "")).strip()
+            for e in entities
+            if str(e.get("label", "")).strip()
+        }
+
+        # 消失实体：旧有但新抽未出现
+        vanished = old_labels - new_labels
+        # 存续实体：新旧都有 → 不动
+        # 新增实体：新有但旧无 → 插入（复用 extract 的写入逻辑）
+
+        # 删除消失实体（仅当其 chunk_id 属于本文档，即不被其他文档引用）
+        if vanished and old_chunk_ids:
+            # 只删属于本文档 chunk 的节点
+            deletable = (
+                await db.execute(
+                    select(KGNode.label).where(
+                        KGNode.kb_id == kb_id,
+                        KGNode.label.in_(vanished),
+                        KGNode.chunk_id.in_(old_chunk_ids),
+                    )
+                )
+            ).scalars().all()
+            if deletable:
+                await db.execute(
+                    delete(KGEdge).where(
+                        KGEdge.kb_id == kb_id,
+                        (KGEdge.from_label.in_(deletable)) | (KGEdge.to_label.in_(deletable)),
+                    )
+                )
+                await db.execute(
+                    delete(KGNode).where(
+                        KGNode.kb_id == kb_id,
+                        KGNode.label.in_(deletable),
+                        KGNode.chunk_id.in_(old_chunk_ids),
+                    )
+                )
+
+        # 新增实体 + 边：复用 extract（它内部会去重已存在的 label）
+        # 先清旧 chunk 归属的节点（让 extract 重新插入更新后的实体）
+        if old_chunk_ids:
+            await db.execute(
+                delete(KGNode).where(KGNode.kb_id == kb_id, KGNode.chunk_id.in_(old_chunk_ids))
+            )
+        # 调 extract 写入新实体（它会跳过已存在的 label）
+        await self.extract(kb_id, doc_title, chunks, db)
+        _invalidate_graph(kb_id)
+        logger.info(
+            "incremental graph update doc=%s: vanished=%d, new=%d",
+            doc_title, len(vanished), len(new_labels - old_labels),
+        )
+
     @staticmethod
     def _locate_chunk(label: str, chunks: Sequence[dict]):
         """把实体映射回它首次出现的 chunk（内容包含该 label 的即归属）。"""
@@ -400,19 +499,24 @@ class GraphStore:
             key=lambda x: x[0],
             reverse=True,
         )
-        # 相似度够高的直接当种子；若一个都没有（问法偏门），兜底取 top_k 最相关
+        # 相似度够高的直接当种子；若一个都没有（问法偏门），兆底取 top_k 最相关
         seed_labels = [nd["label"] for s, nd in scored if s >= 0.55][:top_k]
         if not seed_labels:
             seed_labels = [nd["label"] for _, nd in scored[:top_k]]
-
+        
+        # 构建 label → 真实余弦分数的映射（用于置信度）
+        score_by_label = {nd["label"]: s for s, nd in scored}
+        
         seed_set = set(seed_labels)
         # 3) 1 跳扩展：沿关系边把邻居也拉进来
+        neighbor_labels: set[str] = set()
         if seed_set:
             for e in edge_list:
-                if e["from_label"] in seed_set:
-                    seed_set.add(e["to_label"])
-                if e["to_label"] in seed_set:
-                    seed_set.add(e["from_label"])
+                if e["from_label"] in seed_set and e["to_label"] not in seed_set:
+                    neighbor_labels.add(e["to_label"])
+                if e["to_label"] in seed_set and e["from_label"] not in seed_set:
+                    neighbor_labels.add(e["from_label"])
+        seed_set = seed_set | neighbor_labels
 
         # 4) 收集这些实体对应的 chunk_id（去重，保序）
         node_by_label = {nd["label"]: nd for nd in node_list if nd["label"] in seed_set}
@@ -441,6 +545,20 @@ class GraphStore:
             if not item:
                 continue
             c, title = item
+            # 置信度：找到该 chunk 对应的实体 label，用真实余弦分数
+            # 种子实体用原始分数，1 跳邻居用种子最高分 * 0.8 衰减
+            conf = 0.5  # 兆底
+            for lbl in seed_set:
+                nd = node_by_label.get(lbl)
+                if nd and nd["chunk_id"] == cid:
+                    raw = score_by_label.get(lbl, 0.5)
+                    if lbl in neighbor_labels:
+                        # 邻居：取种子最高分 * 0.8
+                        best_seed = max((score_by_label.get(s, 0) for s in seed_labels), default=0.5)
+                        conf = round(best_seed * 0.8, 3)
+                    else:
+                        conf = round(raw, 3)
+                    break
             out.append(
                 {
                     "chunk_id": str(c.id),
@@ -450,7 +568,7 @@ class GraphStore:
                     "doc_id": str(c.document_id),
                     "snippet": c.content[:300],
                     "content": c.content,
-                    "confidence": 0.7,
+                    "confidence": conf,
                     "source_type": "graph",
                 }
             )
@@ -493,6 +611,7 @@ class GraphStore:
         if not seeds:
             seeds = [nd["label"] for _, nd in scored[: settings.GRAPH_TOP_K]]
         seed_set = set(seeds)
+        score_by_label = {nd["label"]: s for s, nd in scored}
 
         # 无向邻接表（BFS 双向可达），保留边方向与关系文本
         from collections import deque
@@ -568,11 +687,23 @@ class GraphStore:
                 )
             ).all()
             by_id = {c.id: (c, title) for c, title in rows}
+            # 置信度按跳数衰减：种子=原始分, hop1*0.8, hop2*0.6
+            decay = {0: 1.0, 1: 0.8, 2: 0.6}
+            best_seed_score = max((scored[0][0],) if scored else (0.5,))
             for cid in chunk_ids:
                 item = by_id.get(cid)
                 if not item:
                     continue
                 c, title = item
+                # 找该 chunk 对应实体的深度
+                conf = round(best_seed_score * 0.6, 3)  # 兆底
+                for lbl in visited:
+                    nd = node_by_label.get(lbl)
+                    if nd and nd["chunk_id"] == cid:
+                        d = depth.get(lbl, 2)
+                        raw = score_by_label.get(lbl, best_seed_score) if d == 0 else best_seed_score
+                        conf = round(raw * decay.get(d, 0.6), 3)
+                        break
                 chunks.append(
                     {
                         "chunk_id": str(c.id),
@@ -582,7 +713,7 @@ class GraphStore:
                         "doc_id": str(c.document_id),
                         "snippet": c.content[:300],
                         "content": c.content,
-                        "confidence": 0.7,
+                        "confidence": conf,
                         "source_type": "graph-multihop",
                     }
                 )

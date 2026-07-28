@@ -19,6 +19,7 @@ const route = useRoute()
 const announcements = ref<Announcement[]>([])
 const notifyOpen = ref(false)
 const notifyLoading = ref(false)
+const activeAnnouncement = ref<Announcement | null>(null)
 
 const unreadCount = computed(() => announcements.value.filter((a) => !a.read).length)
 
@@ -38,14 +39,25 @@ function toggleNotify() {
   if (notifyOpen.value && !announcements.value.length) loadAnnouncements()
 }
 
-async function markRead(a: Announcement) {
-  if (a.read) return
-  // 乐观更新，避免等待
-  a.read = true
+async function openAnnouncement(a: Announcement) {
+  if (!a.read) {
+    a.read = true
+    try { await markAnnouncementRead(a.id) } catch { a.read = false }
+  }
+  activeAnnouncement.value = a
+}
+
+function closeAnnouncement() {
+  activeAnnouncement.value = null
+}
+
+function formatAnnTime(iso: string) {
   try {
-    await markAnnouncementRead(a.id)
+    const d = new Date(iso)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
   } catch {
-    a.read = false
+    return iso
   }
 }
 
@@ -61,14 +73,17 @@ function goAnnouncements() {
 onMounted(loadAnnouncements)
 
 /* ---------- 顶部主导航 ---------- */
-const topNavItems = [
-  { to: '/dashboard', label: '首页大盘' },
-  { to: '/chat', label: '智能问答' },
-  { to: '/documents', label: '文档管理' },
-  { to: '/search', label: '智能搜索' },
-  { to: '/graph', label: '知识图谱' },
-  { to: '/permission', label: '系统管理' },
-]
+const topNavItems = computed(() => {
+  const items = [
+    { to: '/dashboard', label: '首页大盘' },
+    { to: '/chat', label: '智能问答' },
+    { to: '/documents', label: '文档管理' },
+    { to: '/search', label: '智能搜索' },
+    { to: '/graph', label: '知识图谱' },
+  ]
+  if (auth.isAdmin) items.push({ to: '/permission', label: '系统管理' })
+  return items
+})
 
 /* ---------- 左侧子菜单（每项都是真实路由）---------- */
 interface SubItem {
@@ -110,9 +125,9 @@ const subMenus: Record<string, SubItem[]> = {
     { label: '图谱统计', icon: 'chart', to: '/graph/stats', activeNames: ['graph-stats'] },
   ],
   permission: [
-    { label: '用户管理', icon: 'users', to: '/permission', activeNames: ['permission'] },
+    { label: '用户管理', icon: 'users', to: '/permission', activeNames: ['permission'], adminOnly: true },
     { label: '角色管理', icon: 'shield', to: '/permission/roles', activeNames: ['perm-roles'], adminOnly: true },
-    { label: '部门管理', icon: 'team', to: '/permission/departments', activeNames: ['perm-departments'] },
+    { label: '部门管理', icon: 'team', to: '/permission/departments', activeNames: ['perm-departments'], adminOnly: true },
   ],
   profile: [
     { label: '个人资料', icon: 'user', to: '/profile', activeNames: ['profile'] },
@@ -213,9 +228,9 @@ const sidebarCollapsed = ref(false)
                 :key="a.id"
                 class="notify-item"
                 :class="{ unread: !a.read }"
-                @click="markRead(a)"
+                @click="openAnnouncement(a)"
               >
-                <span class="ni-dot" :class="`lvl-${a.level}`" />
+                <span class="ni-dot" :class="`lvl-${a.level || 'info'}`" />
                 <span class="ni-text">
                   <span class="ni-title">{{ a.title }}</span>
                   <span class="ni-content">{{ a.content }}</span>
@@ -225,6 +240,30 @@ const sidebarCollapsed = ref(false)
             </div>
           </div>
         </div>
+
+        <!-- 公告详情弹窗 -->
+        <Teleport to="body">
+          <div v-if="activeAnnouncement" class="am-overlay" @click.self="closeAnnouncement">
+            <div class="am-modal">
+              <div class="am-head">
+                <span class="am-level-dot" :class="`lvl-${activeAnnouncement.level || 'info'}`" />
+                <span class="am-title">{{ activeAnnouncement.title }}</span>
+              </div>
+              <div class="am-body">
+                <div class="am-meta">
+                  <span class="am-time">{{ formatAnnTime(activeAnnouncement.createdAt) }}</span>
+                  <span v-if="activeAnnouncement.pinned" class="am-pinned">
+                    <Icon name="pin" :size="12" /> 置顶公告
+                  </span>
+                </div>
+                <div class="am-content">{{ activeAnnouncement.content }}</div>
+              </div>
+              <div class="am-footer">
+                <button class="btn btn-primary btn-sm" @click="closeAnnouncement">我知道了</button>
+              </div>
+            </div>
+          </div>
+        </Teleport>
 
         <!-- 用户头像 + 下拉 -->
         <div class="user-trigger" @click.stop="toggleUserMenu">
@@ -430,7 +469,7 @@ const sidebarCollapsed = ref(false)
   font-family: inherit;
   cursor: pointer;
 }
-.notify-body { overflow-y: auto; padding: 6px; }
+.notify-body { overflow-y: auto; padding: 8px; }
 .notify-loading, .notify-empty {
   padding: 28px 12px;
   text-align: center;
@@ -442,17 +481,31 @@ const sidebarCollapsed = ref(false)
   align-items: flex-start;
   gap: 10px;
   width: 100%;
-  padding: 11px 10px;
+  padding: 12px 12px;
+  margin-bottom: 4px;
   border: none;
   background: transparent;
   border-radius: var(--radius-md);
   text-align: left;
   cursor: pointer;
   font-family: inherit;
-  transition: background var(--dur-fast);
+  transition: background 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
 }
-.notify-item:hover { background: var(--bg-hover); }
-.notify-item.unread { background: var(--brand-soft); }
+.notify-item:last-child { margin-bottom: 0; }
+.notify-item:hover {
+  background: var(--bg-hover);
+  transform: translateX(2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.notify-item:active {
+  transform: translateX(1px);
+}
+.notify-item.unread {
+  background: var(--brand-soft);
+}
+.notify-item.unread:hover {
+  background: color-mix(in srgb, var(--brand-soft) 80%, var(--bg-hover));
+}
 .ni-dot {
   width: 8px; height: 8px;
   border-radius: 50%;
@@ -476,6 +529,86 @@ const sidebarCollapsed = ref(false)
   overflow: hidden;
 }
 .ni-mark { color: var(--brand); flex-shrink: 0; margin-top: 3px; }
+
+/* 公告详情弹窗 */
+.am-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+  animation: fade-in 0.15s ease both;
+}
+.am-modal {
+  width: 520px;
+  max-width: 90vw;
+  max-height: 80vh;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fade-up 0.2s ease both;
+}
+.am-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.am-level-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.am-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.am-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+.am-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.am-pinned {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--warning, #f59e0b);
+}
+.am-content {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.am-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
 
 /* 用户触发器 */
 .user-trigger {

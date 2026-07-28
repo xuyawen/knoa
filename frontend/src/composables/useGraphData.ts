@@ -5,8 +5,8 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
-import { getGraph, getGraphHotNodes, getGraphRecent, exportGraph } from '@/api'
-import type { GraphData, GraphNode, GraphFilter, GraphHotNode } from '@/types/api'
+import { getGraph, getGraphHotNodes, getGraphRecent, exportGraph, getGraphNodeSource, deleteGraphNode, updateGraphNode, createGraphNode, createGraphEdge, deleteGraphEdge, mergeGraphNodes, getGraphGaps, clearGraphGaps } from '@/api'
+import type { GraphData, GraphNode, GraphFilter, GraphHotNode, GraphNodeSource, KGGapSignal } from '@/types/api'
 
 /* ---- 模块级共享状态：四个视图拿到同一套 refs ---- */
 const graph = ref<GraphData | null>(null)
@@ -40,6 +40,12 @@ const relPageSize = ref(15)
 const tx = ref(0)
 const ty = ref(0)
 const k = ref(1)
+
+// 知识缺口信号
+const gapSignals = ref<KGGapSignal[]>([])
+
+// 子图聚焦模式
+const focusNodeId = ref<string | null>(null)
 
 // 是否已完成首次加载（模块级：仅第一个挂载的视图触发拉取）
 let fetched = false
@@ -251,6 +257,120 @@ export function useGraphData() {
     })
   }
 
+  /* ---- 溯源 ---- */
+  const sourceInfo = ref<GraphNodeSource | null>(null)
+  const sourceLoading = ref(false)
+  async function loadSource(nodeId: string) {
+    sourceLoading.value = true
+    sourceInfo.value = null
+    try {
+      sourceInfo.value = await getGraphNodeSource(nodeId)
+    } catch (e: unknown) {
+      toast.error(`加载溯源失败：${errMsg(e)}`)
+    } finally {
+      sourceLoading.value = false
+    }
+  }
+
+  /* ---- 编辑操作 ---- */
+  async function removeNode(nodeId: string) {
+    try {
+      await deleteGraphNode(nodeId)
+      toast.success('实体已删除')
+      selectedId.value = null
+      await fetchGraph()
+    } catch (e: unknown) {
+      toast.error(`删除失败：${errMsg(e)}`)
+    }
+  }
+
+  async function editNode(nodeId: string, label?: string, type?: string) {
+    try {
+      await updateGraphNode(nodeId, { label, type })
+      toast.success('实体已更新')
+      await fetchGraph()
+    } catch (e: unknown) {
+      toast.error(`更新失败：${errMsg(e)}`)
+    }
+  }
+
+  async function addNode(label: string, type: string | undefined, kbId: string) {
+    try {
+      await createGraphNode({ label, type, kbId })
+      toast.success('实体已创建')
+      await fetchGraph()
+    } catch (e: unknown) {
+      toast.error(`创建失败：${errMsg(e)}`)
+    }
+  }
+
+  async function addEdge(fromId: string, toId: string, relation: string) {
+    try {
+      await createGraphEdge({ fromId, toId, relation })
+      toast.success('关系已创建')
+      await fetchGraph()
+    } catch (e: unknown) {
+      toast.error(`创建关系失败：${errMsg(e)}`)
+    }
+  }
+
+  async function removeEdge(edgeId: string) {
+    try {
+      await deleteGraphEdge(edgeId)
+      toast.success('关系已删除')
+      await fetchGraph()
+    } catch (e: unknown) {
+      toast.error(`删除关系失败：${errMsg(e)}`)
+    }
+  }
+
+  async function mergeNodes(sourceIds: string[], targetLabel: string, targetType?: string) {
+    const kbId = selectedKb.value || graph.value?.nodes.find(n => sourceIds.includes(n.id))?.kbId
+    if (!kbId) { toast.error('请先选择知识库'); return }
+    try {
+      await mergeGraphNodes({ kbId, sourceIds, targetLabel, targetType })
+      toast.success('实体已合并')
+      await fetchGraph()
+    } catch (e: unknown) {
+      toast.error(`合并失败：${errMsg(e)}`)
+    }
+  }
+
+  /* ---- 知识缺口 ---- */
+  async function loadGaps() {
+    try {
+      gapSignals.value = await getGraphGaps(selectedKb.value, 10)
+    } catch { /* 非致命 */ }
+  }
+  async function dismissGap(question: string) {
+    try {
+      await clearGraphGaps(selectedKb.value, question)
+      gapSignals.value = gapSignals.value.filter(g => g.question !== question)
+    } catch (e: unknown) {
+      toast.error(`操作失败：${errMsg(e)}`)
+    }
+  }
+
+  /* ---- 子图聚焦 ---- */
+  function enterFocus(nodeId: string) {
+    focusNodeId.value = nodeId
+  }
+  function exitFocus() {
+    focusNodeId.value = null
+  }
+  // 聚焦模式下的可见节点（N 跳邻域）
+  const focusedNodeIds = computed<Set<string> | null>(() => {
+    if (!focusNodeId.value) return null
+    const result = new Set<string>([focusNodeId.value])
+    // 2 跳邻域
+    for (let hop = 0; hop < 2; hop++) {
+      for (const id of [...result]) {
+        for (const nb of adjacency.value[id] || []) result.add(nb)
+      }
+    }
+    return result
+  })
+
   function resetAll() {
     const filtersDirty = gFilterType.value !== '' || gFilterBiz.value !== '' || gFilterTime.value !== ''
     gFilterType.value = ''
@@ -279,7 +399,9 @@ export function useGraphData() {
     // 状态
     graph, loading, errorMsg, selectedKb, searchTerm, selectedId, hoveredId,
     gFilterType, gFilterBiz, gFilterTime, allTypeOptions, bizCatOpts, nodeTypeOpts, timeRangeOpts,
-    graphFilter, hotNodes, recentNodes,
+    graphFilter, hotNodes, recentNodes, gapSignals,
+    focusNodeId, focusedNodeIds,
+    sourceInfo, sourceLoading,
     // 派生
     kbColor, nodeColor, kbName, nodeById, nodeLabel, degree, adjacency, presentKbs,
     stats, typeBars, maxDegree, avgDegree,
@@ -290,5 +412,7 @@ export function useGraphData() {
     tx, ty, k, resetView,
     // 动作
     fetchGraph, loadHotRecent, onExport, resetAll,
+    loadSource, removeNode, editNode, addNode, addEdge, removeEdge, mergeNodes,
+    loadGaps, dismissGap, enterFocus, exitFocus,
   }
 }

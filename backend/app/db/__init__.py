@@ -3,7 +3,7 @@ import secrets
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -80,6 +80,11 @@ class DocChunk(Base):
     uploader_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # 与迁移 u8chunkscope 的 ix_doc_chunk_kb_scope 对齐：检索按 (kb_id, scope) 过滤可见性，
+    # 模型声明后 alembic check 不再报索引漂移。
+    __table_args__ = (
+        Index("ix_doc_chunk_kb_scope", "kb_id", "scope"),
+    )
     document: Mapped["Document"] = relationship(back_populates="chunks")
 
 
@@ -211,6 +216,23 @@ class KBPermission(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class KBDeptGrant(Base):
+    """库级部门授权：授权给某部门，该部门及其所有下级部门的用户继承该权限。
+
+    与 KBPermission（个人授权）互补；合并语义为"个人显式优先"——
+    有个人记录用个人的，否则取部门链最高。
+    真 FK + ON DELETE CASCADE：删部门/删库自动清理授权记录。
+    """
+    __tablename__ = "kb_dept_grant"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kb_id: Mapped[str] = mapped_column(ForeignKey("knowledge_base.id", ondelete="CASCADE"), index=True)
+    dept_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("department.id", ondelete="CASCADE"), index=True)
+    level: Mapped[str] = mapped_column(String(20), default="view", server_default="view")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (UniqueConstraint("kb_id", "dept_id", name="uq_kb_dept"),)
+
+
 class Role(Base):
     """全局角色定义。内置角色（is_builtin=True）不可删除，自定义角色可增删。"""
     __tablename__ = "roles"
@@ -283,6 +305,17 @@ class KGEdge(Base):
     from_label: Mapped[str] = mapped_column(String(200))   # 起点实体 label
     to_label: Mapped[str] = mapped_column(String(200))     # 终点实体 label
     relation: Mapped[str] = mapped_column(String(100))     # 关系（属于 / 导致 / 需要 / 影响...）
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KGGapSignal(Base):
+    """知识缺口信号：问答时图谱无命中 → 记录 gap，驱动文档补充。"""
+    __tablename__ = "kg_gap_signal"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kb_id: Mapped[str] = mapped_column(ForeignKey("knowledge_base.id"), index=True)
+    question: Mapped[str] = mapped_column(Text)                    # 触发问题
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

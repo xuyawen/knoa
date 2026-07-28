@@ -121,7 +121,7 @@ const cellColspan = () => props.columns.length + (props.selectable ? 1 : 0)
 </template>
 
 <style scoped>
-.data-table-wrap { width: 100%; overflow-x: auto; }
+.data-table-wrap { width: 100%; overflow-x: auto; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 
 .data-table th {

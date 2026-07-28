@@ -156,9 +156,9 @@ watch(trendRange, (r) => { void loadTrend(r) })
   <div class="dashboard">
     <!-- Row 1: 5 指标卡 -->
     <div class="stats-row">
-      <div v-for="card in statCards" :key="card.label" class="stat-card card">
-        <div class="sc-icon" :style="{ background: card.bg, color: card.color }">
-          <Icon :name="card.icon" :size="22" />
+      <div v-for="card in statCards" :key="card.label" class="stat-card card" :style="{ '--card-accent': card.color }">
+        <div class="sc-icon">
+          <Icon :name="card.icon" :size="18" />
         </div>
         <div class="sc-body">
           <div class="sc-label">{{ card.label }}</div>

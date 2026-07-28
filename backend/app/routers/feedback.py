@@ -4,7 +4,7 @@ from pydantic import Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_user
+from app.core.security import _is_kb_super_admin, get_current_user
 from app.db import ChatMessage, ChatSession, MessageFeedback, User
 from app.deps import get_db
 from app.models.knowledge import CamelModel
@@ -74,7 +74,7 @@ async def delete_feedback(
     if row is None:
         return {"ok": True}  # 幂等：原本就没有该反馈
     fb, session_user_id = row
-    if str(user.id) != session_user_id and user.role != "admin":
+    if str(user.id) != session_user_id and not await _is_kb_super_admin(db, user):
         raise HTTPException(status_code=403, detail="无权删除他人的反馈")
 
     await db.execute(delete(MessageFeedback).where(MessageFeedback.message_id == msg_id))

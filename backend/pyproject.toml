@@ -1,7 +1,7 @@
 [project]
 name = "knoa-backend"
 version = "0.1.0"
-description = "知海 Knoa - 跨境电商运营 AI 知识库后端"
+description = "知海 Knoa - 企业级 AI 知识库后端"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",

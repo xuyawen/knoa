@@ -109,7 +109,6 @@ const showEdit = ref(false)
       <div v-for="s in stats" :key="s.label" class="stat-card card" :class="`tone-${s.tone}`">
         <div class="stat-top">
           <span class="stat-num" :class="{ dim: s.value === '—' }">{{ s.value }}</span>
-          <span class="stat-icon"><Icon :name="s.icon" :size="16" /></span>
         </div>
         <span class="stat-label">{{ s.label }}</span>
       </div>

@@ -95,7 +95,7 @@ const statusOptions = [
 ]
 const scopeOptions = [
   { label: '全部权限', value: '' },
-  { label: '仅本人可见', value: 'private' },
+  { label: '本人可见', value: 'private' },
   { label: '部门可见', value: 'department' },
   { label: '公开可见', value: 'public' },
 ]
@@ -103,13 +103,52 @@ const scopeOptions = [
 // department：部门可见，可手动指定归属部门（不选则后端默认取上传者部门）。
 const uploadScope = ref<string>('public')
 const uploadDeptId = ref<string>('')
-const uploadScopeOptions = [
-  { label: '公开可见', value: 'public' },
-  { label: '部门可见', value: 'department' },
-  { label: '仅本人可见', value: 'private' },
-]
-// 上传设置弹窗开关（权限范围/归属部门收纳进弹窗，避免工具栏拥挤）
+// 非管理员无部门时只能选公开/本人；有部门时可选部门可见（锁定本人部门）
+const uploadScopeOptions = computed(() => {
+  const opts = [
+    { label: '公开可见', value: 'public' },
+    { label: '本人可见', value: 'private' },
+  ]
+  if (auth.isAdmin || auth.user?.departmentId) {
+    opts.splice(1, 0, { label: '部门可见', value: 'department' })
+  }
+  return opts
+})
+// 部门必填判断：仅管理员选了「部门可见」且未指定部门时必填。
+// 非管理员有部门时锁定本人部门（无需选择），无部门时看不到 department 选项。
+const deptRequired = computed(
+  () => uploadScope.value === 'department' && auth.isAdmin && !auth.user?.departmentId,
+)
+const deptMissing = computed(() => deptRequired.value && !uploadDeptId.value)
+// 上传模态框开关（表单 + 进度条一体化）
 const uploadOpen = ref(false)
+
+// 上传状态派生：是否有进行中的任务 / 是否全部完成
+const hasActiveUpload = computed(() => uploadTasks.value.some((t) => t.status === 'uploading' || t.status === 'processing' || t.status === 'queued'))
+const allDone = computed(() => uploadTasks.value.length > 0 && !hasActiveUpload.value)
+
+// 权限范围根据当前视图自动锁定：
+// 我的文档(mine)：自由选择（默认 public）
+// 公共文档(public)：强制公开可见
+// 部门文档(department)：强制部门可见
+// 归档(archive)：不显示上传按钮
+const uploadScopeLocked = computed(() => {
+  if (scope.value === 'public') return 'public'
+  if (scope.value === 'department') return 'department'
+  return null // mine: 自由选择
+})
+
+function openUploadModal() {
+  // 根据当前视图预设权限范围
+  if (uploadScopeLocked.value) {
+    uploadScope.value = uploadScopeLocked.value
+  }
+  uploadOpen.value = true
+}
+function closeUploadModal() {
+  if (hasActiveUpload.value) return // 有任务进行中不允许关闭
+  uploadOpen.value = false
+}
 
 // P5：部门筛选（部门树）+ 标签筛选
 const departments = ref<DepartmentNode[]>([])
@@ -155,7 +194,7 @@ interface UploadTask {
   id: string
   filename: string
   progress: number
-  status: 'uploading' | 'processing' | 'done' | 'error'
+  status: 'queued' | 'uploading' | 'processing' | 'done' | 'error'
   message?: string
 }
 const uploadTasks = ref<UploadTask[]>([])
@@ -213,6 +252,15 @@ async function loadDocs() {
   } catch (e: unknown) {
     docs.value = []
     total.value = 0
+    // 403 无权访问：刷新 KB 列表（后端已按权限过滤）并切换到第一个可用库
+    if ((e as any)?.status === 403) {
+      await knowledge.reload()
+      const next = knowledge.bases.find((b) => b.id !== selectedKb.value)
+      if (next) {
+        selectedKb.value = next.id
+        return // watch(selectedKb) 会触发重新加载
+      }
+    }
     toast.error(`加载文档失败：${errMsg(e)}`)
   } finally {
     loading.value = false
@@ -263,15 +311,10 @@ function onDocClickOutside(e: MouseEvent) {
   if (el && !el.contains(e.target as Node)) deptPopoverOpen.value = false
 }
 
-// 上传设置弹窗：点击外部关闭（复用部门弹层的同款模式）
+// 上传模态框：关闭时清空进度列表，下次打开是干净状态
 watch(uploadOpen, (open) => {
-  if (open) document.addEventListener('click', onUploadClickOutside)
-  else document.removeEventListener('click', onUploadClickOutside)
+  if (!open) uploadTasks.value = []
 })
-function onUploadClickOutside(e: MouseEvent) {
-  const el = document.getElementById('upload-wrap')
-  if (el && !el.contains(e.target as Node)) uploadOpen.value = false
-}
 
 // 组件存活标志 + 轮询 timer 句柄：卸载后中止一切异步定时任务，
 // 避免 pollTask 递归 setTimeout 在后台持续请求（内存泄漏 + 无效流量）。
@@ -361,7 +404,7 @@ function parseStatusLabel(s: string | undefined): string {
 
 // P0：真实权限范围映射
 function scopeLabel(s: string | undefined): string {
-  if (s === 'private') return '仅本人可见'
+  if (s === 'private') return '本人可见'
   if (s === 'department') return '部门可见'
   return '公开可见' // public | 默认
 }
@@ -398,8 +441,17 @@ function readFileB64(file: File): Promise<string> {
 }
 
 /* ---------- 上传 + 进度条（P5）---------- */
+// 选择文件前的拦截：部门可见且当前账号无默认部门时，归属部门必填，
+// 未选则阻止打开文件框并提示，避免把请求发到后端才 400。
+function onPickClick(e: Event) {
+  if (deptMissing.value) {
+    e.preventDefault()
+    toast.warning('部门可见文档必须指定归属部门（当前账号无默认部门）')
+  }
+}
+
 async function onUploadFiles(e: Event) {
-  uploadOpen.value = false
+  // 模态框保持打开以展示上传进度
   const input = e.target as HTMLInputElement
   const files = Array.from(input.files || [])
   if (!files.length) return
@@ -408,44 +460,70 @@ async function onUploadFiles(e: Event) {
     input.value = ''
     return
   }
-  for (const f of files) {
-    const entry = reactive<UploadTask>({ id: '', filename: f.name, progress: 0, status: 'uploading' })
+  if (deptMissing.value) {
+    toast.warning('部门可见文档必须指定归属部门（当前账号无默认部门）')
+    input.value = ''
+    return
+  }
+  // 先为所有选中文件在列表里占位（queued，进度 0），用户立刻看到选了哪些；
+  // 再由并发池逐个填充真实进度。
+  const jobs = files.map((f) => {
+    const entry = reactive<UploadTask>({ id: '', filename: f.name, progress: 0, status: 'queued' })
     uploadTasks.value.push(entry)
+    return { file: f, entry }
+  })
+  // 并发上传（同时最多 3 个）：每个文件独立走完 OSS→后端→轮询，
+  // 不再逐个串行等待，多文件整体耗时大幅缩短；某个失败只标红该条目，不影响其他。
+  await runWithConcurrency(jobs, 3, (job) => uploadOneFile(job.file, job.entry))
+  input.value = ''
+}
+
+// 单个文件的上传流水线（并发执行，entry 由调用方预创建占位）
+async function uploadOneFile(f: File, entry: UploadTask) {
+  entry.status = 'uploading' // 从 queued 占位切换为上传中
+  try {
+    // 优先 OSS 前端直传（后端启用时）；未启用或签名被拒则回退旧 base64 流程
+    let doc: DocumentItem
+    const deptId = uploadScope.value === 'department' ? (uploadDeptId.value || undefined) : undefined
     try {
-      // 优先 OSS 前端直传（后端启用时）；未启用或签名被拒则回退旧 base64 流程
-      let doc: DocumentItem
-      const deptId = uploadScope.value === 'department' ? (uploadDeptId.value || undefined) : undefined
-      try {
-        const { url } = await uploadToOss(f, `uploads/docs/${selectedKb.value}`)
-        doc = await uploadDocument(selectedKb.value, f.name, { fileUrl: url, scope: uploadScope.value, departmentId: deptId })
-      } catch (ossErr: unknown) {
-        const msg = errMsg(ossErr, '')
-        if (msg.includes('OSS 未启用')) {
-          const b64 = await readFileB64(f)
-          doc = await uploadDocument(selectedKb.value, f.name, { contentB64: b64, scope: uploadScope.value, departmentId: deptId })
-        } else {
-          throw ossErr
-        }
-      }
-      // 拿到 task id（上传阶段后端已置 done/100，审核阶段会再推进）
-      const tasks = await getDocumentTasks(doc.id)
-      const task = tasks.items[0]
-      if (task) {
-        entry.id = task.id
-        await pollTask(entry, task.id)
+      const { url } = await uploadToOss(f, `uploads/docs/${selectedKb.value}`)
+      doc = await uploadDocument(selectedKb.value, f.name, { fileUrl: url, scope: uploadScope.value, departmentId: deptId })
+    } catch (ossErr: unknown) {
+      const msg = errMsg(ossErr, '')
+      if (msg.includes('OSS 未启用')) {
+        const b64 = await readFileB64(f)
+        doc = await uploadDocument(selectedKb.value, f.name, { contentB64: b64, scope: uploadScope.value, departmentId: deptId })
       } else {
-        tweenTo(entry, 100, 500)
-        entry.status = 'done'
-        scheduleRemove(entry)
+        throw ossErr
       }
-    } catch (err: unknown) {
-      entry.status = 'error'
-      entry.message = errMsg(err)
-      toast.error(`上传失败：${f.name} - ${errMsg(err)}`)
-      scheduleRemove(entry)
+    }
+    // 拿到 task id（上传阶段后端已置 done/100，审核阶段会再推进）
+    const tasks = await getDocumentTasks(doc.id)
+    const task = tasks.items[0]
+    if (task) {
+      entry.id = task.id
+      await pollTask(entry, task.id)
+    } else {
+      tweenTo(entry, 100, 500)
+      entry.status = 'done'
+    }
+  } catch (err: unknown) {
+    entry.status = 'error'
+    entry.message = errMsg(err)
+    toast.error(`上传失败：${f.name} - ${errMsg(err)}`)
+  }
+}
+
+// 并发池：最多 limit 个任务同时跑，其余排队，避免一次选大量文件打满连接
+async function runWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < items.length) {
+      const idx = cursor++
+      await fn(items[idx])
     }
   }
-  input.value = ''
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()))
 }
 
 // 轮询单个文档任务的真实进度，平滑补间到目标值（组件卸载后自动停止）
@@ -463,7 +541,6 @@ async function pollTask(entry: UploadTask, taskId: string) {
     tweenTo(entry, t.progress, 500)
     if (t.status === 'done' || t.status === 'completed' || t.status === 'failed') {
       if (t.status !== 'failed') entry.progress = 100
-      scheduleRemove(entry)
       await loadDocs()
       return
     }
@@ -483,12 +560,6 @@ function tweenTo(entry: UploadTask, target: number, ms = 600) {
     else entry.progress = target
   }
   requestAnimationFrame(frame)
-}
-
-function scheduleRemove(entry: UploadTask) {
-  setTimeout(() => {
-    uploadTasks.value = uploadTasks.value.filter((x) => x !== entry)
-  }, 1400)
 }
 
 /* ---------- 审核 / 删除 ---------- */
@@ -560,17 +631,14 @@ function isSelected(id: string) {
 }
 function toggleSelectAllOnPage(checked?: boolean) {
   const pageIds = docs.value.map((d) => d.id)
-  const allSelected = checked ?? pageIds.every((id) => selectedIds.value.includes(id))
-  if (allSelected) {
+  // checked 来自表头 checkbox 的 @change：true=用户勾选全选（应加入），false=取消（应移除）
+  if (checked === false) {
     selectedIds.value = selectedIds.value.filter((id) => !pageIds.includes(id))
   } else {
     const set = new Set(selectedIds.value)
     pageIds.forEach((id) => set.add(id))
     selectedIds.value = Array.from(set)
   }
-}
-function clearSelection() {
-  selectedIds.value = []
 }
 
 function onBatchDelete() {
@@ -618,7 +686,7 @@ async function confirmBatchDelete() {
           width="200px"
         />
         <button
-          v-if="auth.isAdmin && selectedKb"
+          v-if="auth.isAdmin && selectedKb && scope !== 'archive'"
           class="btn btn-ghost btn-sm"
           title="管理该知识库可访问的成员"
           @click="openManageMembers"
@@ -637,37 +705,25 @@ async function confirmBatchDelete() {
 
         <!-- 右侧操作组 -->
         <div class="toolbar-actions">
-          <!-- 批量上传（点击展开上传设置弹窗） -->
-          <div id="upload-wrap" class="upload-wrap">
-            <button
-              class="btn btn-primary btn-sm"
-              :class="{ 'is-loading': uploadTasks.length > 0 }"
-              @click.stop="uploadOpen = !uploadOpen"
-            >
-              <Icon name="upload" :size="13" /> {{ uploadTasks.length > 0 ? '上传中…' : '批量上传' }}
-            </button>
-            <div v-if="uploadOpen" class="upload-popover card">
-              <div class="up-title">上传文档</div>
-              <div class="up-field">
-                <span class="up-field-label">权限范围</span>
-                <CustomSelect v-model="uploadScope" :options="uploadScopeOptions" width="100%" />
-              </div>
-              <div v-if="uploadScope === 'department'" class="up-field">
-                <span class="up-field-label">归属部门</span>
-                <DepartmentSelect
-                  v-model="uploadDeptId"
-                  placeholder="默认本人部门"
-                  empty-label="默认本人部门"
-                  width="100%"
-                />
-              </div>
-              <label class="btn btn-primary btn-sm upload-btn up-pick">
-                <Icon name="upload" :size="13" /> 选择文件
-                <input type="file" multiple accept=".md,.txt,.docx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.mov,.webm,.mkv,.avi" class="file-hidden" @change="onUploadFiles" />
-              </label>
-              <p class="up-hint">支持 md / txt / docx / pdf / 图片 / 音视频，可多选</p>
-            </div>
-          </div>
+          <!-- 选中时显示批量删除 -->
+          <button
+            v-if="selectedIds.length"
+            class="btn btn-danger btn-sm"
+            :disabled="deleting"
+            @click="onBatchDelete"
+          >
+            <Icon name="trash" :size="13" /> 批量删除（{{ selectedIds.length }}）
+          </button>
+
+          <!-- 批量上传（归档视图不显示） -->
+          <button
+            v-if="scope !== 'archive'"
+            class="btn btn-primary btn-sm"
+            :class="{ 'is-loading': hasActiveUpload }"
+            @click="openUploadModal"
+          >
+            <Icon name="upload" :size="13" /> {{ hasActiveUpload ? '上传中…' : '批量上传' }}
+          </button>
 
           <!-- 刷新 -->
           <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDocs">
@@ -717,35 +773,92 @@ async function confirmBatchDelete() {
       </div>
     </div>
 
-    <!-- ====== 批量操作条 ====== -->
-    <Transition name="slide-down">
-      <div v-if="selectedIds.length" class="batch-bar card">
-        <span class="batch-count">已选 <b>{{ selectedIds.length }}</b> 篇</span>
-        <button class="btn btn-danger btn-sm" :disabled="deleting" @click="onBatchDelete">
-          <Icon name="trash" :size="13" /> 批量删除
-        </button>
-        <button class="btn btn-ghost btn-sm" @click="clearSelection">取消选择</button>
-      </div>
-    </Transition>
+    <!-- ====== 批量操作条（选中时替换工具栏第一行，不额外占空间）====== -->
+    <!-- 旧版独立 batch-bar 已移除，改为内嵌到 toolbar 第一行的选中态 -->
 
-    <!-- ====== 上传进度条（P5 轮询 DocumentTask）====== -->
-    <Transition name="slide-down">
-      <div v-if="uploadTasks.length" class="upload-progress card">
-        <div v-for="t in uploadTasks" :key="(t.id || t.filename)" class="up-item">
-          <Icon
-            :name="t.status === 'error' ? 'alert' : (t.status === 'done' ? 'check' : 'loader')"
-            :size="14"
-            :class="{ spin: t.status === 'uploading' || t.status === 'processing' }"
-            :style="t.status === 'error' ? 'color:var(--danger)' : (t.status === 'done' ? 'color:var(--success)' : '')"
-          />
-          <span class="up-name" :title="t.filename">{{ t.filename }}</span>
-          <div class="up-bar">
-            <div class="up-fill" :class="t.status" :style="{ width: t.progress + '%' }"></div>
+    <!-- ====== 上传模态框（表单 + 进度条一体化）====== -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="uploadOpen" class="modal-overlay" @click.self="closeUploadModal">
+          <div class="upload-modal card">
+            <!-- 表单区 -->
+            <div class="um-header">
+              <span class="um-title">上传文档</span>
+              <button v-if="!hasActiveUpload" class="um-close" @click="uploadOpen = false" title="关闭">
+                <Icon name="close" :size="16" />
+              </button>
+            </div>
+            <div class="um-body">
+              <!-- 权限范围：我的文档可自由选择，公共/部门视图固定显示 -->
+              <div class="up-field">
+                <span class="up-field-label">权限范围</span>
+                <template v-if="uploadScopeLocked">
+                  <span class="up-scope-fixed" :class="'scope-' + uploadScopeLocked">
+                    {{ uploadScopeLocked === 'public' ? '公开可见' : '部门可见' }}
+                  </span>
+                </template>
+                <CustomSelect v-else v-model="uploadScope" :options="uploadScopeOptions" width="100%" />
+              </div>
+              <!-- 归属部门：非管理员锁定本人部门；管理员可自由选择 -->
+              <div v-if="uploadScope === 'department'" class="up-field">
+                <span class="up-field-label">
+                  归属部门
+                  <span v-if="deptRequired" class="req-mark">*</span>
+                </span>
+                <template v-if="!auth.isAdmin && auth.user?.departmentId">
+                  <span class="up-scope-fixed scope-department">本人部门：{{ auth.user.department }}</span>
+                </template>
+                <DepartmentSelect
+                  v-else
+                  v-model="uploadDeptId"
+                  :placeholder="deptRequired ? '请选择归属部门（必填）' : '默认本人部门'"
+                  :empty-label="deptRequired ? '请选择归属部门（必填）' : '默认本人部门'"
+                  width="100%"
+                />
+                <p v-if="deptMissing" class="up-hint up-hint-error">
+                  部门可见文档必须指定归属部门，当前账号无默认部门，请先选择。
+                </p>
+              </div>
+              <label
+                class="btn btn-primary btn-sm upload-btn"
+                :class="{ 'is-disabled': deptMissing || hasActiveUpload }"
+                @click="onPickClick"
+              >
+                <Icon name="upload" :size="13" /> 选择文件
+                <input type="file" multiple accept=".md,.txt,.docx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.mov,.webm,.mkv,.avi" class="file-hidden" @change="onUploadFiles" />
+              </label>
+              <p class="up-hint">支持 md / txt / docx / pdf / 图片 / 音视频，可多选</p>
+
+              <!-- 进度区：有任务时展示 -->
+              <template v-if="uploadTasks.length">
+                <div class="um-divider"></div>
+                <div class="um-progress-list">
+                  <div v-for="t in uploadTasks" :key="(t.id || t.filename)" class="up-item">
+                    <Icon
+                      :name="t.status === 'error' ? 'alert' : (t.status === 'done' ? 'check' : (t.status === 'queued' ? 'clock' : 'loader'))"
+                      :size="14"
+                      :class="{ spin: t.status === 'uploading' || t.status === 'processing' }"
+                      :style="t.status === 'error' ? 'color:var(--danger)' : (t.status === 'done' ? 'color:var(--success)' : (t.status === 'queued' ? 'color:var(--text-tertiary)' : ''))"
+                    />
+                    <span class="up-name" :title="t.filename">{{ t.filename }}</span>
+                    <div class="up-bar">
+                      <div class="up-fill" :class="t.status" :style="{ width: t.progress + '%' }"></div>
+                    </div>
+                    <span class="up-pct">{{ t.status === 'error' ? '失败' : t.progress + '%' }}</span>
+                    <span v-if="t.message && t.status === 'error'" class="up-err-msg">{{ t.message }}</span>
+                  </div>
+                </div>
+              </template>
+
+              <!-- 全部完成提示 -->
+              <div v-if="allDone && !hasActiveUpload" class="um-footer">
+                <button class="btn btn-primary btn-sm" @click="uploadOpen = false">完成</button>
+              </div>
+            </div>
           </div>
-          <span class="up-pct">{{ t.status === 'error' ? '失败' : t.progress + '%' }}</span>
         </div>
-      </div>
-    </Transition>
+      </Transition>
+    </Teleport>
 
     <!-- ====== 列表 / 网格 ====== -->
     <div class="card" v-if="viewMode === 'list'">
@@ -1015,19 +1128,82 @@ async function confirmBatchDelete() {
 }
 .upload-btn.is-loading { opacity: 0.7; pointer-events: none; }
 
-/* 上传设置弹窗（锚定批量上传按钮，向左下展开） */
-.upload-wrap { position: relative; }
-.upload-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 30;
+/* ---- 上传模态框（居中 overlay）---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+}
+.upload-modal {
+  width: 440px;
+  max-height: 80vh;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  width: 280px;
-  padding: 14px;
-  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+.um-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+  flex-shrink: 0;
+}
+.um-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.um-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--dur-fast);
+}
+.um-close:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.um-body {
+  padding: 0 18px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+.um-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.um-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.um-done-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--success);
+  padding: 8px 0 2px;
+}
+.um-footer {
+  padding: 10px 18px 16px;
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 .up-title {
   font-size: 13px;
@@ -1043,15 +1219,38 @@ async function confirmBatchDelete() {
   font-size: 12px;
   color: var(--text-tertiary);
 }
+.req-mark {
+  color: var(--danger, #e5484d);
+  font-weight: 700;
+  margin-left: 2px;
+}
+.up-scope-fixed {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
 .up-pick {
   justify-content: center;
   width: 100%;
+}
+.up-pick.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .up-hint {
   margin: 0;
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--text-tertiary);
+}
+.up-hint-error {
+  color: var(--danger, #e5484d);
 }
 
 .view-toggle {
@@ -1073,23 +1272,12 @@ async function confirmBatchDelete() {
 .spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* 批量条 */
-.batch-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  border-left: 3px solid var(--brand);
-}
-.batch-count { font-size: 13px; color: var(--text-secondary); }
-.batch-count b { color: var(--text-primary); }
+/* 危险按钮（批量删除用） */
 .btn-danger { background: var(--danger); color: var(--text-on-brand); border-color: var(--danger); }
 .btn-danger:hover { background: var(--danger-hover); }
 .btn-danger:disabled { opacity: 0.6; }
-.slide-down-enter-active, .slide-down-leave-active { transition: all 0.2s var(--ease-out); }
-.slide-down-enter-from, .slide-down-leave-to { opacity: 0; transform: translateY(-6px); }
 
-/* ---- P5：部门筛选 + 弹出树 ---- */
+/* ---- 部门筛选 + 弹出树 ---- */
 .dept-filter-wrap { position: relative; }
 .btn-filter {
   display: inline-flex;
@@ -1120,14 +1308,14 @@ async function confirmBatchDelete() {
   box-shadow: var(--shadow-pop);
 }
 
-/* ---- P5：上传进度条 ---- */
-.upload-progress {
+/* ---- 上传进度条（模态框内）---- */
+.up-item {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 10px;
-  padding: 12px 16px;
+  font-size: 13px;
+  flex-wrap: wrap;
 }
-.up-item { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .up-name {
   flex: 0 0 180px;
   max-width: 180px;
@@ -1152,6 +1340,17 @@ async function confirmBatchDelete() {
 .up-fill.done { background: var(--success); }
 .up-fill.error { background: var(--danger); }
 .up-pct { flex: 0 0 44px; text-align: right; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.up-err-msg {
+  flex-basis: 100%;
+  font-size: 11.5px;
+  color: var(--danger);
+  margin-left: 34px;
+  line-height: 1.4;
+}
+
+/* 模态框淡入淡出 */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
 
 .file-name-cell {
