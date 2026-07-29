@@ -40,3 +40,9 @@ class DepartmentUpdateIn(CamelModel):
     parent_id: str | None = None
     description: str | None = None
     sort_order: int | None = None
+
+
+class DepartmentReorderIn(CamelModel):
+    """同级部门拖拽排序：传入某父级（或顶级 None）下的完整有序 id 列表。"""
+    parent_id: str | None = None
+    ids: list[str]

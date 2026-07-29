@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 首页大盘 — 数据总览（指标卡 + 文档分类占比 + 访问趋势 + 操作记录）。
+// 首页大盘 — 数据总览（指标卡 + 知识库分布 + 访问趋势 + 操作记录）。
 import { computed, onMounted, ref, watch } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import Icon from '@/components/ui/Icon.vue'
@@ -8,11 +8,11 @@ import DataTable from '@/components/ui/DataTable.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
-import { getDashboardMetrics, getDocCategory, getTrend, getOperations, getDocumentById } from '@/api'
+import { getDashboardMetrics, getKbDistribution, getTrend, getOperations, getDocumentById } from '@/api'
 import { useTrendChart } from '@/composables/useTrendChart'
 import '@/assets/dashboard.css'
 import type {
-  DashboardMetrics, TrendResponse, DocCategory,
+  DashboardMetrics, TrendResponse, KbDistribution,
   OperationsResponse, OperationLogItem, DocumentDetail,
 } from '@/types/api'
 
@@ -40,27 +40,22 @@ function pct(v: number): string {
   return `${s}${v.toFixed(1)}%`
 }
 
-/* ---- 文档分类占比 ---- */
-const categories = ref<DocCategory[]>([])
-async function loadCategories() { categories.value = await getDocCategory() }
-const catTotal = computed(() => categories.value.reduce((s, c) => s + c.count, 0) || 0)
-const UNCAT = '未分类'
-function isUncat(c: DocCategory) { return c.category === UNCAT || !c.category }
-const uncatCount = computed(() => categories.value.filter(isUncat).reduce((s, c) => s + c.count, 0))
-const classified = computed(() => categories.value.filter((c) => !isUncat(c)))
-const classifiedTotal = computed(() => classified.value.reduce((s, c) => s + c.count, 0) || 0)
-const classifiedCount = computed(() => classified.value.length)
+/* ---- 知识库分布（文档按知识库归类，KB 即天然分类）---- */
+const kbDist = ref<KbDistribution[]>([])
+async function loadKbDist() { kbDist.value = await getKbDistribution() }
+const kbTotal = computed(() => kbDist.value.reduce((s, k) => s + k.count, 0) || 0)
+const kbCount = computed(() => kbDist.value.length)
 const TOP_N = 8
 function buildBar(label: string, value: number, seg: number) {
-  const pctTotal = catTotal.value ? ((value / catTotal.value) * 100).toFixed(1) : '0'
-  const width = classifiedTotal.value ? (value / classifiedTotal.value) * 100 : 0
+  const pctTotal = kbTotal.value ? ((value / kbTotal.value) * 100).toFixed(1) : '0'
+  const width = kbTotal.value ? (value / kbTotal.value) * 100 : 0
   return { label, value, pctTotal, width, seg }
 }
 const barData = computed(() => {
-  const sorted = [...classified.value].sort((a, b) => b.count - a.count)
+  const sorted = [...kbDist.value].sort((a, b) => b.count - a.count)
   const rest = sorted.slice(TOP_N)
-  const rows = sorted.slice(0, TOP_N).map((c, i) => buildBar(c.category, c.count, (i % 5) + 1))
-  if (rest.length) rows.push(buildBar(`其他 (${rest.length})`, rest.reduce((s, c) => s + c.count, 0), 0))
+  const rows = sorted.slice(0, TOP_N).map((k, i) => buildBar(k.name, k.count, (i % 5) + 1))
+  if (rest.length) rows.push(buildBar(`其他 (${rest.length})`, rest.reduce((s, k) => s + k.count, 0), 0))
   return rows
 })
 
@@ -147,7 +142,7 @@ function defaultContent(action: string): string {
 
 onMounted(() => {
   if (!kb.loaded) kb.load()
-  void loadMetrics(); void loadCategories(); void loadTrend(trendRange.value); void loadOps(1)
+  void loadMetrics(); void loadKbDist(); void loadTrend(trendRange.value); void loadOps(1)
 })
 watch(trendRange, (r) => { void loadTrend(r) })
 </script>
@@ -211,20 +206,13 @@ watch(trendRange, (r) => { void loadTrend(r) })
 
       <div class="pie-panel card">
         <div class="panel-head">
-          <span class="panel-title">文档分类占比</span>
+          <span class="panel-title">知识库分布</span>
         </div>
-        <div v-if="catTotal === 0" class="empty-hint">暂无文档</div>
+        <div v-if="kbTotal === 0" class="empty-hint">暂无文档</div>
         <div v-else class="cat-body">
           <div class="cat-summary">
-            <div class="cat-stack">
-              <div
-                class="cat-stack-fill"
-                :style="{ width: (classifiedTotal && catTotal ? (classifiedTotal / catTotal) * 100 : 0) + '%' }"
-              ></div>
-            </div>
             <div class="cat-summary-meta">
-              <span><span class="dot dot-ok"></span>已分类 {{ classifiedCount }} 类 · {{ classifiedTotal.toLocaleString() }} 条</span>
-              <span><span class="dot dot-gray"></span>未分类 {{ uncatCount.toLocaleString() }} 条</span>
+              <span><span class="dot dot-ok"></span>共 {{ kbCount }} 个知识库 · {{ kbTotal.toLocaleString() }} 篇文档</span>
             </div>
           </div>
           <div class="cat-bars">
@@ -240,7 +228,7 @@ watch(trendRange, (r) => { void loadTrend(r) })
               <span class="cat-bar-val">{{ b.value.toLocaleString() }}</span>
               <span class="cat-bar-pct">{{ b.pctTotal }}%</span>
             </div>
-            <div v-if="!barData.length" class="empty-hint">暂无已分类文档</div>
+            <div v-if="!barData.length" class="empty-hint">暂无文档</div>
           </div>
         </div>
       </div>

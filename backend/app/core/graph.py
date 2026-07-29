@@ -141,6 +141,13 @@ def _coerce_graph(obj) -> dict:
             relations.append(r)
         # 字符串/其他形态的关系难以可靠解析，best-effort 丢弃
 
+    # 过滤孤立实体：不参与任何关系的节点无图谱价值，丢弃避免视觉噪声
+    connected = set()
+    for r in relations:
+        connected.add((r.get("from") or r.get("from_label") or "").strip())
+        connected.add((r.get("to") or r.get("to_label") or "").strip())
+    entities = [e for e in entities if e.get("label", "").strip() in connected]
+
     return {"entities": entities, "relations": relations}
 
 
@@ -223,7 +230,7 @@ class GraphStore:
             .all()
         )
 
-        # 只保留有 label 的实体，再批量向量化（保证 entities 与 embeddings 一一对应）
+        # 只保留有 label 的实体
         valid = [
             (e, str(e.get("label", "")).strip())
             for e in entities
@@ -231,15 +238,32 @@ class GraphStore:
         ]
         if not valid:
             return
-        labels = [lbl for _, lbl in valid]
+        entity_labels = {lbl for _, lbl in valid}
+
+        # 收集 relations 中引用但未列入 entities、且本库尚不存在的端点 label。
+        # LLM 常在关系里引用它忘记列进 entities 的实体；自动补建这些端点，
+        # 避免边因端点缺失被跳过、实体落单成孤儿（保留完整信息）。
+        endpoint_labels: set[str] = set()
+        for rel in relations:
+            for key in ("from", "to"):
+                lbl = str(rel.get(key, "")).strip()
+                if lbl and lbl not in entity_labels and lbl not in existing_labels:
+                    endpoint_labels.add(lbl)
+
+        # 实体 + 缺失端点 一次性批量向量化（保证顺序一一对应）
+        ep_sorted = sorted(endpoint_labels)
+        all_labels = [lbl for _, lbl in valid] + ep_sorted
         try:
-            embeddings = await self.embedder.embed(labels)
+            embeddings = await self.embedder.embed(all_labels)
         except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort fallback, skip graph if embedding fails)
             logger.warning("graph embed failed (skip graph for doc %s): %s", doc_title, e)
             return
+        entity_embs = embeddings[: len(valid)]
+        ep_embs = dict(zip(ep_sorted, embeddings[len(valid):], strict=True))
 
         inserted_nodes = 0
-        for (ent, label), emb in zip(valid, embeddings, strict=True):
+        new_labels: list[str] = []
+        for (ent, label), emb in zip(valid, entity_embs, strict=True):
             if label in existing_labels:
                 continue
             chunk_id = self._locate_chunk(label, chunks)
@@ -253,10 +277,30 @@ class GraphStore:
                 )
             )
             existing_labels.add(label)
+            new_labels.append(label)
+            inserted_nodes += 1
+
+        # 补建缺失端点节点（type 未知，仅作为关系枢纽保留连通性）
+        for label in ep_sorted:
+            if label in existing_labels:
+                continue
+            chunk_id = self._locate_chunk(label, chunks)
+            db.add(
+                KGNode(
+                    kb_id=kb_id,
+                    label=label,
+                    type=None,
+                    chunk_id=chunk_id,
+                    embedding=ep_embs[label],
+                )
+            )
+            existing_labels.add(label)
+            new_labels.append(label)
             inserted_nodes += 1
 
         # 关系（边）：起止实体都须是本 KB 已知节点，且这条边未存在
         inserted_edges = 0
+        linked_labels: set[str] = set()
         for rel in relations:
             f = str(rel.get("from", "")).strip()
             t = str(rel.get("to", "")).strip()
@@ -270,7 +314,21 @@ class GraphStore:
                 continue
             db.add(KGEdge(kb_id=kb_id, from_label=f, to_label=t, relation=r))
             existing_edges.add((f, t, r))
+            linked_labels.add(f)
+            linked_labels.add(t)
             inserted_edges += 1
+
+        # 清理孤儿节点：本轮新建但未挂上任何边的实体
+        # （LLM 常在 relations 里引用未列入 entities 的实体名，导致边被跳过、节点落单）
+        orphan_labels = [lbl for lbl in new_labels if lbl not in linked_labels]
+        if orphan_labels:
+            await db.execute(
+                delete(KGNode).where(KGNode.kb_id == kb_id, KGNode.label.in_(orphan_labels))
+            )
+            for lbl in orphan_labels:
+                existing_labels.discard(lbl)
+            inserted_nodes -= len(orphan_labels)
+            logger.info("graph extract doc=%s: pruned %d orphan nodes", doc_title, len(orphan_labels))
 
         if inserted_nodes or inserted_edges:
             await db.flush()
@@ -283,6 +341,8 @@ class GraphStore:
         推理模型（Agnes）非流式 chat 的 content 常为空，且 reasoning 会吃掉
         max_tokens 预算把 JSON 截断；流式 + 抬高 token 上限能让完整 JSON 落在
         content 流里（与问答共用同一流式通道）。
+        include_reasoning=True：推理模型把结构化输出塞进 reasoning_content，
+        必须同时收集才能拿到 JSON（_extract_json 容错从噪声中定位配平 JSON 块）。
         """
         chunks: list[str] = []
         async for piece in self.llm.stream_chat(
@@ -292,6 +352,7 @@ class GraphStore:
             ],
             temperature=0.0,
             max_tokens=8000,
+            include_reasoning=True,
         ):
             chunks.append(piece)
         return chunks
@@ -326,8 +387,25 @@ class GraphStore:
         await db.execute(
             delete(KGNode).where(KGNode.kb_id == kb_id, KGNode.chunk_id.in_(chunk_ids))
         )
+        # 级联删边可能使其他节点失去最后一条边（如 Z→X 的 X 被删）→ 统一清理落单节点
+        await self.prune_isolated_nodes(db, kb_id)
         await db.flush()
         _invalidate_graph(kb_id)
+
+    async def prune_isolated_nodes(self, db: AsyncSession, kb_id: str) -> int:
+        """清理本库中无任何边关联的落单节点（度为 0）。
+
+        产生场景：文档删除 / 增量更新级联删边后，对端节点失去最后一条边；
+        或 LLM 只抽出了实体未抽出关系。零度节点在图谱中仅为噪点，
+        实体内容仍保留在文档 chunk 中，删除不影响检索。
+        """
+        linked = select(KGEdge.from_label).where(KGEdge.kb_id == kb_id).union(
+            select(KGEdge.to_label).where(KGEdge.kb_id == kb_id)
+        )
+        result = await db.execute(
+            delete(KGNode).where(KGNode.kb_id == kb_id, KGNode.label.notin_(linked))
+        )
+        return result.rowcount or 0
 
     async def incremental_extract(
         self,
@@ -375,7 +453,6 @@ class GraphStore:
 
         graph = _coerce_graph(raw)
         entities = graph["entities"]
-        relations = graph["relations"]
         new_labels = {
             str(e.get("label", "")).strip()
             for e in entities
@@ -422,6 +499,8 @@ class GraphStore:
             )
         # 调 extract 写入新实体（它会跳过已存在的 label）
         await self.extract(kb_id, doc_title, chunks, db)
+        # 消失实体的级联删边可能使其他节点落单 → 统一清理
+        await self.prune_isolated_nodes(db, kb_id)
         _invalidate_graph(kb_id)
         logger.info(
             "incremental graph update doc=%s: vanished=%d, new=%d",

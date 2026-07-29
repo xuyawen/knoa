@@ -1,9 +1,8 @@
 <script setup lang="ts">
-// KB 成员管理弹窗（库级授权 / 严格隔离下的共享入口），从 DocumentLibrary.vue 拆出。
-// 三个 Tab：个人成员 / 部门授权 / 有效权限预览。
+// KB 成员管理面板（库级授权）。三个 Tab：个人成员 / 部门授权 / 有效权限预览。
+// 从 KbMembersModal 抽出的可内嵌版本：供「成员管理」页直接承载，随 kbId 切换自动重载。
 import { ref, computed, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
-import AppModal from '@/components/ui/AppModal.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import DepartmentSelect from '@/components/ui/DepartmentSelect.vue'
 import { useToastStore } from '@/stores/toast'
@@ -13,12 +12,9 @@ import type { KBMember, KBDeptGrant, EffectiveMember, UserOut, DepartmentNode } 
 import UserSearchSelect from '@/components/ui/UserSearchSelect.vue'
 
 const props = defineProps<{
-  show: boolean
   kbId: string
-  kbName: string
+  kbName?: string
 }>()
-
-const emit = defineEmits<{ (e: 'close'): void }>()
 
 const toast = useToastStore()
 
@@ -55,15 +51,17 @@ const deptNameMap = ref<Record<string, string>>({})
 const effectiveMembers = ref<EffectiveMember[]>([])
 const previewLoading = ref(false)
 
-// 每次打开时自动拉取成员列表
+// 挂载时 / 切换知识库时：重置 Tab 并重新拉取成员
 watch(
-  () => props.show,
-  (v) => {
-    if (v) {
-      activeTab.value = 'members'
-      void load()
-    }
+  () => props.kbId,
+  (id) => {
+    if (!id) return
+    activeTab.value = 'members'
+    deptGrants.value = []
+    effectiveMembers.value = []
+    void load()
   },
+  { immediate: true },
 )
 
 watch(activeTab, (tab) => {
@@ -113,7 +111,6 @@ async function load() {
     memberRows.value = await getKbMembers(props.kbId)
   } catch (e: unknown) {
     toast.error(`加载成员失败：${errMsg(e)}`)
-    emit('close')
   } finally {
     loading.value = false
   }
@@ -174,7 +171,6 @@ async function saveMembers() {
     })
     memberRows.value = updated
     toast.success('成员权限已保存')
-    emit('close')
   } catch (e: unknown) {
     toast.error(`保存失败：${errMsg(e)}`)
   } finally {
@@ -208,7 +204,7 @@ function sourceLabel(source: string): string {
 </script>
 
 <template>
-  <AppModal :show="show" :title="`管理成员 · ${kbName}`" wide @close="emit('close')">
+  <div class="kb-members-panel">
     <!-- Tab 导航 -->
     <div class="tab-bar">
       <button
@@ -222,7 +218,7 @@ function sourceLabel(source: string): string {
 
     <!-- Tab 1: 个人成员 -->
     <div v-if="activeTab === 'members'">
-      <div v-if="loading" class="modal-hint">加载中…</div>
+      <div v-if="loading" class="panel-hint">加载中…</div>
       <template v-else>
         <div class="member-add">
           <UserSearchSelect
@@ -251,7 +247,7 @@ function sourceLabel(source: string): string {
 
     <!-- Tab 2: 部门授权 -->
     <div v-if="activeTab === 'dept'">
-      <div v-if="deptLoading" class="modal-hint">加载中…</div>
+      <div v-if="deptLoading" class="panel-hint">加载中…</div>
       <template v-else>
         <div class="member-add">
           <DepartmentSelect v-model="newDeptId" :allow-empty="false" placeholder="选择部门即添加…" width="100%" />
@@ -275,7 +271,7 @@ function sourceLabel(source: string): string {
 
     <!-- Tab 3: 有效权限预览 -->
     <div v-if="activeTab === 'preview'">
-      <div v-if="previewLoading" class="modal-hint">加载中…</div>
+      <div v-if="previewLoading" class="panel-hint">加载中…</div>
       <template v-else>
         <p class="member-footnote">合并结果：个人显式优先，无个人记录则取部门继承。</p>
         <div class="member-list">
@@ -294,26 +290,26 @@ function sourceLabel(source: string): string {
       </template>
     </div>
 
-    <template #foot>
-      <button class="btn btn-ghost btn-sm" @click="emit('close')">取消</button>
+    <!-- 操作区 -->
+    <div class="panel-foot">
       <button
         v-if="activeTab === 'members'"
         class="btn btn-primary btn-sm"
-        :disabled="saving"
+        :disabled="saving || loading"
         @click="saveMembers"
       ><span v-if="saving" class="spinner sm"></span> 保存成员</button>
       <button
         v-if="activeTab === 'dept'"
         class="btn btn-primary btn-sm"
-        :disabled="deptSaving"
+        :disabled="deptSaving || deptLoading"
         @click="saveDeptGrants"
       ><span v-if="deptSaving" class="spinner sm"></span> 保存部门授权</button>
-    </template>
-  </AppModal>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.modal-hint { color: var(--text-tertiary); text-align: center; padding: 20px 0; }
+.panel-hint { color: var(--text-tertiary); text-align: center; padding: 20px 0; }
 .spinner {
   width: 18px;
   height: 18px;
@@ -347,18 +343,6 @@ function sourceLabel(source: string): string {
 }
 .tab-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .tab-btn.active { background: var(--brand-soft, rgba(59,130,246,.1)); color: var(--brand); font-weight: 600; }
-
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
-  transition: all var(--dur-fast) var(--ease-out);
-}
-.action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 .member-list { display: flex; flex-direction: column; gap: 8px; }
 .member-row {
@@ -406,4 +390,25 @@ function sourceLabel(source: string): string {
   min-width: 52px;
   text-align: right;
 }
+
+/* 操作区 */
+.panel-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 </style>

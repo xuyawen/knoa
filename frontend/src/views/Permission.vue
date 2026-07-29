@@ -44,7 +44,7 @@ const roleFilter = ref<string>('all')
 const currentPage = ref(1)
 const pageSize = ref(20)
 
-async function loadUsers(resetPage = false) {
+async function loadUsers(resetPage = false, force = false) {
   if (resetPage) currentPage.value = 1
   loading.value = true
   try {
@@ -53,6 +53,7 @@ async function loadUsers(resetPage = false) {
       pageSize.value,
       roleFilter.value === 'all' ? null : roleFilter.value,
       searchQuery.value.trim() || null,
+      force,
     )
   } catch (e: unknown) {
     usersData.value = null
@@ -217,7 +218,7 @@ const roleSelectOptions = computed(() =>
             <button v-if="searchQuery" class="search-clear" @click="clearSearch"><Icon name="close" :size="12" /></button>
           </div>
           <CustomSelect v-model="roleFilter" :options="roleFilterOptions" width="140px" @update:model-value="currentPage = 1" />
-          <button class="icon-btn" title="刷新" :disabled="loading" @click="() => loadUsers()">
+          <button class="icon-btn" title="刷新" :disabled="loading" @click="() => loadUsers(false, true)">
             <Icon name="refresh" :size="15" :class="{ spin: loading }" />
           </button>
           <div class="perm-h-row" style="margin-left:auto">
@@ -250,8 +251,8 @@ const roleSelectOptions = computed(() =>
             </template>
             <template v-else-if="col.key === 'actions'">
               <div class="row-actions">
-                <button class="action-btn" title="编辑" @click="openEdit(row)"><Icon name="edit" :size="15" /></button>
-                <button class="action-btn" title="删除" @click="onDelete(row)"><Icon name="trash" :size="15" /></button>
+                <button class="action-btn edit" title="编辑" @click="openEdit(row)"><Icon name="edit" :size="15" /></button>
+                <button class="action-btn danger" title="删除" @click="onDelete(row)"><Icon name="trash" :size="15" /></button>
               </div>
             </template>
           </template>
@@ -391,11 +392,6 @@ const roleSelectOptions = computed(() =>
 .status-badge.danger { background: var(--danger-soft); color: var(--danger); }
 
 .row-actions { display: flex; align-items: center; gap: 4px; }
-.action-btn {
-  display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
-  border-radius: var(--radius-sm); color: var(--text-secondary); background: transparent; cursor: pointer; transition: all var(--dur-fast);
-}
-.action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 /* ---- 表单 ---- */
 .form-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }

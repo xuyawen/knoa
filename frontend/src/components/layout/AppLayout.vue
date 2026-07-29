@@ -9,6 +9,7 @@ import { getAnnouncements, markAnnouncementRead } from '@/api'
 import type { Announcement } from '@/types/api'
 import Icon from '@/components/ui/Icon.vue'
 import UserProfileSettingsModal from '@/components/user/UserProfileSettingsModal.vue'
+import { useBackdropClick } from '@/composables/useBackdropClick'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
@@ -51,6 +52,9 @@ function closeAnnouncement() {
   activeAnnouncement.value = null
 }
 
+// 公告弹窗：仅蒙层上明确单击才关闭，拖拽手势不关
+const announceBd = useBackdropClick(closeAnnouncement)
+
 function formatAnnTime(iso: string) {
   try {
     const d = new Date(iso)
@@ -77,9 +81,10 @@ const topNavItems = computed(() => {
   const items = [
     { to: '/dashboard', label: '首页大盘' },
     { to: '/chat', label: '智能问答' },
+    { to: '/knowledge', label: '知识库' },
     { to: '/documents', label: '文档管理' },
-    { to: '/search', label: '智能搜索' },
     { to: '/graph', label: '知识图谱' },
+    { to: '/search', label: '智能搜索' },
   ]
   if (auth.isAdmin) items.push({ to: '/permission', label: '系统管理' })
   return items
@@ -99,9 +104,12 @@ const subMenus: Record<string, SubItem[]> = {
     { label: '数据总览', icon: 'grid', to: '/dashboard', activeNames: ['dashboard'] },
     { label: '文档统计', icon: 'doc', to: '/dashboard/docs', activeNames: ['dash-docs'] },
     { label: '热门内容', icon: 'fire', to: '/dashboard/popular', activeNames: ['dash-popular'] },
-    { label: '访问分析', icon: 'chart', to: '/dashboard/analytics', activeNames: ['dash-analytics'] },
     { label: '用户统计', icon: 'users', to: '/dashboard/users', activeNames: ['dash-users'] },
     { label: '系统公告', icon: 'bell', to: '/dashboard/announcements', activeNames: ['dash-announcements'] },
+  ],
+  knowledge: [
+    { label: '知识库列表', icon: 'folder', to: '/knowledge', activeNames: ['knowledge'] },
+    { label: '成员管理', icon: 'users', to: '/knowledge/members', activeNames: ['knowledge-members'] },
   ],
   documents: [
     { label: '我的文档', icon: 'folder', to: '/documents', activeNames: ['documents'] },
@@ -126,8 +134,8 @@ const subMenus: Record<string, SubItem[]> = {
   ],
   permission: [
     { label: '用户管理', icon: 'users', to: '/permission', activeNames: ['permission'], adminOnly: true },
-    { label: '角色管理', icon: 'shield', to: '/permission/roles', activeNames: ['perm-roles'], adminOnly: true },
-    { label: '部门管理', icon: 'team', to: '/permission/departments', activeNames: ['perm-departments'], adminOnly: true },
+    { label: '角色管理', icon: 'shield-check', to: '/permission/roles', activeNames: ['perm-roles'], adminOnly: true },
+    { label: '部门管理', icon: 'layers', to: '/permission/departments', activeNames: ['perm-departments'], adminOnly: true },
   ],
   profile: [
     { label: '个人资料', icon: 'user', to: '/profile', activeNames: ['profile'] },
@@ -243,7 +251,7 @@ const sidebarCollapsed = ref(false)
 
         <!-- 公告详情弹窗 -->
         <Teleport to="body">
-          <div v-if="activeAnnouncement" class="am-overlay" @click.self="closeAnnouncement">
+          <div v-if="activeAnnouncement" class="am-overlay" @mousedown="announceBd.onMouseDown" @mouseup="announceBd.onMouseUp">
             <div class="am-modal">
               <div class="am-head">
                 <span class="am-level-dot" :class="`lvl-${activeAnnouncement.level || 'info'}`" />

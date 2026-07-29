@@ -49,7 +49,7 @@ BUILTIN_ROLES: dict[str, dict] = {
         "perms": [p.key for p in PERMISSIONS],
     },
     "editor": {
-        "name": "编辑者",
+        "name": "编辑",
         "description": "可维护知识库内容（上传/编辑文档、管理图谱）",
         "perms": [
             Perm.KB_VIEW,
@@ -60,7 +60,7 @@ BUILTIN_ROLES: dict[str, dict] = {
         ],
     },
     "viewer": {
-        "name": "访客",
+        "name": "只读",
         "description": "仅可查看知识库与进行 AI 问答",
         "perms": [Perm.KB_VIEW, Perm.AI_QA],
     },

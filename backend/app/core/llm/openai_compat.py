@@ -40,11 +40,14 @@ class OpenAICompatProvider:
         max_tokens: int | None = None,
         model: str | None = None,
         top_p: float | None = None,
+        include_reasoning: bool = False,
     ) -> AsyncIterator[str]:
         """兼容多提供商流式输出，安全地提取 content + reasoning_content。
 
         model 覆盖参数：用户偏好模型（settings.preferred_model）透传时生效，
         为空则回落实例默认模型（config.LLM_MODEL）。
+        include_reasoning：True 时同时透出 reasoning_content（仅用于内部结构化抽取，
+        不可暴露给终端用户——推理过程又臭又长）。
         """
         try:
             params: dict[str, Any] = {
@@ -72,6 +75,11 @@ class OpenAICompatProvider:
 
             # ponytail: reasoning_content（Agnes 推理模型）按约定丢弃，只透出 content；
             # 否则会把模型思考过程整段泄漏给用户（回答又臭又长）。
+            # include_reasoning=True 时例外：内部结构化抽取需要从中提取 JSON。
+            if include_reasoning:
+                reasoning = getattr(delta, "reasoning_content", "") or ""
+                if reasoning:
+                    yield reasoning
             if content:
                 yield content
 

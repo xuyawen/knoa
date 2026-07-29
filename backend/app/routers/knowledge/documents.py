@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -35,7 +35,7 @@ from app.core.security import (
 )
 from app.core.storage import get_object_store
 from app.db import DocChunk, Document, DocumentTask, KnowledgeBase, User
-from app.deps import get_db, get_es, get_llm
+from app.deps import get_db, get_es, get_llm, get_redis
 from app.models.common import PaginatedOut
 from app.models.knowledge import (
     DocumentDetailOut,
@@ -62,14 +62,13 @@ async def list_documents(
     q: str | None = None,
     mine: bool = False,
     department_id: str | None = None,
-    tags: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_kb_access("view")),
 ):
     """列出某知识库下的文档（服务端分页 + 真实过滤）。
 
     过滤维度：scope（权限范围）/ doc_type（按扩展名）/ status（审核状态）/
-    q（标题模糊）/ mine（仅本人）/ department_id（部门维度）/ tags（标签，逗号分隔 OR）。
+    q（标题模糊）/ mine（仅本人）/ department_id（部门维度）。
     返回统一分页结构 {items,total,page,pageSize,pages}。
     """
     base = select(Document).where(Document.kb_id == kb_id)
@@ -96,14 +95,6 @@ async def list_documents(
             base = base.where(Document.department_id == uuid.UUID(department_id))
         except ValueError:
             raise HTTPException(status_code=400, detail="department_id 非法") from None
-    if tags:
-        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-        if tag_list:
-            # JSONB 数组用 ? 存在操作符逐标签匹配，OR 组合实现「含任一标签即命中」
-            # （has_any 生成 jsonb ?| jsonb、contains 生成 jsonb @> varchar 均无匹配运算符）
-            conds = [Document.tags.has_key(t) for t in tag_list]
-            base = base.where(or_(*conds))
-
     stmt = base.order_by(Document.created_at.desc())
     rows, total = await paginate(db, stmt, page=page, page_size=size)
     pages = max(1, (total + size - 1) // size) if total else 1
@@ -138,6 +129,12 @@ async def search_docs(
         return {
             "items": [], "total": 0, "page": page, "page_size": size, "pages": 1,
         }
+
+    # 热门搜索榜计数（best-effort：失败不影响搜索主流程）
+    try:
+        await get_redis().incr_trending(q)
+    except Exception:  # noqa: BLE001  (intentional catch-all: trending counter must not fail the search)
+        pass
 
     base = (
         select(Document, KnowledgeBase.name.label("kb_name"))
@@ -197,21 +194,6 @@ async def search_docs(
         "page_size": size,
         "pages": pages,
     }
-
-
-@router.get("/knowledge-bases/{kb_id}/tags")
-async def list_doc_tags(
-    kb_id: str,
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_kb_access("view")),
-):
-    """返回该知识库文档中出现过的去重标签，供前端标签筛选下拉枚举。"""
-    rows = (await db.execute(select(Document.tags).where(Document.kb_id == kb_id))).scalars().all()
-    tag_set: set[str] = set()
-    for t in rows:
-        if t:
-            tag_set.update(t)
-    return sorted(tag_set)
 
 
 @router.post("/knowledge-bases/{kb_id}/documents", response_model=DocumentOut, status_code=201)
@@ -360,13 +342,11 @@ async def upload_document(
         scope=scope,
         parse_status="pending",
     )
-    # 标签 / 分类 / 归属部门（架构图1/2/5：随上传透传）
-    if payload.tags is not None:
-        doc.tags = payload.tags
+    # 分类 / 归属部门（架构图2/5：随上传透传）
     if payload.category:
         doc.category = payload.category
-    # 归属部门：显式传 department_id 优先；scope=department 未传则默认取上传者部门。
-    # department 文档必须有部门（否则无人可见），两者皆空 → 400。
+    # 归属部门：显式传 department_id 优先；scope=department 未传则默认取上传者部门；
+    # 其余情况（public/private）若上传者有部门也自动归属（scope 控制可见范围，不影响组织归属）。
     if payload.department_id:
         try:
             doc.department_id = uuid.UUID(payload.department_id)
@@ -377,6 +357,8 @@ async def upload_document(
             raise HTTPException(
                 status_code=400, detail="部门文档需指定部门，且当前用户无部门可默认"
             )
+        doc.department_id = user.department_id
+    elif user.department_id is not None:
         doc.department_id = user.department_id
     db.add(doc)
     # 先 flush 让 doc.id 生成，否则 task.document_id 会拿到 None（FK 落空）

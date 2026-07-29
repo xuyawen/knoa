@@ -284,7 +284,6 @@ class AgenticRAGAgent(SessionMemoryMixin):
                 return
             # 限流：60s 内同用户同 KB 不重复写
             from datetime import timedelta
-            from app.database import AsyncSessionLocal
             cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
             recent = await db.scalar(
                 select(KGGapSignal.id).where(
@@ -435,6 +434,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
             source_content: dict[int, str] = {}  # 编号 → chunk 全文（生成时注入）
             final_answer_text: str = ""
             graph_reasoning_text: str = ""  # 8.5 多跳推理链路，注入 final prompt
+            pre_loop_thinking: list[dict] = []  # 循环前产出的 thinking 事件（落库用）
             skip = should_skip_retrieval(question)
 
             # ── 加载会话历史 + 滚动摘要（提前到三路并行之前）──
@@ -508,11 +508,13 @@ class AgenticRAGAgent(SessionMemoryMixin):
                     )
                     if chains:
                         graph_reasoning_text = "\n".join(chains)
-                        yield {"event": "thinking", "data": {
+                        _think_ev = {
                             "step": 0, "action": "graph_reason",
                             "detail": f"图谱多跳推理链路（{len(chains)} 条）",
                             "raw_reasoning": "",
-                        }}
+                        }
+                        pre_loop_thinking.append(_think_ev)
+                        yield {"event": "thinking", "data": _think_ev}
                     # 注意：all_sources 里是格式化后的 dict（键为 camelCase
                     # chunkId），此前误用 snake_case chunk_id 取值恒为 None，
                     # 去重形同虚设，多跳与图检索的重叠 chunk 会被重复入选
@@ -533,6 +535,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
             # (纯文本 → str;带图 → list)。agent 决策(tool_call)也能看到图。
             user_content = self._build_user_content(question, files)
             st = _AgentState(question, kb_id)
+            st.thinking_steps = pre_loop_thinking  # 合并循环前的 thinking 事件
             st.all_sources = all_sources
             st.source_content = source_content
             st.intent = intent

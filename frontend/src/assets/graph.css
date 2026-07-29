@@ -5,6 +5,20 @@
 .graph-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; gap: 12px; }
 .toolbar-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .toolbar-right { display: flex; align-items: center; gap: 8px; }
+
+/* 重建进度横幅（画布内嵌顶部） */
+.rebuild-banner { position: absolute; top: 0; left: 0; right: 0; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 13px; border-left: 3px solid var(--brand); background: var(--bg-tertiary); border-radius: 0; box-shadow: 0 1px 0 var(--border); }
+.rebuild-banner.rb-running { border-left-color: var(--accent-blue); }
+.rebuild-banner.rb-done { border-left-color: var(--accent-green); }
+.rebuild-banner.rb-failed { border-left-color: var(--accent-rose); }
+.rb-spinner { width: 15px; height: 15px; flex: none; border: 2px solid var(--border); border-top-color: var(--brand); border-radius: 50%; animation: rb-spin 0.8s linear infinite; }
+@keyframes rb-spin { to { transform: rotate(360deg); } }
+.rb-icon { flex: none; }
+.rb-done .rb-icon { color: var(--accent-green); }
+.rb-failed .rb-icon { color: var(--accent-rose); }
+.rb-text { color: var(--text-primary); white-space: nowrap; }
+.rb-track { flex: 1; min-width: 120px; height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.rb-fill { display: block; height: 100%; border-radius: 4px; background: var(--brand); transition: width 0.4s ease; }
 .g-search { position: relative; width: 260px; }
 .g-input {
   width: 100%; height: 34px; padding: 0 34px 0 12px;
@@ -51,20 +65,24 @@
 .empty-sub { font-size: 13px; line-height: 1.6; margin: 0; }
 
 .force-graph {
-  width: 100%; flex: 1; min-height: 440px; cursor: grab; touch-action: none;
+  width: 100%; flex: 1; min-height: 480px; cursor: grab; touch-action: none;
   background:
-    radial-gradient(circle at 30% 40%, rgba(59, 130, 246, 0.04) 0%, transparent 50%),
-    radial-gradient(circle at 70% 60%, rgba(16, 185, 129, 0.03) 0%, transparent 50%);
+    radial-gradient(ellipse at 25% 35%, rgba(59, 130, 246, 0.05) 0%, transparent 55%),
+    radial-gradient(ellipse at 75% 65%, rgba(139, 92, 246, 0.04) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 50%, rgba(16, 185, 129, 0.02) 0%, transparent 70%);
 }
 .force-graph:active { cursor: grabbing; }
-.edge-label { font-size: 9px; font-weight: 500; fill: var(--text-tertiary); pointer-events: none; }
-.gnode { cursor: pointer; }
-.gnode circle { transition: stroke-width var(--dur-fast); }
-.gnode .node-label {
-  font-size: 9px; fill: var(--text-secondary); pointer-events: none; font-weight: 600;
+.edge-label {
+  font-size: 10px; font-weight: 500; fill: var(--text-tertiary); pointer-events: none;
   paint-order: stroke; stroke: var(--bg-surface); stroke-width: 3px; stroke-linejoin: round;
 }
-.gnode.dim, .edges .dim { opacity: 0.12; transition: opacity var(--dur-fast); }
+.gnode { cursor: pointer; }
+.gnode circle { transition: stroke-width var(--dur-fast), opacity var(--dur-fast); }
+.gnode .node-label {
+  font-size: 11px; fill: var(--text-primary); pointer-events: none; font-weight: 600;
+  paint-order: stroke; stroke: var(--bg-surface); stroke-width: 3.5px; stroke-linejoin: round;
+}
+.gnode.dim, .edges .dim { opacity: 0.1; transition: opacity var(--dur-fast); }
 
 .canvas-footer {
   display: flex; align-items: center; justify-content: space-between;
@@ -80,6 +98,17 @@
 .zoom-level { font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 42px; text-align: center; }
 .legend { display: flex; align-items: center; gap: 14px; font-size: 11px; color: var(--text-secondary); flex-wrap: wrap; }
 .leg-item { display: flex; align-items: center; gap: 4px; }
+.leg-type {
+  padding: 2px 7px; border-radius: var(--radius-pill); cursor: default;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.leg-type:hover, .leg-type.active { background: var(--bg-hover); color: var(--text-primary); }
+.leg-count { font-style: normal; font-size: 10px; color: var(--text-tertiary); margin-left: 1px; }
+.leg-more {
+  border: 1px solid var(--border); background: var(--bg-subtle); color: var(--text-secondary);
+  border-radius: var(--radius-pill); padding: 2px 10px; font-size: 11px; cursor: pointer; white-space: nowrap;
+}
+.leg-more:hover { color: var(--brand); border-color: var(--brand); }
 .leg-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .leg-divider { width: 1px; height: 14px; background: var(--border); }
 .leg-line { display: inline-flex; align-items: center; gap: 4px; }
@@ -89,29 +118,43 @@
 
 .leg-divider { width: 1px; height: 14px; background: var(--border); }
 
-/* 导出按钮 */
-.btn-outline {
-  display: inline-flex; align-items: center; gap: 5px;
-  height: 32px; padding: 0 12px; border-radius: var(--radius-md);
-  background: transparent; border: 1px solid var(--border);
-  color: var(--text-secondary); font-size: 12.5px; cursor: pointer;
-  font-family: inherit; transition: all var(--dur-fast);
-}
-.btn-outline:hover { border-color: var(--brand); color: var(--brand); }
-
 /* ---- 右侧统计面板 ---- */
 .stats-panel { padding: 16px; overflow-y: auto; }
+
+/* 图谱侧栏内统计卡片：覆盖 dashboard.css 的 5 列大屏布局 → 2 列紧凑版 */
+.stats-panel .stats-row {
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 10px !important;
+}
+.stats-panel .stat-card {
+  padding: 12px 12px 12px 14px;
+  gap: 10px;
+}
+.stats-panel .stat-card::before {
+  top: 8px;
+  bottom: 8px;
+}
+.stats-panel .sc-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+.stats-panel .sc-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.stats-panel .sc-label {
+  font-size: 11.5px;
+}
+.stats-panel .sc-value {
+  font-size: 20px;
+}
 .panel-head { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
 .panel-title { font-size: 15px; font-weight: 700; }
 .info-hint { color: var(--text-tertiary); cursor: pointer; margin-left: auto; }
 
-.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
-.stat-cell { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: var(--radius-md); background: var(--bg-subtle); }
-.sc-icon-wrap { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.sc-label { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
-.sc-value { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.2; }
-
-.section-block { margin-bottom: 18px; }
+.section-block { margin-top: 20px; }
 .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .section-title { font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 10px; }
 
@@ -143,7 +186,7 @@
 .source-modal-link:hover { text-decoration: underline; }
 .source-modal-foot { padding: 12px 18px; border-top: 1px solid var(--border, rgba(255,255,255,.06)); display: flex; justify-content: flex-end; }
 
-.type-bars { display: flex; flex-direction: column; gap: 12px; }
+.type-bars { display: flex; flex-direction: column; gap: 12px; max-height: 260px; overflow-y: auto; }
 .type-bar { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
 .tb-label { width: 56px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-track { flex: 1; height: 8px; border-radius: 4px; background: var(--bg-subtle); overflow: hidden; }
@@ -206,7 +249,6 @@
 
 /* ---- 图谱统计 ---- */
 .stats-page { display: flex; flex-direction: column; gap: 14px; }
-.stat-grid.wide { grid-template-columns: repeat(4, 1fr); }
 .stat-block { padding: 20px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .grid-2 > .stat-block { display: flex; flex-direction: column; }
@@ -216,3 +258,18 @@
   .stat-grid.wide { grid-template-columns: 1fr 1fr; }
   .grid-2 { grid-template-columns: 1fr; }
 }
+
+/* ---- 导出下拉菜单（Teleport 到 body + fixed 定位，避开画布卡片 overflow:hidden 裁剪） ---- */
+.export-backdrop { position: fixed; inset: 0; z-index: 900; }
+.export-menu {
+  position: fixed; z-index: 901; min-width: 172px; padding: 6px;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+.export-item {
+  display: flex; align-items: center; gap: 9px; padding: 8px 10px;
+  border: none; background: none; border-radius: 7px; cursor: pointer;
+  font-size: 12.5px; color: var(--text-primary); text-align: left; white-space: nowrap;
+}
+.export-item:hover { background: var(--bg-hover); }

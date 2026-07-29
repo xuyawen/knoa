@@ -17,10 +17,48 @@ from app.models.department import (
     DepartmentCreateIn,
     DepartmentNode,
     DepartmentOut,
+    DepartmentReorderIn,
     DepartmentUpdateIn,
 )
 
 router = APIRouter()
+
+MAX_DEPT_DEPTH = 3  # 部门最多 3 级：顶级 / 二级 / 三级
+
+
+def _dept_index(depts: list[Department]) -> dict[str, Department]:
+    return {str(x.id): x for x in depts}
+
+
+def _depth(depts_by_id: dict[str, Department], dept_id: str) -> int:
+    """某部门自身的层级（根部门=1）。"""
+    depth = 0
+    seen: set[str] = set()
+    cur: str | None = dept_id
+    while cur in depts_by_id and cur not in seen:
+        seen.add(cur)
+        depth += 1
+        p = depts_by_id[cur].parent_id
+        cur = str(p) if p else None
+    return depth
+
+
+def _subtree_height(depts_by_id: dict[str, Department], root_id: str) -> int:
+    """以 root_id 为根的子树最大深度（root 自身=1）。"""
+    children_map: dict[str, list[Department]] = {}
+    for x in depts_by_id.values():
+        children_map.setdefault(str(x.parent_id), []).append(x)
+    max_d = 1
+    stack: list[tuple[str, int]] = [(root_id, 1)]
+    while stack:
+        cid, cd = stack.pop()
+        for c in children_map.get(cid, []):
+            nd = cd + 1
+            if nd > max_d:
+                max_d = nd
+            stack.append((str(c.id), nd))
+    return max_d
+
 
 
 def _to_out(d: Department) -> DepartmentOut:
@@ -87,6 +125,15 @@ async def create_department(
         if parent is None:
             raise HTTPException(status_code=400, detail="父部门不存在")
         parent_id = uuid.UUID(payload.parent_id)
+        # 深度上限：新部门层级 = 父部门层级 + 1，不得超过 MAX_DEPT_DEPTH
+        all_depts = (await db.execute(select(Department))).scalars().all()
+        idx = _dept_index(all_depts)
+        parent_level = _depth(idx, str(parent_id))
+        if parent_level + 1 > MAX_DEPT_DEPTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"部门最多支持 {MAX_DEPT_DEPTH} 级，所选父部门已是第 {parent_level} 级，无法再向下创建",
+            )
     d = Department(
         name=payload.name,
         parent_id=parent_id,
@@ -132,6 +179,16 @@ async def update_department(
                 raise HTTPException(status_code=400, detail="不能将部门挂到自己的子部门下")
             if not any(str(x.id) == str(pid) for x in all_depts):
                 raise HTTPException(status_code=400, detail="父部门不存在")
+            # 深度上限：调整后「d 自身新层级 + d 现有子树高度」不得超过 MAX_DEPT_DEPTH，
+            # 否则把 d 挂到更深层父级会连带子/孙部门一起突破层级上限。
+            idx = _dept_index(all_depts)
+            subtree_h = _subtree_height(idx, str(d.id))
+            new_parent_depth = _depth(idx, str(pid)) if pid else 0
+            if new_parent_depth + subtree_h > MAX_DEPT_DEPTH:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"部门最多支持 {MAX_DEPT_DEPTH} 级，调整后将超过层级上限",
+                )
             d.parent_id = pid
     if payload.name is not None:
         d.name = payload.name
@@ -142,6 +199,37 @@ async def update_department(
     await db.commit()
     await db.refresh(d)
     return _to_out(d)
+
+
+@router.post("/departments/reorder", status_code=200)
+async def reorder_departments(
+    payload: DepartmentReorderIn,
+    db: AsyncSession = Depends(get_db),
+    _: Department = Depends(require_permission(Perm.SYS_SETTINGS)),
+):
+    """同级部门拖拽排序：传入某父级（或顶级 None）下的完整有序 id 列表，按序重设 sort_order。
+
+    仅允许同级内重排，不改父级、不触碰层级深度。
+    """
+    parent_id = uuid.UUID(payload.parent_id) if payload.parent_id else None
+    stmt = select(Department)
+    if parent_id is None:
+        stmt = stmt.where(Department.parent_id.is_(None))
+    else:
+        stmt = stmt.where(Department.parent_id == parent_id)
+    children = (await db.execute(stmt)).scalars().all()
+    existing = {str(c.id) for c in children}
+    incoming = set(payload.ids)
+    if incoming != existing:
+        raise HTTPException(
+            status_code=400,
+            detail="排序列表必须包含该层级下的全部部门（不可遗漏或混入其他层级）",
+        )
+    by_id = {str(c.id): c for c in children}
+    for idx, did in enumerate(payload.ids):
+        by_id[did].sort_order = idx
+    await db.commit()
+    return {"ok": True}
 
 
 @router.delete("/departments/{dept_id}", status_code=204)

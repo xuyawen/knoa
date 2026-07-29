@@ -11,6 +11,8 @@
   不受渲染采样 limit 截断影响，大图谱下统计依然准确；
 - 边查询用 from_label/to_label IN (节点 labels) 预筛，避免边表全表加载。
 """
+import asyncio
+import logging
 import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -22,11 +24,20 @@ from sqlalchemy import Select, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user, get_accessible_kb_ids, get_kb_permission_level
-from app.core.graph import _invalidate_graph
+from app.core.graph import GraphStore, _invalidate_graph
+from app.database import AsyncSessionLocal
 from app.db import DocChunk, Document, KGEdge, KGGapSignal, KGNode, KnowledgeBase, User
-from app.deps import get_db
+from app.deps import get_db, get_embedder, get_llm
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# 后台图谱重建任务引用集：持有 task 到完成，防止被 GC 取消（与 review.py 同款机制）
+_REBUILD_TASKS: set = set()
+# 重建进度（kb_id -> {total, processed, status}），供前端轮询展示「已处理 X/N 篇」。
+# 进程内状态：running/done/failed；无条目视为 idle。
+_REBUILD_PROGRESS: dict[str, dict[str, Any]] = {}
 
 
 def _node_out(n: KGNode) -> dict[str, Any]:
@@ -316,7 +327,7 @@ async def graph_node_source(
     try:
         nid = _uuid.UUID(node_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="无效的节点 ID")
+        raise HTTPException(status_code=400, detail="无效的节点 ID") from None
     node = await db.get(KGNode, nid)
     if not node:
         raise HTTPException(status_code=404, detail="实体不存在")
@@ -432,7 +443,7 @@ async def update_graph_node(
     try:
         nid = _uuid.UUID(node_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="无效的节点 ID")
+        raise HTTPException(status_code=400, detail="无效的节点 ID") from None
     node = await db.get(KGNode, nid)
     if not node:
         raise HTTPException(status_code=404, detail="实体不存在")
@@ -476,7 +487,7 @@ async def delete_graph_node(
     try:
         nid = _uuid.UUID(node_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="无效的节点 ID")
+        raise HTTPException(status_code=400, detail="无效的节点 ID") from None
     node = await db.get(KGNode, nid)
     if not node:
         raise HTTPException(status_code=404, detail="实体不存在")
@@ -504,7 +515,7 @@ async def create_graph_edge(
         from_id = _uuid.UUID(body.from_id)
         to_id = _uuid.UUID(body.to_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="无效的节点 ID")
+        raise HTTPException(status_code=400, detail="无效的节点 ID") from None
     from_node = await db.get(KGNode, from_id)
     to_node = await db.get(KGNode, to_id)
     if not from_node or not to_node:
@@ -545,7 +556,7 @@ async def delete_graph_edge(
     try:
         eid = _uuid.UUID(edge_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="无效的边 ID")
+        raise HTTPException(status_code=400, detail="无效的边 ID") from None
     edge = await db.get(KGEdge, eid)
     if not edge:
         raise HTTPException(status_code=404, detail="关系不存在")
@@ -569,7 +580,7 @@ async def merge_graph_nodes(
         try:
             source_uuids.append(_uuid.UUID(sid))
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"无效的节点 ID: {sid}")
+            raise HTTPException(status_code=400, detail=f"无效的节点 ID: {sid}") from None
     sources = list((await db.execute(
         select(KGNode).where(KGNode.id.in_(source_uuids), KGNode.kb_id == body.kb_id)
     )).scalars().all())
@@ -701,3 +712,117 @@ async def clear_graph_gaps(
         q = q.where(KGGapSignal.question == question)
     await db.execute(q)
     await db.flush()
+
+
+# ---------------------------------------------------------------------------
+# 图谱重建（存量已审核文档补抽 / 换模型后全量重抽）
+# ---------------------------------------------------------------------------
+async def _rebuild_graph_background(kb_id: str, clean: bool) -> None:
+    """后台重建某 KB 图谱：独立会话，对该库已审核文档的 chunk 重新 LLM 抽取。
+
+    用于补「脚本直写 DB（graph=None）/ 早期抽取静默失败」导致的空图。
+    clean=True 先清空本库节点+边再重抽（真重建）；False 走 extract 的 label 去重增量补全。
+    失败隔离：单篇文档抽取异常不影响其余文档与主流程。
+    进度写入 _REBUILD_PROGRESS，供 /graph/rebuild/status 轮询。
+    """
+    _REBUILD_PROGRESS[kb_id] = {"total": 0, "processed": 0, "status": "running"}
+    try:
+        async with AsyncSessionLocal() as db:
+            store = GraphStore(get_llm(), get_embedder())
+            if clean:
+                await db.execute(delete(KGEdge).where(KGEdge.kb_id == kb_id))
+                await db.execute(delete(KGNode).where(KGNode.kb_id == kb_id))
+                await db.commit()
+                _invalidate_graph(kb_id)
+            docs = (
+                await db.execute(
+                    select(Document.id, Document.title).where(
+                        Document.kb_id == kb_id, Document.status == "已审核"
+                    )
+                )
+            ).all()
+            prog = _REBUILD_PROGRESS[kb_id]
+            prog["total"] = len(docs)
+            for doc_id, title in docs:
+                try:
+                    chunks = (
+                        await db.execute(
+                            select(DocChunk).where(DocChunk.document_id == doc_id).order_by(
+                                DocChunk.chunk_index
+                            )
+                        )
+                    ).scalars().all()
+                    infos = [
+                        {"index": c.chunk_index, "content": c.content, "chunk_id": c.id}
+                        for c in chunks
+                    ]
+                    if infos:
+                        await store.extract(kb_id, title, infos, db)
+                        await db.commit()
+                except Exception as e:  # noqa: BLE001  (best-effort: 单篇失败跳过，继续其余文档)
+                    logger.warning("rebuild graph doc=%s failed: %s", title, e)
+                    await db.rollback()
+                finally:
+                    prog["processed"] += 1
+            # 重建收尾：统一清理零度落单节点（单篇抽取的轮内清理只管当轮新建节点，
+            # 跨文档级联场景的落单节点由这里兜底）
+            pruned = await store.prune_isolated_nodes(db, kb_id)
+            await db.commit()
+            if pruned:
+                logger.info("rebuild graph kb=%s: pruned %d isolated nodes", kb_id, pruned)
+            _invalidate_graph(kb_id)
+        _REBUILD_PROGRESS[kb_id]["status"] = "done"
+    except Exception as e:  # noqa: BLE001  (整体崩溃：清库/会话异常，标记 failed 供前端提示)
+        logger.warning("rebuild graph kb=%s crashed: %s", kb_id, e)
+        if kb_id in _REBUILD_PROGRESS:
+            _REBUILD_PROGRESS[kb_id]["status"] = "failed"
+
+
+@router.post("/graph/rebuild", status_code=202)
+async def rebuild_graph(
+    kb_id: str = Query(...),
+    clean: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """重建知识库图谱：对该库已审核文档的 chunk 重新 LLM 抽取实体/关系。
+
+    - clean=false（默认）：增量补全，已有实体按 label 去重跳过，适合给存量空图补数据；
+    - clean=true：先清空本库节点+边再全量重抽，适合换抽取模型后彻底重建。
+    需 KB admin 权限（重抽会批量写图、清图属破坏性操作）。后台异步执行，立即返回待处理文档数。
+    """
+    await _require_kb_write(db, user, kb_id, "admin")
+    doc_count = await db.scalar(
+        select(func.count(Document.id)).where(
+            Document.kb_id == kb_id, Document.status == "已审核"
+        )
+    )
+    task = asyncio.create_task(_rebuild_graph_background(kb_id, clean))
+    _REBUILD_TASKS.add(task)
+    task.add_done_callback(_REBUILD_TASKS.discard)
+    return {"kbId": kb_id, "queuedDocs": doc_count or 0, "clean": clean}
+
+
+@router.get("/graph/rebuild/status")
+async def rebuild_status(
+    kb_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """查询某 KB 图谱重建进度（前端轮询用）。
+
+    返回 status：running（进行中，附 total/processed）/ done / failed / idle（无任务）。
+    进度为进程内状态，服务重启后重置为 idle。
+    """
+    allowed = await get_accessible_kb_ids(db, user)
+    if kb_id not in allowed:
+        raise HTTPException(status_code=403, detail="无权访问该知识库的图谱")
+    prog = _REBUILD_PROGRESS.get(kb_id)
+    if prog is None:
+        return {"kbId": kb_id, "status": "idle", "total": 0, "processed": 0}
+    return {
+        "kbId": kb_id,
+        "status": prog["status"],
+        "total": prog["total"],
+        "processed": prog["processed"],
+    }

@@ -36,7 +36,6 @@ def doc_out(d: Document) -> DocumentOut:
         updated_at=d.updated_at.isoformat() if d.updated_at else "",
         original_filename=d.original_filename,
         file_size=d.file_size,
-        tags=d.tags or [],
         category=d.category,
         department_id=str(d.department_id) if d.department_id else None,
         uploader_name=d.uploader_name,

@@ -25,6 +25,7 @@ class LLMProvider(Protocol):
         temperature: float | None = None,
         max_tokens: int | None = None,
         top_p: float | None = None,
+        include_reasoning: bool = False,
     ) -> AsyncIterator[str]: ...
 
     async def chat(

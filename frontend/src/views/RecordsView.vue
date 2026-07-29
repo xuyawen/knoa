@@ -56,14 +56,14 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-async function loadRecords() {
+async function loadRecords(force = false) {
   recordsLoading.value = true
   try {
     const res = await getRecords({
       page: currentPage.value,
       size: pageSize.value,
       filter: recordsFilter.value === 'all' ? undefined : recordsFilter.value,
-    })
+    }, force)
     records.value = res.items
     total.value = res.total
   } catch (e: unknown) {
@@ -101,6 +101,9 @@ onMounted(loadRecords)
         <div class="records-title-row">
           <h2 class="records-title">检索记录</h2>
           <span class="records-count">{{ total }} 条提问</span>
+          <button type="button" class="icon-btn" title="刷新" :disabled="recordsLoading" @click="loadRecords(true)">
+            <Icon name="refresh" :size="15" :class="{ spin: recordsLoading }" />
+          </button>
         </div>
         <div class="records-filters">
           <button
@@ -241,6 +244,20 @@ onMounted(loadRecords)
 .records-title-row { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
 .records-title { font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0; }
 .records-count { font-size: 13px; color: var(--text-tertiary); }
+.records-title-row .icon-btn { margin-left: auto; align-self: center; }
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.icon-btn:disabled { opacity: 0.5; cursor: default; }
 .records-filters { display: flex; gap: 6px; }
 .records-filters .seg-btn {
   padding: 5px 14px;

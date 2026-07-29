@@ -5,7 +5,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
-import { getGraph, getGraphHotNodes, getGraphRecent, exportGraph, getGraphNodeSource, deleteGraphNode, updateGraphNode, createGraphNode, createGraphEdge, deleteGraphEdge, mergeGraphNodes, getGraphGaps, clearGraphGaps } from '@/api'
+import { getGraph, getGraphHotNodes, getGraphRecent, exportGraph, getGraphNodeSource, deleteGraphNode, updateGraphNode, createGraphNode, createGraphEdge, deleteGraphEdge, mergeGraphNodes, getGraphGaps, clearGraphGaps, rebuildGraph, getRebuildStatus } from '@/api'
 import type { GraphData, GraphNode, GraphFilter, GraphHotNode, GraphNodeSource, KGGapSignal } from '@/types/api'
 
 /* ---- 模块级共享状态：四个视图拿到同一套 refs ---- */
@@ -21,6 +21,9 @@ const hoveredId = ref<string | null>(null)
 const gFilterType = ref('')
 const gFilterBiz = ref('')
 const gFilterTime = ref('')
+
+// 生效的知识库筛选：下拉选择优先，其次为外部预设的 selectedKb
+const effectiveKb = computed<string | null>(() => gFilterBiz.value || selectedKb.value)
 
 // 节点类型选项：从已加载图谱的真实去重 type 派生（首次无类型过滤时采集）
 const allTypeOptions = ref<{ label: string; value: string }[]>([{ label: '全部', value: '' }])
@@ -50,15 +53,44 @@ const focusNodeId = ref<string | null>(null)
 // 是否已完成首次加载（模块级：仅第一个挂载的视图触发拉取）
 let fetched = false
 
+// 图谱重建状态（模块级共享：若放在 useGraphData() 内，视图重新挂载会产生
+// 多个独立轮询链，重建完成时每个实例各弹一次成功提示）
+const rebuilding = ref(false)
+// 重建进度（供工具栏下方横幅展示）；null 表示无进行中/刚完成的重建
+const rebuildProgress = ref<{ kbId: string; kbName: string; total: number; processed: number; status: string } | null>(null)
+let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+
+/* ---- 导出工具：纯前端生成文件并触发下载（PNG / CSV 用） ---- */
+export function dateStamp(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+function csvEscape(v: string): string {
+  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
+}
+
+function downloadText(text: string, filename: string): void {
+  // BOM 前置：让 Excel 打开 CSV 时正确识别 UTF-8 中文
+  downloadBlob(new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' }), filename)
+}
+
 export function useGraphData() {
   const knowledge = useKnowledgeStore()
   const toast = useToastStore()
 
   const bizCatOpts = computed<{ label: string; value: string }[]>(() => {
-    const cats = Array.from(
-      new Set(knowledge.bases.map((b) => b.category).filter((c): c is string => !!c)),
-    )
-    return [{ label: '全部', value: '' }, ...cats.map((c) => ({ label: c, value: c }))]
+    return knowledge.bases.map((b) => ({ label: b.name, value: b.id }))
   })
   const nodeTypeOpts = computed(() => allTypeOptions.value)
   const timeRangeOpts = [
@@ -79,7 +111,6 @@ export function useGraphData() {
   // 真实筛选参数（随三个下拉变化）
   const graphFilter = computed<GraphFilter>(() => ({
     nodeType: gFilterType.value || undefined,
-    bizCategory: gFilterBiz.value || undefined,
     ...timeRangeToFromTo(gFilterTime.value),
   }))
 
@@ -95,6 +126,19 @@ export function useGraphData() {
   }
   function kbName(id: string): string {
     return knowledge.bases.find((b) => b.id === id)?.name || id
+  }
+
+  /* ---- 按实体类型着色（单 KB 时也有丰富色彩） ---- */
+  const TYPE_PALETTE = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#F97316', '#6366F1', '#14B8A6', '#E11D48', '#7C3AED', '#0EA5E9']
+  const typeColorMap = computed<Record<string, string>>(() => {
+    const m: Record<string, string> = {}
+    const types = Object.keys(stats.value?.typeCounts || {})
+    types.forEach((t, i) => { m[t] = TYPE_PALETTE[i % TYPE_PALETTE.length] })
+    return m
+  })
+  function typeColor(type: string | undefined | null): string {
+    if (!type) return '#94A3B8'
+    return typeColorMap.value[type] || '#94A3B8'
   }
 
   /* ---- 节点索引：替代模板 / 边过滤里的 O(N) find ---- */
@@ -211,7 +255,7 @@ export function useGraphData() {
     loading.value = true
     errorMsg.value = ''
     try {
-      const data = await getGraph(selectedKb.value, graphFilter.value)
+      const data = await getGraph(effectiveKb.value, graphFilter.value)
       graph.value = data
       selectedId.value = null
       hoveredId.value = null
@@ -241,8 +285,8 @@ export function useGraphData() {
   async function loadHotRecent() {
     try {
       const [h, r] = await Promise.all([
-        getGraphHotNodes(5, selectedKb.value),
-        getGraphRecent(5, selectedKb.value),
+        getGraphHotNodes(5, effectiveKb.value),
+        getGraphRecent(5, effectiveKb.value),
       ])
       hotNodes.value = h
       recentNodes.value = r
@@ -251,10 +295,28 @@ export function useGraphData() {
     }
   }
 
-  function onExport() {
-    exportGraph('json', selectedKb.value).catch((e: unknown) => {
-      toast.error(`导出失败：${errMsg(e)}`)
-    })
+  /* ---- 导出：json/gexf 由后端生成；csv 纯前端从当前图谱数据生成 ---- */
+  function exportRemote(fmt: 'json' | 'gexf') {
+    return exportGraph(fmt, effectiveKb.value)
+  }
+
+  function exportCSV(which: 'nodes' | 'edges') {
+    const g = graph.value
+    if (!g) return
+    let header: string
+    let rows: string[][]
+    let filename: string
+    if (which === 'nodes') {
+      header = '实体,类型,知识库,度数'
+      rows = g.nodes.map((n) => [n.label, n.type || '', kbName(n.kbId), String(degree.value[n.id] || 0)])
+      filename = `graph-nodes-${dateStamp()}.csv`
+    } else {
+      header = '起始实体,关系,目标实体'
+      rows = g.edges.map((e) => [nodeLabel(e.source), e.relation, nodeLabel(e.target)])
+      filename = `graph-edges-${dateStamp()}.csv`
+    }
+    const csv = [header, ...rows.map((r) => r.map(csvEscape).join(','))].join('\n')
+    downloadText(csv, filename)
   }
 
   /* ---- 溯源 ---- */
@@ -325,7 +387,7 @@ export function useGraphData() {
   }
 
   async function mergeNodes(sourceIds: string[], targetLabel: string, targetType?: string) {
-    const kbId = selectedKb.value || graph.value?.nodes.find(n => sourceIds.includes(n.id))?.kbId
+    const kbId = effectiveKb.value || graph.value?.nodes.find(n => sourceIds.includes(n.id))?.kbId
     if (!kbId) { toast.error('请先选择知识库'); return }
     try {
       await mergeGraphNodes({ kbId, sourceIds, targetLabel, targetType })
@@ -336,16 +398,94 @@ export function useGraphData() {
     }
   }
 
-  /* ---- 知识缺口 ---- */
-  async function loadGaps() {
+  /* ---- 图谱重建（存量已审核文档补抽 / 换模型后重抽） ---- */
+  function stopRebuildPoll() {
+    if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null }
+  }
+
+  async function rebuild(kbId: string, clean = false) {
+    if (!kbId) { toast.error('请选择要重建的知识库'); return }
     try {
-      gapSignals.value = await getGraphGaps(selectedKb.value, 10)
+      const res = await rebuildGraph(kbId, clean)
+      if (!res.queuedDocs) {
+        toast.error('该知识库暂无已审核文档，无法重建图谱')
+        return
+      }
+      rebuilding.value = true
+      rebuildProgress.value = { kbId, kbName: kbName(kbId), total: res.queuedDocs, processed: 0, status: 'running' }
+      toast.success(`已提交重建：${res.queuedDocs} 篇文档重新抽取中`)
+      stopRebuildPoll()
+      pollRebuild(kbId)
+    } catch (e: unknown) {
+      rebuilding.value = false
+      rebuildProgress.value = null
+      toast.error(`重建失败：${errMsg(e)}`)
+    }
+  }
+
+  // 每 2s 轮询后端进度；running 继续，done/failed/idle 收尾
+  function pollRebuild(kbId: string) {
+    rebuildTimer = setTimeout(async () => {
+      try {
+        const st = await getRebuildStatus(kbId)
+        const p = rebuildProgress.value
+        if (p && p.kbId === kbId) {
+          p.total = st.total || p.total
+          p.processed = st.processed
+          p.status = st.status
+        }
+        if (st.status === 'running') {
+          pollRebuild(kbId)
+        } else {
+          await finishRebuild(st.status, kbId)
+        }
+      } catch {
+        // 网络抖动：后端任务仍在跑，继续轮询
+        pollRebuild(kbId)
+      }
+    }, 2000)
+  }
+
+  async function finishRebuild(status: string, kbId: string) {
+    stopRebuildPoll()
+    rebuilding.value = false
+    // 仅当重建的就是当前正在查看的库时才刷新画布，避免切库后误刷其他库的图谱
+    if (kbId === effectiveKb.value) {
+      await fetchGraph().catch(() => {})
+    }
+    if (rebuildProgress.value) {
+      rebuildProgress.value.status = status === 'done' ? 'done' : 'failed'
+    }
+    if (status === 'done') toast.success('图谱重建完成')
+    else if (status === 'failed') toast.error('图谱重建异常，请重试')
+    // 完成态横幅停留 5 秒后自动消失
+    rebuildTimer = setTimeout(() => { rebuildProgress.value = null }, 5000)
+  }
+
+  // 进入页面时若该库仍在重建（如刷新后），恢复进度横幅 + 轮询
+  async function resumeRebuildIfRunning(kbId: string | null) {
+    if (!kbId || rebuilding.value) return
+    try {
+      const st = await getRebuildStatus(kbId)
+      if (st.status === 'running') {
+        rebuilding.value = true
+        rebuildProgress.value = { kbId, kbName: kbName(kbId), total: st.total, processed: st.processed, status: 'running' }
+        stopRebuildPoll()
+        pollRebuild(kbId)
+      }
     } catch { /* 非致命 */ }
   }
-  async function dismissGap(question: string) {
+
+  /* ---- 知识缺口 ---- */
+  async function loadGaps(allKbs = false) {
     try {
-      await clearGraphGaps(selectedKb.value, question)
-      gapSignals.value = gapSignals.value.filter(g => g.question !== question)
+      gapSignals.value = await getGraphGaps(allKbs ? null : effectiveKb.value, 10)
+    } catch { /* 非致命 */ }
+  }
+  async function dismissGap(kbId: string, question: string) {
+    try {
+      await clearGraphGaps(kbId, question)
+      gapSignals.value = gapSignals.value.filter(g => !(g.kbId === kbId && g.question === question))
     } catch (e: unknown) {
       toast.error(`操作失败：${errMsg(e)}`)
     }
@@ -372,9 +512,10 @@ export function useGraphData() {
   })
 
   function resetAll() {
-    const filtersDirty = gFilterType.value !== '' || gFilterBiz.value !== '' || gFilterTime.value !== ''
+    const defaultKb = knowledge.bases[0]?.id || ''
+    const filtersDirty = gFilterType.value !== '' || gFilterBiz.value !== defaultKb || gFilterTime.value !== ''
     gFilterType.value = ''
-    gFilterBiz.value = ''
+    gFilterBiz.value = defaultKb
     gFilterTime.value = ''
     searchTerm.value = ''
     selectedId.value = null
@@ -386,8 +527,13 @@ export function useGraphData() {
 
   onMounted(async () => {
     if (!knowledge.loaded) await knowledge.load().catch(() => {})
-    // 共享状态只在首次挂载拉取；tab 切换直接复用（「搜索」按钮 / 筛选可强制刷新）
-    if (!fetched && !loading.value) await fetchGraph()
+    // 默认选中第一个知识库（数据量大，全量视图不可读）
+    if (!gFilterBiz.value && knowledge.bases.length) {
+      gFilterBiz.value = knowledge.bases[0].id
+      // watch 会触发 fetchGraph，无需手动拉取
+    } else if (!fetched && !loading.value) {
+      await fetchGraph()
+    }
   })
 
   // 三个筛选下拉变化 → 重新拉图（后端真实过滤，节点集合随之变化）
@@ -404,6 +550,7 @@ export function useGraphData() {
     sourceInfo, sourceLoading,
     // 派生
     kbColor, nodeColor, kbName, nodeById, nodeLabel, degree, adjacency, presentKbs,
+        typeColor, typeColorMap,
     stats, typeBars, maxDegree, avgDegree,
     selectedNode, selectedNeighbors,
     nodeColumns, nodePage, nodePageSize, pagedNodes,
@@ -411,8 +558,9 @@ export function useGraphData() {
     // 画布
     tx, ty, k, resetView,
     // 动作
-    fetchGraph, loadHotRecent, onExport, resetAll,
+    fetchGraph, loadHotRecent, exportRemote, exportCSV, resetAll,
     loadSource, removeNode, editNode, addNode, addEdge, removeEdge, mergeNodes,
+    rebuild, rebuilding, rebuildProgress, resumeRebuildIfRunning,
     loadGaps, dismissGap, enterFocus, exitFocus,
   }
 }

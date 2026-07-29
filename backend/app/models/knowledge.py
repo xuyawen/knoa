@@ -97,7 +97,6 @@ class DocumentOut(CamelModel):
     updated_at: str
     original_filename: str | None = None
     file_size: int | None = None
-    tags: list[str] = []
     category: str | None = None
     department_id: str | None = None
     uploader_name: str | None = None       # P0：真实上传人（冗余显示名）
@@ -123,7 +122,6 @@ class DocumentUploadIn(CamelModel):
     content: str | None = None       # 文本路径（md/txt 直传文本，向后兼容）
     content_b64: str | None = None    # 二进制路径（docx/pdf 传 base64 原始字节）
     file_url: str | None = None       # OSS 直传后的可访问地址（前端直传 OSS 时回传）
-    tags: list[str] | None = None          # 标签（架构图1 标签体系）
     category: str | None = None             # 分类
     department_id: str | None = None        # 归属部门（架构图2/5 部门隔离）
     scope: str | None = "public"            # P0：权限范围 private|department|public

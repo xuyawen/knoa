@@ -43,9 +43,8 @@ class Document(Base):
     # 审核留痕：approve/reject 时写入（谁、何时）
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # 标签/分类/部门归属（架构图2/5：文档维度权限 + 标签体系）
-    # ponytail: tags 存 JSONB 数组，department_id 自引用 department 表做部门隔离
-    tags: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list, server_default="[]")
+    # 分类/部门归属（架构图2/5：文档维度权限）
+    # department_id 自引用 department 表做部门隔离
     category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("department.id"), nullable=True)
     # P0：真实三要素（前端不再造假）

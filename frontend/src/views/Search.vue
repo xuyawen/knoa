@@ -1,17 +1,17 @@
 <script setup lang="ts">
 // 智能搜索主页：搜索框 + 筛选条 + 文档结果列表（带关键词高亮）。
 import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
+import AppModal from '@/components/ui/AppModal.vue'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
-import { searchDocs } from '@/api'
-import type { SearchDocItem, Paginated } from '@/types/api'
+import { searchDocs, getDocumentById } from '@/api'
+import type { SearchDocItem, Paginated, DocumentDetail } from '@/types/api'
 import { useSearchHistory } from '@/composables/useSearchHistory'
 
 const route = useRoute()
-const router = useRouter()
 const toast = useToastStore()
 const { save: saveHistory } = useSearchHistory()
 
@@ -138,9 +138,27 @@ function scopeLabel(scope: string): string {
   return map[scope] || scope
 }
 
-// 从结果/历史/热门跳转过来时复用当前查询
-function gotoQuery(text: string) {
-  router.push({ path: '/search', query: { q: text } })
+// ── 源文档预览（点击搜索结果直接查看原文）──
+const showPreview = ref(false)
+const previewDoc = ref<DocumentDetail | null>(null)
+const previewLoading = ref(false)
+
+async function openPreview(docId: string) {
+  showPreview.value = false
+  previewDoc.value = null
+  previewLoading.value = true
+  try {
+    previewDoc.value = await getDocumentById(docId)
+    showPreview.value = true
+  } catch (e: unknown) {
+    toast.error(`加载文档失败：${errMsg(e)}`)
+  } finally {
+    previewLoading.value = false
+  }
+}
+function closePreview() {
+  showPreview.value = false
+  previewDoc.value = null
 }
 </script>
 
@@ -163,7 +181,7 @@ function gotoQuery(text: string) {
           </button>
         </div>
         <button
-          class="btn btn-primary"
+          class="btn btn-primary btn-sm"
           :disabled="loading"
           @click="runSearch()"
         >
@@ -175,7 +193,7 @@ function gotoQuery(text: string) {
         <CustomSelect v-model="filterScope" :options="scopeOpts" placeholder="权限范围" width="120px" />
         <CustomSelect v-model="filterStatus" :options="statusOpts" placeholder="文档状态" width="110px" />
         <CustomSelect v-model="filterTime" :options="timeOpts" placeholder="更新时间" width="110px" />
-        <button class="btn-link muted" @click="resetFilters">清空</button>
+        <button class="btn btn-ghost btn-sm" @click="resetFilters">清空</button>
       </div>
     </div>
 
@@ -197,7 +215,7 @@ function gotoQuery(text: string) {
           v-for="doc in results.items"
           :key="doc.id"
           class="doc-card"
-          @click="gotoQuery(doc.title)"
+          @click="openPreview(doc.id)"
         >
           <div class="doc-icon" :class="fileIconClass(doc.type)">
             <Icon :name="fileIcon(doc.type)" :size="20" />
@@ -232,6 +250,19 @@ function gotoQuery(text: string) {
       <div class="welcome-title">输入关键词，搜索知识库文档</div>
       <div class="welcome-desc">支持按文件类型、权限范围、审核状态筛选</div>
     </div>
+
+    <!-- 源文档预览弹窗 -->
+    <AppModal :show="showPreview || previewLoading" :title="previewDoc?.title || '文档预览'" wide @close="closePreview">
+      <div v-if="previewLoading" class="modal-hint">加载中…</div>
+      <template v-else-if="previewDoc">
+        <div class="preview-meta">
+          <span class="type-text">{{ previewDoc.type }}</span>
+          <span class="meta-time">{{ fmtTime(previewDoc.updatedAt) }}</span>
+          <span v-if="previewDoc.originalFilename" class="doc-file-name">{{ previewDoc.originalFilename }}</span>
+        </div>
+        <pre class="preview-body">{{ previewDoc.contentMd || '（无内容）' }}</pre>
+      </template>
+    </AppModal>
   </div>
 </template>
 
@@ -256,10 +287,6 @@ function gotoQuery(text: string) {
   align-items: center;
   gap: 12px;
 }
-.search-input-row .btn-primary {
-  min-width: 72px;
-  padding: 0 20px;
-}
 .search-input-wrap {
   flex: 1;
   position: relative;
@@ -274,7 +301,7 @@ function gotoQuery(text: string) {
 }
 .sb-input {
   width: 100%;
-  height: 36px;
+  height: 32px;
   padding: 0 34px 0 38px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -408,6 +435,21 @@ function gotoQuery(text: string) {
   text-align: center;
   color: var(--text-tertiary);
   font-size: 13px;
+}
+
+/* 源文档预览 */
+.modal-hint { padding: 40px 0; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+.preview-meta {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border);
+}
+.type-text { font-size: 12px; font-weight: 600; color: var(--text-secondary); background: var(--bg-subtle); padding: 2px 10px; border-radius: var(--radius-sm); }
+.meta-time { font-size: 12px; color: var(--text-tertiary); }
+.doc-file-name { font-size: 12px; color: var(--text-tertiary); }
+.preview-body {
+  margin: 0; padding: 14px 16px; background: var(--bg-subtle); border-radius: var(--radius-md);
+  font-size: 13px; line-height: 1.75; color: var(--text-primary); white-space: pre-wrap; word-break: break-word;
+  max-height: 52vh; overflow-y: auto;
 }
 
 /* 欢迎态 */

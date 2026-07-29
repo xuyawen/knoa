@@ -9,11 +9,17 @@ import { useToastStore } from '@/stores/toast'
 import { useAuthStore } from '@/stores/auth'
 import { useModelConfig, DEFAULT_MODEL_PREFS, MODEL_OPTIONS, VOICE_OPTIONS } from '@/composables/useModelConfig'
 import { useTtsPreview } from '@/composables/useTtsPreview'
+import { getSystemStatus } from '@/api'
+import type { SystemStatus } from '@/types/api'
 
 const toast = useToastStore()
 const auth = useAuthStore()
 const { state, load, save } = useModelConfig()
 const { previewLoading, previewPlaying, previewVoice } = useTtsPreview()
+
+// 后端运行配置概览（只读）：「当前状态」面板据此渲染，不再用写死值
+// （此前前端写死 text-embedding-3-small，后端早已换成 text-embedding-v4——正是要防的脱节）
+const sysStatus = ref<SystemStatus | null>(null)
 
 // ════════════════════════════════════════
 // Section 0 — 个人偏好（原「系统设置」页并入：模型 / 语音 / 输入习惯）
@@ -55,6 +61,27 @@ const webProviderOptions = [
   { value: 'tavily', label: 'Tavily（LLM 检索专用）' },
   { value: 'ddg', label: 'DuckDuckGo（无需密钥兜底）' },
 ]
+// 依据后端真实配置动态标注未配置密钥的服务，避免用户选了永不生效的选项
+const webProviderOpts = computed(() =>
+  webProviderOptions.map((o) => {
+    if (o.value === 'auto' || o.value === 'ddg') return o
+    const ok = sysStatus.value?.webProviders.includes(o.value) ?? true
+    return ok ? o : { ...o, label: `${o.label}（未配置密钥）` }
+  })
+)
+const PROVIDER_NAMES: Record<string, string> = { bocha: 'BoCha', tavily: 'Tavily', ddg: 'DuckDuckGo' }
+const webProviderText = computed(() =>
+  (sysStatus.value?.webProviders || []).map((p) => PROVIDER_NAMES[p] || p).join(' · ')
+)
+const RERANKER_LABELS: Record<string, string> = {
+  auto: '自动（Cross-Encoder 优先）',
+  'cross-encoder': 'Cross-Encoder 精排',
+  'lexical-semantic': '词法-语义规则',
+  disabled: '已停用',
+}
+const rerankerLabel = computed(() => RERANKER_LABELS[sysStatus.value?.reranker || ''] || sysStatus.value?.reranker || '—')
+// TTS 服务未配置（后端无密钥）：语音播报开了也不会生效，给出警示提示
+const ttsUnavailable = computed(() => sysStatus.value !== null && !sysStatus.value.ttsAvailable)
 
 // ════════════════════════════════════════
 // Section 3 — 回答风格
@@ -72,12 +99,21 @@ const promptPlaceholder = `可选：自定义 AI 人设或回答风格指令。
 留空则使用系统默认 Prompt。`
 const charCount = computed(() => systemPrompt.value.length)
 
+// 滑块填充轨道：品牌色渐变到当前值位置（inline style 覆盖 CSS 灰底）
+function sliderFill(val: number, min = 0, max = 1) {
+  const p = ((val - min) / (max - min)) * 100
+  return { background: `linear-gradient(90deg, var(--brand) ${p}%, var(--border) ${p}%)` }
+}
+
+// 保存成功时间（底部操作栏回显，给用户明确落定感）
+const savedAt = ref('')
+
 // 从服务端加载已保存配置，填充表单（单一真值在服务端）
 onMounted(async () => {
   await load()
   modelName.value = state.preferredModel
   ttsEnabled.value = state.ttsEnabled
-  ttsVoiceType.value = Number(state.prefs.ttsVoiceType) || 1004
+  ttsVoiceType.value = Number(state.prefs.ttsVoiceType) || 1002
   enterToSend.value = state.prefs.enterToSend !== false
   temperature.value = Number(state.prefs.temp)
   topP.value = Number(state.prefs.topP)
@@ -89,6 +125,8 @@ onMounted(async () => {
   systemPrompt.value = String(state.prefs.systemPrompt ?? '')
   showThinking.value = Boolean(state.prefs.showThinking)
   conciseMode.value = Boolean(state.prefs.conciseMode)
+  // 系统状态独立于表单，失败静默（面板回落为加载态/隐藏，不阻塞配置编辑）
+  getSystemStatus().then((s) => { sysStatus.value = s }).catch(() => {})
 })
 
 // ════════════════════════════════════════
@@ -106,13 +144,14 @@ function saveAll() {
     systemPrompt: systemPrompt.value,
     showThinking: showThinking.value,
     conciseMode: conciseMode.value,
-    ttsVoiceType: Number(ttsVoiceType.value) || 1004,
+    ttsVoiceType: Number(ttsVoiceType.value) || 1002,
     enterToSend: enterToSend.value,
   }
   save(modelName.value || null, modelPrefs, ttsEnabled.value)
     .then(() => {
       // 同步用户快照，Chat 的朗读按钮随 ttsEnabled 即时生效
       void auth.fetchMe()
+      savedAt.value = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
       toast.success('配置已保存')
     })
     .catch((e: unknown) => toast.error(e instanceof Error ? e.message : '保存失败，请重试'))
@@ -121,7 +160,7 @@ function saveAll() {
 function resetDefaults() {
   modelName.value = ''
   ttsEnabled.value = false
-  ttsVoiceType.value = 1004
+  ttsVoiceType.value = 1002
   enterToSend.value = true
   temperature.value = 0.3
   topP.value = 0.9
@@ -138,503 +177,412 @@ function resetDefaults() {
 </script>
 
 <template>
-  <div class="secondary-page">
-    <div class="config-grid">
+  <div class="page config-page fade-up">
+    <div class="config-layout">
 
-      <!-- ── Section 0：个人偏好（原「系统设置」页并入） ── -->
-      <section class="card config-section">
-        <div class="section-head">
-          <h3 class="section-title">
-            <span class="section-icon pref">P</span>
-            个人偏好
-          </h3>
-          <p class="section-desc">模型选择、语音播报与输入习惯，与下方参数一同保存</p>
-        </div>
+      <!-- ── 左栏：偏好 + 生成参数 + 回答风格 ── -->
+      <div class="config-main">
 
-        <div class="cfg-form">
-          <div class="cfg-row">
-            <label class="cfg-label">问答模型</label>
-            <div class="cfg-control">
+        <!-- 个人偏好 -->
+        <section class="card cfg-card">
+          <div class="cfg-header">
+            <span class="cfg-icon cfg-icon--muted"><Icon name="user" :size="15" /></span>
+            <div class="cfg-heading">
+              <h3 class="cfg-title">个人偏好</h3>
+              <p class="cfg-subtitle">模型选择、语音播报与输入习惯</p>
+            </div>
+          </div>
+
+          <div class="cfg-body">
+            <div class="field field--row">
+              <label class="field-label">问答模型</label>
               <CustomSelect v-model="modelName" :options="MODEL_OPTIONS" />
-              <span class="cfg-note">所有问答默认使用该模型；选「系统默认」则跟随管理员配置</span>
+              <p class="field-hint">选「系统默认」则跟随管理员配置</p>
             </div>
-          </div>
 
-          <div class="cfg-row">
-            <label class="cfg-label">语音播报</label>
-            <div class="cfg-control cfg-switch-row">
-              <button
-                class="toggle-switch"
-                :class="{ on: ttsEnabled }"
-                @click="ttsEnabled = !ttsEnabled"
-                role="switch"
-                :aria-checked="ttsEnabled"
-              >
-                <span class="toggle-knob" />
-              </button>
-              <span class="cfg-note">{{ ttsEnabled ? '开启：AI 回答下方出现朗读按钮，可一键播报' : '关闭：回答不展示朗读按钮' }}</span>
+            <div class="field field--row">
+              <label class="field-label">语音播报</label>
+              <div class="switch-group">
+                <span class="switch-text">{{ ttsEnabled ? '已开启' : '已关闭' }}</span>
+                <button class="switch" :class="{ on: ttsEnabled }" @click="ttsEnabled = !ttsEnabled" role="switch" :aria-checked="ttsEnabled">
+                  <span class="switch-knob" />
+                </button>
+              </div>
+              <p class="field-hint" :class="{ 'field-hint--warn': ttsUnavailable && ttsEnabled }">{{ ttsUnavailable ? '管理员未配置 TTS 服务，语音播报暂不可用' : (ttsEnabled ? 'AI 回答下方出现朗读按钮' : '回答不展示朗读按钮') }}</p>
             </div>
-          </div>
 
-          <div v-if="ttsEnabled" class="cfg-row">
-            <label class="cfg-label">播报音色</label>
-            <div class="cfg-control">
+            <div v-if="ttsEnabled" class="field field--indent field--row">
+              <label class="field-label">播报音色</label>
               <div class="voice-row">
                 <CustomSelect v-model="ttsVoiceType" :options="VOICE_OPTIONS" />
-                <button
-                  type="button"
-                  class="btn btn-outline btn-sm preview-btn"
-                  :disabled="previewLoading"
-                  @click="previewVoice(Number(ttsVoiceType) || undefined)"
-                >
+                <button type="button" class="btn btn-outline btn-sm" :disabled="previewLoading" @click="previewVoice(Number(ttsVoiceType) || undefined)">
                   <Icon :name="previewPlaying ? 'square' : 'volume'" :size="14" />
                   {{ previewLoading ? '合成中…' : previewPlaying ? '停止' : '试听' }}
                 </button>
               </div>
-              <span class="cfg-note">选择发音人，可先试听再保存</span>
             </div>
-          </div>
 
-          <div class="cfg-row">
-            <label class="cfg-label">Enter 发送</label>
-            <div class="cfg-control cfg-switch-row">
-              <button
-                class="toggle-switch"
-                :class="{ on: enterToSend }"
-                @click="enterToSend = !enterToSend"
-                role="switch"
-                :aria-checked="enterToSend"
-              >
-                <span class="toggle-knob" />
-              </button>
-              <span class="cfg-note">{{ enterToSend ? '开启：对话页 Enter 直接发送、Shift+Enter 换行' : '关闭：Enter 换行、Ctrl+Enter 发送' }}</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ── Section 1：生成参数 ── -->
-      <section class="card config-section">
-        <div class="section-head">
-          <h3 class="section-title">
-            <span class="section-icon gen">G</span>
-            生成参数
-          </h3>
-          <p class="section-desc">控制大模型回答的创造性和长度</p>
-        </div>
-
-        <div class="cfg-form">
-          <div class="cfg-row">
-            <label class="cfg-label">温度</label>
-            <div class="cfg-control">
-              <div class="cfg-slider">
-                <input type="range" min="0" max="1" step="0.1" v-model.number="temperature" class="cfg-range" />
-                <span class="cfg-range-val">{{ temperature.toFixed(1) }}</span>
+            <div class="field field--row">
+              <label class="field-label">Enter 发送</label>
+              <div class="switch-group">
+                <span class="switch-text">{{ enterToSend ? '已开启' : '已关闭' }}</span>
+                <button class="switch" :class="{ on: enterToSend }" @click="enterToSend = !enterToSend" role="switch" :aria-checked="enterToSend">
+                  <span class="switch-knob" />
+                </button>
               </div>
-              <span class="cfg-note">低值→稳定精确（事实查询推荐 0~0.3），高值→创意多样（写作/头脑风暴 0.7~1）</span>
+              <p class="field-hint">{{ enterToSend ? 'Enter 发送 / Shift+Enter 换行' : 'Enter 换行 / Ctrl+Enter 发送' }}</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 生成参数 -->
+        <section class="card cfg-card">
+          <div class="cfg-header">
+            <span class="cfg-icon cfg-icon--muted"><Icon name="settings" :size="15" /></span>
+            <div class="cfg-heading">
+              <h3 class="cfg-title">生成参数</h3>
+              <p class="cfg-subtitle">控制大模型回答的创造性和长度</p>
             </div>
           </div>
 
-          <div class="cfg-row">
-            <label class="cfg-label">Top P</label>
-            <div class="cfg-control">
-              <div class="cfg-slider">
-                <input type="range" min="0" max="1" step="0.05" v-model.number="topP" class="cfg-range" />
-                <span class="cfg-range-val">{{ topP.toFixed(2) }}</span>
+          <div class="cfg-body">
+            <div class="field-row-2col">
+              <div class="field">
+                <div class="field-top">
+                  <label class="field-label">温度</label>
+                  <span class="field-value">{{ temperature.toFixed(1) }}</span>
+                </div>
+                <input type="range" min="0" max="1" step="0.1" v-model.number="temperature" class="range-slider" :style="sliderFill(temperature)" />
+                <div class="range-scale"><span>0</span><span>0.5</span><span>1</span></div>
+                <p class="field-hint">低值稳定精确（推荐 0~0.3），高值创意多样</p>
               </div>
-              <span class="cfg-note">核采样阈值，与 Temperature 二选一调参即可。推荐保持 0.9 左右</span>
-            </div>
-          </div>
 
-          <div class="cfg-row">
-            <label class="cfg-label">最大生成长度</label>
-            <div class="cfg-control">
+              <div class="field">
+                <div class="field-top">
+                  <label class="field-label">Top P</label>
+                  <span class="field-value">{{ topP.toFixed(2) }}</span>
+                </div>
+                <input type="range" min="0" max="1" step="0.05" v-model.number="topP" class="range-slider" :style="sliderFill(topP)" />
+                <div class="range-scale"><span>0</span><span>0.5</span><span>1</span></div>
+                <p class="field-hint">核采样阈值，与温度二选一即可（推荐 0.9）</p>
+              </div>
+            </div>
+
+            <div class="field field--row">
+              <label class="field-label">最大生成长度</label>
               <CustomSelect v-model.number="maxTokens" :options="tokenOptions" />
-              <span class="cfg-note">单次回答的最大 token 数。越长越费时耗资源</span>
+              <p class="field-hint">单次回答最大 token 数</p>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- ── Section 2：检索策略 ── -->
-      <section class="card config-section">
-        <div class="section-head">
-          <h3 class="section-title">
-            <span class="section-icon ret">R</span>
-            检索策略
-          </h3>
-          <p class="section-desc">控制 RAG 检索行为和来源展示</p>
-        </div>
-
-        <div class="cfg-form">
-          <div class="cfg-row">
-            <label class="cfg-label">召回数量 (Top K)</label>
-            <div class="cfg-control">
-              <CustomSelect v-model.number="retrievalTopK" :options="topKOptions" />
-              <span class="cfg-note">每次检索从知识库召回的文档片段数量。越多覆盖面越广但噪声也越多</span>
+        <!-- 回答风格 -->
+        <section class="card cfg-card">
+          <div class="cfg-header">
+            <span class="cfg-icon cfg-icon--muted"><Icon name="sparkles" :size="15" /></span>
+            <div class="cfg-heading">
+              <h3 class="cfg-title">回答风格</h3>
+              <p class="cfg-subtitle">定制 AI 的表达方式和展示选项</p>
             </div>
           </div>
 
-          <div class="cfg-row">
-            <label class="cfg-label">联网搜索</label>
-            <div class="cfg-control cfg-switch-row">
-              <button
-                class="toggle-switch"
-                :class="{ on: webSearchEnabled }"
-                @click="webSearchEnabled = !webSearchEnabled"
-                role="switch"
-                :aria-checked="webSearchEnabled"
-              >
-                <span class="toggle-knob" />
-              </button>
-              <span class="cfg-note">{{ webSearchEnabled ? '已开启：实时信息（汇率/股价/新闻）会优先联网搜索' : '已关闭：仅使用知识库内文档回答' }}</span>
-            </div>
-          </div>
-
-          <div class="cfg-row">
-            <label class="cfg-label">搜索服务</label>
-            <div class="cfg-control">
-              <CustomSelect v-model="webProvider" :options="webProviderOptions" />
-              <span class="cfg-note">指定联网搜索服务商；选「自动」则按后端可用密钥优先级降级</span>
-            </div>
-          </div>
-
-          <div class="cfg-row">
-            <label class="cfg-label">引用来源数</label>
-            <div class="cfg-control">
-              <CustomSelect v-model.number="sourceCount" :options="sourceOptions" />
-              <span class="cfg-note">回答下方展示的参考来源条数上限</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ── Section 3：回答风格 ── -->
-      <section class="card config-section">
-        <div class="section-head">
-          <h3 class="section-title">
-            <span class="section-icon sty">S</span>
-            回答风格
-          </h3>
-          <p class="section-desc">定制 AI 的表达方式和展示选项</p>
-        </div>
-
-        <div class="cfg-form">
-          <div class="cfg-row cfg-row--textarea">
-            <label class="cfg-label">自定义人设指令</label>
-            <div class="cfg-control">
-              <textarea
-                v-model="systemPrompt"
-                class="cfg-textarea"
-                :placeholder="promptPlaceholder"
-                rows="5"
-                maxlength="2000"
-              />
-              <div class="textarea-meta">
-                <span class="char-count">{{ charCount }} / 2000</span>
+          <div class="cfg-body">
+            <div class="field field--full">
+              <label class="field-label">自定义人设指令</label>
+              <div class="textarea-wrap">
+                <textarea
+                  v-model="systemPrompt"
+                  class="cfg-textarea"
+                  :placeholder="promptPlaceholder"
+                  rows="5"
+                  maxlength="2000"
+                />
+                <div class="textarea-meta">
+                  <span class="char-count">{{ charCount }} / 2000</span>
+                </div>
               </div>
-              <span class="cfg-note">追加到系统默认 Prompt 之后，用于定制回答语气、格式约束或领域专精</span>
+              <p class="field-hint">追加到系统默认 Prompt 之后，用于定制语气、格式或领域专精</p>
+            </div>
+
+            <div class="field field--row">
+              <label class="field-label">思考过程</label>
+              <div class="switch-group">
+                <span class="switch-text">{{ showThinking ? '展示' : '隐藏' }}</span>
+                <button class="switch" :class="{ on: showThinking }" @click="showThinking = !showThinking" role="switch" :aria-checked="showThinking">
+                  <span class="switch-knob" />
+                </button>
+              </div>
+            </div>
+            
+            <div class="field field--row">
+              <label class="field-label">简洁模式</label>
+              <div class="switch-group">
+                <span class="switch-text">{{ conciseMode ? '开启' : '关闭' }}</span>
+                <button class="switch" :class="{ on: conciseMode }" @click="conciseMode = !conciseMode" role="switch" :aria-checked="conciseMode">
+                  <span class="switch-knob" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ── 右栏：检索策略 + 系统状态 + 操作 ── -->
+      <div class="config-side">
+
+        <!-- 检索策略 -->
+        <section class="card cfg-card">
+          <div class="cfg-header">
+            <span class="cfg-icon cfg-icon--muted"><Icon name="search" :size="15" /></span>
+            <div class="cfg-heading">
+              <h3 class="cfg-title">检索策略</h3>
+              <p class="cfg-subtitle">控制 RAG 检索行为</p>
             </div>
           </div>
 
-          <div class="cfg-row">
-            <label class="cfg-label">思考过程</label>
-            <div class="cfg-control cfg-switch-row">
-              <button
-                class="toggle-switch"
-                :class="{ on: showThinking }"
-                @click="showThinking = !showThinking"
-                role="switch"
-                :aria-checked="showThinking"
-              >
-                <span class="toggle-knob" />
-              </button>
-              <span class="cfg-note">{{ showThinking ? '展示：回答前显示 AI 的决策推理过程' : '隐藏：直接给出最终答案' }}</span>
+          <div class="cfg-body">
+            <div class="field field--row">
+              <label class="field-label">召回数量 (Top K)</label>
+              <CustomSelect v-model.number="retrievalTopK" :options="topKOptions" />
+            </div>
+
+            <div class="field field--row">
+              <label class="field-label">联网搜索</label>
+              <div class="switch-group">
+                <span class="switch-text">{{ webSearchEnabled ? '已开启' : '已关闭' }}</span>
+                <button class="switch" :class="{ on: webSearchEnabled }" @click="webSearchEnabled = !webSearchEnabled" role="switch" :aria-checked="webSearchEnabled">
+                  <span class="switch-knob" />
+                </button>
+              </div>
+            </div>
+
+            <div v-if="webSearchEnabled" class="field field--indent field--row">
+              <label class="field-label">搜索服务</label>
+              <CustomSelect v-model="webProvider" :options="webProviderOpts" />
+            </div>
+
+            <div class="field field--row">
+              <label class="field-label">引用来源数</label>
+              <CustomSelect v-model.number="sourceCount" :options="sourceOptions" />
+            </div>
+          </div>
+        </section>
+
+        <!-- 系统状态 -->
+        <section class="card cfg-card">
+          <div class="cfg-header">
+            <span class="cfg-icon cfg-icon--muted"><Icon name="info" :size="15" /></span>
+            <div class="cfg-heading">
+              <h3 class="cfg-title">当前状态</h3>
+              <p class="cfg-subtitle">后端运行配置概览（只读）</p>
             </div>
           </div>
 
-          <div class="cfg-row">
-            <label class="cfg-label">简洁模式</label>
-            <div class="cfg-control cfg-switch-row">
-              <button
-                class="toggle-switch"
-                :class="{ on: conciseMode }"
-                @click="conciseMode = !conciseMode"
-                role="switch"
-                :aria-checked="conciseMode"
-              >
-                <span class="toggle-knob" />
-              </button>
-              <span class="cfg-note">{{ conciseMode ? '开启：回答更精炼，省去冗余铺垫' : '关闭：完整详细回答（默认）' }}</span>
+          <div v-if="sysStatus" class="status-list">
+            <div class="status-item">
+              <span class="status-label">推理模型</span>
+              <span class="status-val" :class="{ mono: !!modelName }">{{ modelName || `系统默认 · ${sysStatus.defaultModel}` }}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Embedding</span>
+              <span class="status-val mono">{{ sysStatus.embeddingModel }} · {{ sysStatus.embeddingDim }}d</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">重排器</span>
+              <span class="status-val">{{ rerankerLabel }}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">图谱增强</span>
+              <span class="status-flag"><i class="dot" :class="sysStatus.graphEnabled ? 'dot--on' : 'dot--off'" />{{ sysStatus.graphEnabled ? '已启用' : '已停用' }}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">长期记忆</span>
+              <span class="status-flag"><i class="dot" :class="sysStatus.memoryEnabled ? 'dot--on' : 'dot--off'" />{{ sysStatus.memoryEnabled ? 'Mem0 已启用' : '已停用' }}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">混合检索</span>
+              <span class="status-flag"><i class="dot" :class="sysStatus.esEnabled ? 'dot--on' : 'dot--off'" />{{ sysStatus.esEnabled ? 'ES + pgvector' : 'pgvector' }}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">对话摘要</span>
+              <span class="status-flag"><i class="dot" :class="sysStatus.convSummaryEnabled ? 'dot--on' : 'dot--off'" />{{ sysStatus.convSummaryEnabled ? '已启用' : '已停用' }}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">联网搜索</span>
+              <span class="status-val">{{ webProviderText }}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">语音服务</span>
+              <span class="status-flag"><i class="dot" :class="sysStatus.ttsAvailable ? 'dot--on' : 'dot--off'" />{{ sysStatus.ttsAvailable ? '腾讯云 TTS' : '未配置' }}</span>
             </div>
           </div>
-        </div>
-      </section>
+          <div v-else class="status-empty">正在加载后端配置…</div>
+        </section>
 
-      <!-- ── Section 4：系统状态 ── -->
-      <section class="card config-section status-section">
-        <div class="section-head">
-          <h3 class="section-title">
-            <span class="section-icon info">i</span>
-            当前状态
-          </h3>
-          <p class="section-desc">后端运行配置概览（只读）</p>
-        </div>
-
-        <div class="status-grid">
-          <div class="status-item">
-            <span class="status-label">推理模型</span>
-            <span class="status-value">{{ modelName || '系统默认' }}</span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">Embedding 模型</span>
-            <span class="status-value mono">text-embedding-3-small</span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">向量维度</span>
-            <span class="status-value mono">1024</span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">重排器</span>
-            <span class="status-value">cross-encoder</span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">图谱增强</span>
-            <span class="status-value active">已启用</span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">记忆系统</span>
-            <span class="status-value active">Mem0 已启用</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- ── 操作栏 ── -->
-      <div class="config-actions">
-        <button class="btn btn-outline" @click="resetDefaults">恢复默认</button>
-        <button class="btn btn-primary" @click="saveAll">保存配置</button>
       </div>
 
     </div>
+
+    <!-- ── 底部操作栏（全宽卡片，滚动时 sticky 悬浮，保存始终可触达） ── -->
+    <section class="card cfg-actions-card">
+      <div class="cfg-actions-inner">
+        <span v-if="savedAt" class="save-note"><Icon name="check" :size="13" /> 已于 {{ savedAt }} 保存</span>
+        <button class="btn btn-outline" @click="resetDefaults">恢复默认</button>
+        <button class="btn btn-primary" @click="saveAll">保存配置</button>
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
-/* ── 布局 ── */
-.secondary-page {
-  padding: 20px;
+/* ── 页面布局：左右两栏 ── */
+.config-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 20px;
+  align-items: start;
 }
-.config-grid {
+.config-main {
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
+.config-side {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  position: sticky;
+  top: 0;
+}
 
-/* ── 卡片区块 ── */
-.config-section {
+/* ── 卡片 ── */
+.cfg-card {
   padding: 20px;
 }
-.section-head {
-  margin-bottom: 20px;
+
+/* ── 卡片头部：图标 chip + 标题/副标题堆叠 ── */
+.cfg-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 18px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--border);
 }
-.section-title {
+.cfg-icon {
+  width: 30px; height: 30px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cfg-icon--brand   { background: var(--brand-soft);   color: var(--brand); }
+.cfg-icon--warning { background: var(--warning-soft); color: var(--warning); }
+.cfg-icon--success { background: var(--success-soft); color: var(--success); }
+.cfg-icon--info    { background: var(--info-soft);    color: var(--info); }
+.cfg-icon--muted   { background: var(--bg-subtle);    color: var(--text-secondary); }
+.cfg-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cfg-title {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-primary);
-  margin: 0 0 4px;
+  margin: 0;
+  line-height: 1.35;
+}
+.cfg-subtitle {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+/* ── 表单体 ── */
+.cfg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── 字段（通用） ── */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field--full {
+  max-width: 100%;
+}
+.field--row {
+  display: flex;
+  flex-direction: row; /* 必须显式重置：.field 的 column 会让标签/控件垂直堆叠居中，布局崩坏 */
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.field--row .field-label {
+  padding-top: 0;
+  flex-shrink: 0;
+}
+.field--row > .field-hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+.field--indent {
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+}
+.field-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.field-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+  margin: 0;
+}
+.field-hint--warn { color: var(--warning); }
+.field-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+.field-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand);
+  background: var(--brand-soft);
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', Consolas, monospace);
+  letter-spacing: 0.2px;
+}
+
+/* ── 双列字段行 ── */
+.field-row-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* ── 开关 ── */
+.switch-group {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.section-icon {
-  width: 26px; height: 26px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
-  color: #fff;
-  flex-shrink: 0;
-}
-.section-icon.gen { background: linear-gradient(135deg, #0958d9, #1677ff); }
-.section-icon.pref { background: linear-gradient(135deg, #b45309, #f59e0b); }
-.section-icon.ret { background: linear-gradient(135deg, #15803d, #22c55e); }
-.section-icon.sty { background: linear-gradient(135deg, #7c3aed, #a78bfa); }
-.section-icon.info {
-  background: var(--bg-subtle);
-  color: var(--text-secondary);
-  font-style: italic;
-  font-family: Georgia, serif;
-  font-size: 15px;
-}
-.section-desc {
-  font-size: 12.5px;
-  color: var(--text-tertiary);
-  margin: 0;
-  padding-left: 34px;
-}
-
-/* ── 表单行 ── */
-.cfg-form {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-.cfg-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-.cfg-row--textarea {
-  max-width: 800px;
-  align-items: stretch;
-}
-.cfg-label {
-  width: 110px;
-  flex-shrink: 0;
-  padding-top: 2px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  text-align: right;
-  line-height: 1.4;
-}
-.cfg-control {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.cfg-switch-row {
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.voice-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.voice-row .select { width: 200px; }
-.preview-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-/* ── 滑块 ── */
-.cfg-slider {
-  max-width: 500px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.cfg-range {
-  flex: 1;
-  min-width: 0;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--border);
-  outline: none;
-  -webkit-appearance: none;
-  appearance: none;
-}
-.cfg-range::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 16px; height: 16px;
-  border-radius: 50%;
-  background: var(--brand);
-  border: 2px solid var(--bg-surface);
-  box-shadow: 0 1px 4px rgba(1, 77, 178, 0.35);
-  cursor: pointer;
-}
-.cfg-range::-moz-range-thumb {
-  width: 16px; height: 16px;
-  border-radius: 50%;
-  background: var(--brand);
-  border: 2px solid var(--bg-surface);
-  box-shadow: 0 1px 4px rgba(1, 77, 178, 0.35);
-  cursor: pointer;
-}
-.cfg-range-val {
-  min-width: 36px;
-  text-align: right;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--brand);
-  font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', Consolas, monospace);
-}
-
-/* ── 提示文字 & 徽标 ── */
-.cfg-note {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  line-height: 1.5;
-}
-.cfg-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 8px;
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.7;
-  white-space: nowrap;
-  align-self: flex-start;
-}
-.cfg-badge.pending {
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-.cfg-badge.active {
-  background: var(--success-soft);
-  color: var(--success);
-}
-
-/* ── 文本框 ── */
-.cfg-textarea {
-  width: 100%;
-  min-height: 100px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font-size: 13px;
-  line-height: 1.6;
-  resize: vertical;
-  outline: none;
-  transition: border-color var(--dur-fast) var(--ease-out);
-  font-family: inherit;
-}
-.cfg-textarea:focus {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 2px rgba(9, 88, 217, 0.1);
-}
-.cfg-textarea::placeholder {
-  color: var(--text-tertiary);
-}
-.textarea-meta {
-  display: flex;
-  justify-content: flex-end;
-}
-.char-count {
-  font-size: 11.5px;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', Consolas, monospace);
-}
-
-/* ── 开关 ── */
-.toggle-switch {
+.switch {
   position: relative;
-  width: 40px; height: 22px;
-  border-radius: 11px;
+  width: 36px; height: 20px;
+  border-radius: 10px;
   border: none;
   background: var(--border);
   cursor: pointer;
@@ -642,65 +590,201 @@ function resetDefaults() {
   padding: 0;
   flex-shrink: 0;
 }
-.toggle-switch.on {
-  background: var(--brand);
-}
-.toggle-knob {
+.switch.on { background: var(--brand); }
+.switch-knob {
   position: absolute;
   top: 2px; left: 2px;
-  width: 18px; height: 18px;
+  width: 16px; height: 16px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 3px rgba(0,0,0,.15);
   transition: transform var(--dur-fast) var(--ease-out);
 }
-.toggle-switch.on .toggle-knob {
-  transform: translateX(18px);
+.switch.on .switch-knob {
+  transform: translateX(16px);
+}
+.switch-text {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
 }
 
-/* ── 状态卡片 ── */
-.status-section {
+/* ── 滑块 ── */
+.range-slider {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
 }
-.status-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
+.range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--brand);
+  border: 2px solid var(--bg-surface);
+  box-shadow: 0 1px 4px rgba(9, 88, 217, 0.3);
+  cursor: pointer;
+}
+.range-slider::-moz-range-thumb {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--brand);
+  border: 2px solid var(--bg-surface);
+  box-shadow: 0 1px 4px rgba(9, 88, 217, 0.3);
+  cursor: pointer;
+}
+/* 滑块刻度尺：0 / 中点 / 1 参考值 */
+.range-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-placeholder);
+  font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', Consolas, monospace);
+}
+
+/* ── 文本框 ── */
+.textarea-wrap {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  transition: border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+.textarea-wrap:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(9, 88, 217, 0.1);
+}
+.cfg-textarea {
+  width: 100%;
+  min-height: 110px;
+  padding: 12px 14px;
+  padding-bottom: 28px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.65;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+}
+.cfg-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+.textarea-meta {
+  position: absolute;
+  right: 16px;
+  bottom: 6px;
+  pointer-events: none;
+}
+.char-count {
+  font-size: 11px;
+  color: var(--text-quaternary, var(--text-tertiary));
+  font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', Consolas, monospace);
+  letter-spacing: 0.2px;
+}
+
+/* ── 音色行 ── */
+.voice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.voice-row .select { width: 200px; }
+
+/* ── 状态列表 ── */
+.status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 .status-item {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.status-item:last-child {
+  border-bottom: none;
 }
 .status-label {
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--text-tertiary);
   font-weight: 500;
 }
-.status-value {
-  font-size: 13.5px;
-  font-weight: 600;
+.status-val {
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-primary);
 }
-.status-value.mono {
+.status-val.mono {
   font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', Consolas, monospace);
-  font-size: 12.5px;
+  font-size: 12px;
 }
-.status-value.active {
-  color: #15803d;
+/* 状态指示点：启用绿点亮 / 停用灰点 */
+.status-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot--on {
+  background: var(--success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--success) 55%, transparent);
+}
+.dot--off { background: var(--text-placeholder); }
+.status-empty {
+  padding: 18px 0;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  text-align: center;
 }
 
-/* ── 操作栏 ── */
-.config-actions {
+/* ── 底部操作栏（全宽卡片，滚动时 sticky 悬浮） ── */
+.cfg-actions-card {
+  padding: 14px 20px;
+  margin-top: 20px;
+  box-shadow: var(--shadow-float);
+}
+.cfg-actions-inner {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 10px;
-  padding-top: 4px;
 }
-.config-actions .btn {
-  min-width: 100px;
+.save-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: auto;
+  font-size: 12.5px;
+  color: var(--success);
+}
+
+/* ── 响应式 ── */
+@media (max-width: 900px) {
+  .config-layout {
+    grid-template-columns: 1fr;
+  }
+  .config-side {
+    position: static;
+  }
+  .field-row-2col {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

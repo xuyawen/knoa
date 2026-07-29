@@ -17,6 +17,7 @@ const props = withDefaults(
     columns: DataTableColumn[]
     rows: any[]
     rowKey?: string | ((row: any, index: number) => string | number)
+    rowClass?: (row: any, index: number) => string // 行级动态 class（如拖拽落点提示）
     selectable?: boolean
     selectedKeys?: (string | number)[]
     loading?: boolean
@@ -90,7 +91,11 @@ const cellColspan = () => props.columns.length + (props.selectable ? 1 : 0)
         <tr
           v-for="(row, i) in rows"
           :key="keyOf(row, i)"
-          :class="{ 'is-selected': selectable && selectedSet().has(keyOf(row, i)) }"
+          :data-rowkey="keyOf(row, i)"
+          :class="[
+            { 'is-selected': selectable && selectedSet().has(keyOf(row, i)) },
+            rowClass ? rowClass(row, i) : '',
+          ]"
           @click="onRowClick(row)"
         >
           <td v-if="selectable" class="col-check">
@@ -176,5 +181,6 @@ const cellColspan = () => props.columns.length + (props.selectable ? 1 : 0)
   color: var(--text-tertiary);
   padding: 32px 14px;
   font-size: 13px;
+  opacity: 0.5;
 }
 </style>

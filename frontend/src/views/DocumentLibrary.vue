@@ -8,22 +8,22 @@ import DepartmentSelect from '@/components/ui/DepartmentSelect.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
-import DepartmentTree from '@/components/DepartmentTree.vue'
-import KbMembersModal from '@/components/documents/KbMembersModal.vue'
+import DepartmentTreeSelect from '@/components/ui/DepartmentTreeSelect.vue'
 import DocPreviewModal from '@/components/documents/DocPreviewModal.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
 import { useAuthStore } from '@/stores/auth'
+import { useBackdropClick } from '@/composables/useBackdropClick'
 import {
   getDocuments,
   uploadDocument,
   approveDocument,
   rejectDocument,
   deleteDocument,
+  batchApproveDocuments,
   getDocument,
   getDepartments,
-  getDocumentTags,
   getDocumentTask,
   getDocumentTasks,
 } from '@/api'
@@ -43,20 +43,6 @@ const auth = useAuthStore()
 const kbOptions = computed(() =>
   knowledge.bases.map((b) => ({ label: b.name, value: b.id })),
 )
-const selectedKbName = computed(
-  () => knowledge.bases.find((b) => b.id === selectedKb.value)?.name || '',
-)
-
-/* ---------- KB 成员管理（弹窗逻辑在 KbMembersModal）---------- */
-const showMemberModal = ref(false)
-
-function openManageMembers() {
-  if (!selectedKb.value) {
-    toast.warning('请先选择知识库')
-    return
-  }
-  showMemberModal.value = true
-}
 
 const props = defineProps<{ scope?: string }>()
 const scope = computed(() => props.scope ?? 'mine')
@@ -145,48 +131,27 @@ function openUploadModal() {
   }
   uploadOpen.value = true
 }
+// 上传弹窗：仅蒙层上明确单击才关闭，拖拽手势不关
+const uploadBd = useBackdropClick(closeUploadModal)
+
 function closeUploadModal() {
   if (hasActiveUpload.value) return // 有任务进行中不允许关闭
   uploadOpen.value = false
 }
 
-// P5：部门筛选（部门树）+ 标签筛选
+// P5：部门筛选（部门树）
 const departments = ref<DepartmentNode[]>([])
 const filterDept = ref<string>('')
-const deptPopoverOpen = ref(false)
-const tagOptions = ref<{ label: string; value: string }[]>([])
-const filterTag = ref<string>('')
 
 // 是否有任一筛选器激活（用于显示「重置筛选」按钮）
 const hasActiveFilter = computed(() =>
-  !!(filterType.value || filterStatus.value || filterScope.value || filterDept.value || filterTag.value),
+  !!(filterType.value || filterStatus.value || filterScope.value || filterDept.value),
 )
 function resetFilters() {
   filterType.value = ''
   filterStatus.value = ''
   filterScope.value = ''
   filterDept.value = ''
-  filterTag.value = ''
-}
-
-// 当前选中部门名（用于筛选按钮文案）
-const deptLabel = computed(() => {
-  if (!filterDept.value) return '部门'
-  const find = (nodes: DepartmentNode[]): string => {
-    for (const n of nodes) {
-      if (n.id === filterDept.value) return n.name
-      if (n.children?.length) {
-        const r = find(n.children)
-        if (r) return r
-      }
-    }
-    return ''
-  }
-  return find(departments.value) || '部门'
-})
-function onDeptSelect(id: string | null) {
-  filterDept.value = id || ''
-  deptPopoverOpen.value = false
 }
 
 // P5：上传进度（轮询 DocumentTask）
@@ -232,12 +197,11 @@ function buildQuery(): Record<string, string | number | boolean> {
   if (filterStatus.value) q.status = filterStatus.value
   if (searchQuery.value.trim()) q.q = searchQuery.value.trim()
   if (filterDept.value) q.departmentId = filterDept.value
-  if (filterTag.value) q.tags = filterTag.value
   return q
 }
 
 /* ---------- 数据加载（服务端分页 + 真实过滤）---------- */
-async function loadDocs() {
+async function loadDocs(force = false) {
   if (!selectedKb.value) {
     docs.value = []
     total.value = 0
@@ -246,7 +210,7 @@ async function loadDocs() {
   loading.value = true
   selectedIds.value = []
   try {
-    const res = await getDocuments(selectedKb.value, buildQuery() as any)
+    const res = await getDocuments(selectedKb.value, buildQuery() as any, force)
     docs.value = res.items
     total.value = res.total
   } catch (e: unknown) {
@@ -272,7 +236,6 @@ onMounted(async () => {
   await loadDepartments()
   if (knowledge.bases.length) {
     selectedKb.value = knowledge.bases[0].id
-    await loadTags()
     await loadDocs()
   }
 })
@@ -281,8 +244,6 @@ watch(selectedKb, async () => {
   currentPage.value = 1
   selectedIds.value = []
   filterDept.value = ''
-  filterTag.value = ''
-  await loadTags()
   await loadDocs()
 })
 
@@ -296,20 +257,11 @@ watch([filterType, filterStatus, filterScope], async () => {
   await loadDocs()
 })
 
-// P5：部门 / 标签筛选变化 → 重新拉取（服务端真实过滤）
-watch([filterDept, filterTag], async () => {
+// P5：部门筛选变化 → 重新拉取（服务端真实过滤）
+watch(filterDept, async () => {
   currentPage.value = 1
   await loadDocs()
 })
-
-watch(deptPopoverOpen, (open) => {
-  if (open) document.addEventListener('click', onDocClickOutside)
-  else document.removeEventListener('click', onDocClickOutside)
-})
-function onDocClickOutside(e: MouseEvent) {
-  const el = document.getElementById('dept-filter-wrap')
-  if (el && !el.contains(e.target as Node)) deptPopoverOpen.value = false
-}
 
 // 上传模态框：关闭时清空进度列表，下次打开是干净状态
 watch(uploadOpen, (open) => {
@@ -334,7 +286,6 @@ function trackTimeout(fn: () => void, ms: number) {
 // 同时中止搜索防抖与上传轮询的全部定时器。
 onBeforeUnmount(() => {
   alive = false
-  document.removeEventListener('click', onDocClickOutside)
   if (searchTimer) clearTimeout(searchTimer)
   for (const id of pendingTimers) clearTimeout(id)
   pendingTimers.clear()
@@ -346,18 +297,6 @@ async function loadDepartments() {
     departments.value = await getDepartments()
   } catch (e: unknown) {
     departments.value = []
-  }
-}
-async function loadTags() {
-  if (!selectedKb.value) {
-    tagOptions.value = []
-    return
-  }
-  try {
-    const tags = await getDocumentTags(selectedKb.value)
-    tagOptions.value = [{ label: '全部标签', value: '' }, ...tags.map((t) => ({ label: t, value: t }))]
-  } catch (e: unknown) {
-    tagOptions.value = [{ label: '全部标签', value: '' }]
   }
 }
 
@@ -415,7 +354,8 @@ function fileMeta(type: string): { icon: string; color: string } {
   if (t.includes('DOC')) return { icon: 'doc', color: '#3B82F6' }
   if (t.includes('XLS')) return { icon: 'excel', color: '#22C55E' }
   if (t.includes('PPT')) return { icon: 'pptx', color: '#F59E0B' }
-  if (t.includes('MD') || t.includes('TXT')) return { icon: 'file', color: '#64748B' }
+  if (t.includes('MD')) return { icon: 'file-code', color: '#8B5CF6' }   // 紫色 — Markdown
+  if (t.includes('TXT')) return { icon: 'file-text', color: '#0EA5E9' } // 天蓝 — 纯文本
   return { icon: 'file', color: '#94A3B8' }
 }
 
@@ -645,6 +585,27 @@ function onBatchDelete() {
   if (!selectedIds.value.length || !selectedKb.value) return
   showBatchDelete.value = true
 }
+
+const showBatchApprove = ref(false)
+const approving = ref(false)
+function onBatchApprove() {
+  if (!selectedIds.value.length || !selectedKb.value) return
+  showBatchApprove.value = true
+}
+async function confirmBatchApprove() {
+  showBatchApprove.value = false
+  approving.value = true
+  try {
+    const res = await batchApproveDocuments(selectedKb.value, selectedIds.value)
+    toast.success(`已审核 ${res.approved} 篇，跳过 ${res.skipped} 篇`)
+    selectedIds.value = []
+    await loadDocs()
+  } catch (e: unknown) {
+    toast.error(`批量审核失败：${errMsg(e)}`)
+  } finally {
+    approving.value = false
+  }
+}
 async function confirmBatchDelete() {
   const n = selectedIds.value.length
   showBatchDelete.value = false
@@ -668,12 +629,6 @@ async function confirmBatchDelete() {
 
 <template>
   <div class="docs-page">
-    <!-- 分区说明横幅 -->
-    <div v-if="scope === 'archive'" class="scope-banner warn">
-      <Icon name="archive" :size="14" />
-      <span>文档归档：仅展示状态为「已拒绝」的文档。</span>
-    </div>
-
     <!-- ====== 工具栏（双行：主操作行 + 筛选行）====== -->
     <div class="toolbar card">
       <!-- 第一行：主操作行 -->
@@ -685,15 +640,6 @@ async function confirmBatchDelete() {
           placeholder="选择知识库"
           width="200px"
         />
-        <button
-          v-if="auth.isAdmin && selectedKb && scope !== 'archive'"
-          class="btn btn-ghost btn-sm"
-          title="管理该知识库可访问的成员"
-          @click="openManageMembers"
-        >
-          <Icon name="users" :size="13" /> 管理成员
-        </button>
-
         <!-- 搜索（自适应拉宽） -->
         <div class="search-box">
           <Icon name="search" :size="14" class="search-icon" />
@@ -705,16 +651,6 @@ async function confirmBatchDelete() {
 
         <!-- 右侧操作组 -->
         <div class="toolbar-actions">
-          <!-- 选中时显示批量删除 -->
-          <button
-            v-if="selectedIds.length"
-            class="btn btn-danger btn-sm"
-            :disabled="deleting"
-            @click="onBatchDelete"
-          >
-            <Icon name="trash" :size="13" /> 批量删除（{{ selectedIds.length }}）
-          </button>
-
           <!-- 批量上传（归档视图不显示） -->
           <button
             v-if="scope !== 'archive'"
@@ -726,17 +662,17 @@ async function confirmBatchDelete() {
           </button>
 
           <!-- 刷新 -->
-          <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDocs">
+          <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDocs(true)">
             <Icon name="refresh" :size="15" :class="{ spin: loading }" />
           </button>
 
           <span class="action-divider"></span>
 
           <!-- 视图切换 -->
-          <button class="view-toggle" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">
+          <button class="btn btn-ghost btn-sm view-toggle" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">
             <Icon name="listview" :size="16" />
           </button>
-          <button class="view-toggle" :class="{ active: viewMode === 'grid' }" @click="viewMode = 'grid'">
+          <button class="btn btn-ghost btn-sm view-toggle" :class="{ active: viewMode === 'grid' }" @click="viewMode = 'grid'">
             <Icon name="gridview" :size="16" />
           </button>
         </div>
@@ -751,25 +687,31 @@ async function confirmBatchDelete() {
         <CustomSelect v-model="filterStatus" :options="statusOptions" placeholder="解析状态" width="120px" />
         <CustomSelect v-model="filterScope" :options="scopeOptions" placeholder="权限范围" width="120px" />
 
-        <!-- P5：部门筛选（弹出部门树） -->
-        <div id="dept-filter-wrap" class="dept-filter-wrap">
-          <button class="btn-filter" :class="{ active: !!filterDept }" @click.stop="deptPopoverOpen = !deptPopoverOpen">
-            <Icon name="users" :size="13" />
-            <span>{{ deptLabel }}</span>
-            <Icon name="chevron-down" :size="11" />
-          </button>
-          <div v-if="deptPopoverOpen" class="dept-popover card">
-            <DepartmentTree :nodes="departments" :selected-id="filterDept" @select="onDeptSelect" />
-          </div>
-        </div>
-
-        <!-- P5：标签筛选 -->
-        <CustomSelect v-model="filterTag" :options="tagOptions" placeholder="标签" width="120px" />
+        <!-- P5：部门筛选（弹出部门树，复用 DepartmentTreeSelect） -->
+        <DepartmentTreeSelect v-model="filterDept" :nodes="departments" placeholder="部门" top-label="全部部门" />
 
         <!-- 重置筛选（任一筛选器激活时显示） -->
-        <button v-if="hasActiveFilter" class="reset-btn" @click="resetFilters">
+        <button v-if="hasActiveFilter" class="btn btn-ghost btn-sm" @click="resetFilters">
           <Icon name="close" :size="12" /> 重置筛选
         </button>
+
+        <!-- 选中时显示批量操作（右对齐） -->
+        <div v-if="selectedIds.length" class="batch-actions-right">
+          <button
+            class="btn btn-primary btn-sm"
+            :disabled="approving"
+            @click="onBatchApprove"
+          >
+            <Icon name="check" :size="13" /> {{ approving ? '审核中…' : `批量审批（${selectedIds.length}）` }}
+          </button>
+          <button
+            class="btn btn-danger btn-sm"
+            :disabled="deleting"
+            @click="onBatchDelete"
+          >
+            <Icon name="trash" :size="13" /> 批量删除（{{ selectedIds.length }}）
+          </button>
+        </div>
       </div>
     </div>
 
@@ -779,7 +721,7 @@ async function confirmBatchDelete() {
     <!-- ====== 上传模态框（表单 + 进度条一体化）====== -->
     <Teleport to="body">
       <Transition name="fade">
-        <div v-if="uploadOpen" class="modal-overlay" @click.self="closeUploadModal">
+        <div v-if="uploadOpen" class="modal-overlay" @mousedown="uploadBd.onMouseDown" @mouseup="uploadBd.onMouseUp">
           <div class="upload-modal card">
             <!-- 表单区 -->
             <div class="um-header">
@@ -862,6 +804,10 @@ async function confirmBatchDelete() {
 
     <!-- ====== 列表 / 网格 ====== -->
     <div class="card" v-if="viewMode === 'list'">
+      <div v-if="scope === 'archive'" class="scope-banner warn">
+        <Icon name="archive" :size="14" />
+        <span>文档归档：仅展示状态为「已拒绝」的文档。</span>
+      </div>
       <DataTable
         :columns="docColumns"
         :rows="docs"
@@ -898,10 +844,10 @@ async function confirmBatchDelete() {
           </template>
           <template v-else-if="col.key === 'actions'">
             <div class="row-actions">
-              <button class="action-btn" title="预览" @click="onPreview(row)"><Icon name="eye" :size="15" /></button>
-              <button class="action-btn" title="通过审核" @click="onApprove(row)"><Icon name="check" :size="15" /></button>
-              <button class="action-btn" title="驳回" @click="onReject(row)"><Icon name="close" :size="15" /></button>
-              <button class="action-btn" title="删除" @click="onDelete(row)"><Icon name="trash" :size="15" /></button>
+              <button class="action-btn preview" title="预览" @click="onPreview(row)"><Icon name="eye" :size="15" /></button>
+              <button class="action-btn approve" title="通过审核" @click="onApprove(row)"><Icon name="check" :size="15" /></button>
+              <button class="action-btn reject" title="驳回" @click="onReject(row)"><Icon name="close" :size="15" /></button>
+              <button class="action-btn danger" title="删除" @click="onDelete(row)"><Icon name="trash" :size="15" /></button>
             </div>
           </template>
         </template>
@@ -909,10 +855,23 @@ async function confirmBatchDelete() {
           {{ selectedKb ? '该知识库暂无文档，点击「上传文档」添加' : '请选择左侧知识库' }}
         </template>
       </DataTable>
+      <Pagination
+        v-if="total > 0"
+        v-model:page="currentPage"
+        v-model:page-size="pageSize"
+        :total="total"
+        :page-sizes="[10, 20, 50]"
+        @update:page="loadDocs()"
+        @update:page-size="currentPage = 1; loadDocs()"
+      />
     </div>
 
     <!-- 网格视图 -->
-    <div class="file-grid" v-else>
+    <div class="file-grid card" v-else>
+      <div v-if="scope === 'archive'" class="scope-banner warn">
+        <Icon name="archive" :size="14" />
+        <span>文档归档：仅展示状态为「已拒绝」的文档。</span>
+      </div>
       <div
         v-for="d in docs"
         :key="d.id"
@@ -929,27 +888,16 @@ async function confirmBatchDelete() {
         <div class="doc-card-title" :title="d.title">{{ d.title }}</div>
         <div class="doc-card-meta">{{ d.type }} · {{ fmtTime(d.updatedAt) }}</div>
         <div class="doc-card-actions" @click.stop>
-          <button class="action-btn" title="预览" @click="onPreview(d)"><Icon name="eye" :size="15" /></button>
-          <button class="action-btn" title="通过审核" @click="onApprove(d)"><Icon name="check" :size="15" /></button>
-          <button class="action-btn" title="驳回" @click="onReject(d)"><Icon name="close" :size="15" /></button>
-          <button class="action-btn" title="删除" @click="onDelete(d)"><Icon name="trash" :size="15" /></button>
+          <button class="action-btn preview" title="预览" @click="onPreview(d)"><Icon name="eye" :size="15" /></button>
+          <button class="action-btn approve" title="通过审核" @click="onApprove(d)"><Icon name="check" :size="15" /></button>
+          <button class="action-btn reject" title="驳回" @click="onReject(d)"><Icon name="close" :size="15" /></button>
+          <button class="action-btn danger" title="删除" @click="onDelete(d)"><Icon name="trash" :size="15" /></button>
         </div>
       </div>
       <div v-if="!loading && !docs.length" class="grid-empty">
         {{ selectedKb ? '该知识库暂无文档' : '请选择左侧知识库' }}
       </div>
     </div>
-
-    <!-- ====== 分页 ====== -->
-    <Pagination
-      v-if="total > 0"
-      v-model:page="currentPage"
-      v-model:page-size="pageSize"
-      :total="total"
-      :page-sizes="[10, 20, 50]"
-      @update:page="loadDocs()"
-      @update:page-size="currentPage = 1; loadDocs()"
-    />
 
     <!-- ====== 预览弹窗（含 AI 辅助审核；拆分组件） ====== -->
     <DocPreviewModal
@@ -977,13 +925,13 @@ async function confirmBatchDelete() {
       @close="showBatchDelete = false"
       @confirm="confirmBatchDelete"
     />
-
-    <!-- ====== KB 成员管理（库级授权；拆分组件）====== -->
-    <KbMembersModal
-      :show="showMemberModal"
-      :kb-id="selectedKb"
-      :kb-name="selectedKbName"
-      @close="showMemberModal = false"
+    <ConfirmDialog
+      :show="showBatchApprove"
+      title="批量审核通过"
+      :message="`确认将选中的 ${selectedIds.length} 篇文档批量审核通过？通过后将自动进入检索库。`"
+      confirm-text="批量审核"
+      @close="showBatchApprove = false"
+      @confirm="confirmBatchApprove"
     />
   </div>
 </template>
@@ -994,21 +942,21 @@ async function confirmBatchDelete() {
   flex-direction: column;
   gap: 16px;
 }
-/* 分区说明横幅 */
+/* 分区说明横幅（内嵌列表卡内，与卡片内容融合） */
 .scope-banner {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  border-radius: var(--radius-md);
-  background: var(--brand-soft);
-  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-tertiary);
   font-size: 12.5px;
   line-height: 1.5;
 }
-.scope-banner :deep(svg) { color: var(--brand); flex-shrink: 0; }
-.scope-banner.warn { background: var(--warning-soft); }
-.scope-banner.warn :deep(svg) { color: var(--warning); }
+.scope-banner :deep(svg) { color: var(--text-tertiary); flex-shrink: 0; }
+.scope-banner.warn { border-left-color: var(--border); }
+.scope-banner.warn :deep(svg) { color: var(--text-tertiary); }
 
 /* ---- 工具栏（双行：主操作行 + 筛选行）---- */
 .toolbar {
@@ -1025,6 +973,12 @@ async function confirmBatchDelete() {
   padding: 12px 16px;
 }
 .toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.batch-actions-right {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1055,22 +1009,6 @@ async function confirmBatchDelete() {
   font-size: 12.5px;
   margin-right: 2px;
 }
-.reset-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 30px;
-  padding: 0 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-tertiary);
-  font-size: 12.5px;
-  cursor: pointer;
-  transition: all var(--dur-fast);
-}
-.reset-btn:hover { color: var(--brand); background: var(--brand-soft); }
-
 /* 搜索框（自适应拉宽） */
 .search-box {
   position: relative;
@@ -1253,60 +1191,11 @@ async function confirmBatchDelete() {
   color: var(--danger, #e5484d);
 }
 
-.view-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 33px;
-  height: 33px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: all var(--dur-fast);
-}
-.view-toggle:hover { background: var(--bg-hover); color: var(--text-secondary); }
+/* 视图切换按钮（基于 .btn-ghost，仅覆盖 active 态） */
 .view-toggle.active { background: var(--brand); color: var(--text-on-brand); border-color: var(--brand); }
 .icon-btn:disabled { opacity: 0.5; cursor: default; }
 .spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-/* 危险按钮（批量删除用） */
-.btn-danger { background: var(--danger); color: var(--text-on-brand); border-color: var(--danger); }
-.btn-danger:hover { background: var(--danger-hover); }
-.btn-danger:disabled { opacity: 0.6; }
-
-/* ---- 部门筛选 + 弹出树 ---- */
-.dept-filter-wrap { position: relative; }
-.btn-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all var(--dur-fast);
-}
-.btn-filter:hover { border-color: var(--brand); color: var(--text-primary); }
-.btn-filter.active { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
-.dept-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 30;
-  min-width: 240px;
-  max-height: 360px;
-  overflow: auto;
-  padding: 4px;
-  box-shadow: var(--shadow-pop);
-}
 
 /* ---- 上传进度条（模态框内）---- */
 .up-item {
@@ -1416,19 +1305,6 @@ async function confirmBatchDelete() {
   align-items: center;
   gap: 4px;
 }
-.action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  background: transparent;
-  cursor: pointer;
-  transition: all var(--dur-fast);
-}
-.action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 .empty-cell {
   text-align: center;

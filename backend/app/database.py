@@ -4,7 +4,7 @@ import os
 import sys
 import uuid
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -81,9 +81,8 @@ async def _migrate_columns(conn) -> None:
         await conn.execute(
             text(f"ALTER TABLE chat_session ADD COLUMN IF NOT EXISTS {name} {typ}")
         )
-    # 架构图 A3：Document 标签/分类/部门，KnowledgeBase 标签/分类（幂等补列）
+    # 架构图 A3：Document 分类/部门，KnowledgeBase 标签/分类（幂等补列）
     doc_cols = [
-        ("tags", "JSONB"),
         ("category", "VARCHAR(50)"),
         ("department_id", "UUID"),
     ]
@@ -167,6 +166,17 @@ async def _seed_roles() -> None:
         for idx, (key, spec) in enumerate(BUILTIN_ROLES.items()):
             if key in existing:
                 role_id = existing[key]
+                # 已存在的内置角色：同步种子定义中的名称/描述（保持与代码定义一致）
+                await session.execute(
+                    update(Role)
+                    .where(Role.id == role_id)
+                    .values(
+                        name=spec["name"],
+                        description=spec["description"],
+                        sort_order=idx,
+                        is_builtin=True,
+                    )
+                )
             else:
                 role = Role(
                     id=uuid.uuid4(),

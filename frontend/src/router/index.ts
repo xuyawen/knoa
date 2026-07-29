@@ -13,7 +13,6 @@ import Login from '@/views/Login.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 
 const DashboardOverview = () => import('@/views/DashboardOverview.vue')
-const DashboardAnalytics = () => import('@/views/DashboardAnalytics.vue')
 const DashboardDocs = () => import('@/views/DashboardDocs.vue')
 const DashboardUsers = () => import('@/views/DashboardUsers.vue')
 const DashboardPopular = () => import('@/views/DashboardPopular.vue')
@@ -36,6 +35,8 @@ const DocumentsMine = () => import('@/views/DocumentsMine.vue')
 const DocumentsPublic = () => import('@/views/DocumentsPublic.vue')
 const DocumentsDepartment = () => import('@/views/DocumentsDepartment.vue')
 const DocumentsArchive = () => import('@/views/DocumentsArchive.vue')
+const KnowledgeBases = () => import('@/views/KnowledgeBases.vue')
+const KbMembers = () => import('@/views/KbMembers.vue')
 const NotFound = () => import('@/views/NotFound.vue')
 
 // 子菜单分区 -> 路由段 + 默认 section
@@ -48,11 +49,14 @@ const routes: RouteRecordRaw[] = [
     children: [
       // ===== 首页大盘（每个页面一个文件）=====
       { path: 'dashboard', name: 'dashboard', component: DashboardOverview, meta: { title: '首页大盘', icon: 'dashboard' } },
-      { path: 'dashboard/analytics', name: 'dash-analytics', component: DashboardAnalytics, meta: { title: '首页大盘', icon: 'chart' } },
       { path: 'dashboard/docs', name: 'dash-docs', component: DashboardDocs, meta: { title: '首页大盘', icon: 'doc' } },
       { path: 'dashboard/users', name: 'dash-users', component: DashboardUsers, meta: { title: '首页大盘', icon: 'users' } },
       { path: 'dashboard/popular', name: 'dash-popular', component: DashboardPopular, meta: { title: '首页大盘', icon: 'fire' } },
       { path: 'dashboard/announcements', name: 'dash-announcements', component: Announcements, meta: { title: '首页大盘', icon: 'bell' } },
+
+      // ===== 知识库（列表增删改 + 成员管理）=====
+      { path: 'knowledge', name: 'knowledge', component: KnowledgeBases, meta: { title: '知识库', icon: 'folder' } },
+      { path: 'knowledge/members', name: 'knowledge-members', component: KbMembers, meta: { title: '知识库', icon: 'users' } },
 
       // ===== 文档管理（每个页面一个文件，复用 DocumentLibrary 组件）=====
       { path: 'documents', name: 'documents', component: DocumentsMine, meta: { title: '文档管理', icon: 'doc' } },

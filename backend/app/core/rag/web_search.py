@@ -17,6 +17,7 @@ Provider 策略（优先级从高到低）：
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import re
@@ -155,27 +156,45 @@ class WebSearcher:
 
 
     # ── BoCha 博查 web-search（需 key，中文检索质量最佳）──
-    async def _search_bocha(self, query: str, max_results: int) -> list[dict]:
-        resp = await self._client.post(
-            "https://api.bocha.cn/v1/web-search",
-            headers={
-                "Authorization": f"Bearer {settings.BOCHA_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "query": query,
-                "count": max_results,
-                "freshness": "noLimit",
-                "summary": True,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        # 博查在 key 无效/配额耗尽时仍返回 HTTP 200，需靠顶层 code 判断真实成败，
-        # 否则会把空数据误判为成功，阻断向 Tavily/DDG 的降级。
-        if data.get("code") not in (200, None):
-            raise RuntimeError(f"BoCha error code={data.get('code')} msg={data.get('msg')}")
-        return self._parse_bocha(data, max_results)
+    async def _search_bocha(self, query: str, max_results: int, retries: int = 2) -> list[dict]:
+        """BoCha 免费额度偶发 429 / 网络抖动：对可重试错误做退避重试，
+        避免一遇限流就整条搜索落空、模型被迫答「无法获取实时信息」。
+
+        仅对 429 限流与传输/超时类错误重试；key 无效、配额耗尽（业务 code 非 200）
+        属不可重试错误，直接抛出以走 Tavily/DDG 兜底。"""
+        last_err: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                resp = await self._client.post(
+                    "https://api.bocha.cn/v1/web-search",
+                    headers={
+                        "Authorization": f"Bearer {settings.BOCHA_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "query": query,
+                        "count": max_results,
+                        "freshness": "noLimit",
+                        "summary": True,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                # 博查在 key 无效/配额耗尽时仍返回 HTTP 200，需靠顶层 code 判断真实成败，
+                # 否则会把空数据误判为成功，阻断向 Tavily/DDG 的降级。
+                if data.get("code") not in (200, None):
+                    raise RuntimeError(f"BoCha error code={data.get('code')} msg={data.get('msg')}")
+                return self._parse_bocha(data, max_results)
+            except (httpx.HTTPStatusError, httpx.TransportError, httpx.TimeoutException) as e:
+                last_err = e
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                # 只有 429 限流或传输/超时类错误才退避重试；其余（4xx 业务错误）直接抛出
+                if attempt < retries and (status == 429 or isinstance(e, (httpx.TransportError, httpx.TimeoutException))):
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                raise
+        assert last_err is not None
+        raise last_err
 
     @staticmethod
     def _parse_bocha(data: dict, max_results: int) -> list[dict]:

@@ -63,6 +63,8 @@ export interface KBUpdate {
   name?: string | null
   icon?: string | null
   description?: string | null
+  category?: string | null
+  tags?: string[]
 }
 
 export interface KBReorder {
@@ -432,8 +434,9 @@ export interface TrendResponse {
   points: TrendPoint[]
 }
 
-export interface DocCategory {
-  category: string
+export interface KbDistribution {
+  kbId: string
+  name: string
   count: number
 }
 
@@ -451,7 +454,7 @@ export interface UserStats {
   activeUsers: number
   totalUsers: number | null
   newUsers30: number | null
-  byRole: { role: string; count: number }[]
+  byRole: { role: string; name: string; count: number }[]
   byStatus: { status: string; count: number }[]
   recentNew: RecentTrendPoint[]
   activeTrend: RecentTrendPoint[]
@@ -459,7 +462,7 @@ export interface UserStats {
 
 export interface DocStats {
   total: number
-  byCategory: DocCategory[]
+  byKb: KbDistribution[]
   byStatus: { status: string; count: number }[]
   byType: DocTypeItem[]
   recentTrend: RecentTrendPoint[]
@@ -519,6 +522,21 @@ export interface SettingsUpdate {
   preferredModel?: string | null
   ttsEnabled?: boolean
   modelPrefs?: Record<string, unknown>
+}
+
+/** 后端运行配置概览（只读、非机密）：模型配置页「当前状态」面板数据源，
+ *  避免前端写死值与后端实际配置脱节。 */
+export interface SystemStatus {
+  defaultModel: string        // 「系统默认」实际对应的 LLM 模型
+  embeddingModel: string
+  embeddingDim: number
+  reranker: string            // auto | cross-encoder | lexical-semantic | disabled
+  graphEnabled: boolean
+  memoryEnabled: boolean
+  esEnabled: boolean          // ES 混合检索；false = pgvector 回退
+  convSummaryEnabled: boolean
+  ttsAvailable: boolean       // 腾讯 TTS 密钥是否已配置
+  webProviders: string[]      // 可用联网搜索服务（含 ddg 免密钥兜底）
 }
 
 /** 语音合成结果：base64 音频 + MIME 类型，前端拼 data URI 播放。P8 新增。 */

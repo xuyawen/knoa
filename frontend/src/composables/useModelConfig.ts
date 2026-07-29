@@ -18,7 +18,7 @@ export const DEFAULT_MODEL_PREFS: Record<string, unknown> = {
   systemPrompt: '',
   showThinking: true,
   conciseMode: false,
-  ttsVoiceType: 1004, // 腾讯 TTS 音色：1002 成熟男声 | 1004 温润女声 | 1050 新闻女声
+  ttsVoiceType: 1002, // 腾讯 TTS 音色：1002 温润女声 | 1004 成熟男声 | 1050 新闻女声（实测 1004 为男声，ID↔名称已校正）
   enterToSend: true, // 对话页 Enter 发送（关闭后 Ctrl+Enter 发送）
 }
 
@@ -32,9 +32,10 @@ export const MODEL_OPTIONS = [
 ]
 
 // 腾讯 TTS 音色选项（与后端 config 注释一致）
+// 注意：实测 1004 播放为男声、1002 为女声，此前 ID↔名称标反，已对调校正。
 export const VOICE_OPTIONS = [
-  { value: 1004, label: '温润女声（默认）' },
-  { value: 1002, label: '成熟男声' },
+  { value: 1002, label: '温润女声（默认）' },
+  { value: 1004, label: '成熟男声' },
   { value: 1050, label: '新闻女声' },
 ]
 

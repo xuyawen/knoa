@@ -3,6 +3,7 @@
 // 复用于所有弹框场景（确认框、会话过期、详情等），配色走 token。
 import { watch, onBeforeUnmount } from 'vue'
 import Icon from './Icon.vue'
+import { useBackdropClick } from '@/composables/useBackdropClick'
 
 const props = withDefaults(
   defineProps<{
@@ -20,6 +21,10 @@ function onBackdrop() {
   if (props.closeOnBackdrop) emit('close')
 }
 
+// 蒙层关闭：仅在蒙层自身上"明确单击"（无拖拽位移）时触发，
+// 从弹窗拖进蒙层（或反之）不再误关。
+const bd = useBackdropClick(onBackdrop)
+
 // 打开时锁滚动；组件在打开状态下被卸载（路由切换/父组件销毁）时也复位，
 // 否则 body 会永久 overflow:hidden 导致页面无法滚动。
 watch(
@@ -36,7 +41,7 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="show" class="overlay" @click.self="onBackdrop">
+      <div v-if="show" class="overlay" @mousedown="bd.onMouseDown" @mouseup="bd.onMouseUp">
         <div class="modal" :class="{ wide }" role="dialog" aria-modal="true">
           <header v-if="title || $slots.head" class="modal-head">
             <slot name="head">

@@ -4,6 +4,7 @@ import { ref, computed } from 'vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { useGraphData } from '@/composables/useGraphData'
+import { useBackdropClick } from '@/composables/useBackdropClick'
 import '@/assets/graph.css'
 
 const {
@@ -14,6 +15,7 @@ const {
 /* ---- 多选 + 合并 ---- */
 const selectedIds = ref<Set<string>>(new Set())
 const mergeDialogVisible = ref(false)
+const mergeBd = useBackdropClick(() => { mergeDialogVisible.value = false })
 const mergeLabel = ref('')
 const mergeType = ref('')
 
@@ -57,8 +59,8 @@ async function confirmMerge() {
           <Icon name="layers" :size="13" /> 合并{{ selectedIds.size >= 2 ? `（${selectedIds.size}）` : '' }}
         </button>
       </div>
-      <div class="node-scroll">
-        <table class="node-table">
+      <div class="data-table-wrap">
+        <table class="data-table">
           <thead>
             <tr>
               <th class="col-check"><input type="checkbox" :checked="allPageSelected" @change="toggleSelectAll" /></th>
@@ -66,7 +68,7 @@ async function confirmMerge() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in pagedNodes" :key="row.id" :class="{ selected: selectedIds.has(row.id) }">
+            <tr v-for="row in pagedNodes" :key="row.id" :class="{ 'is-selected': selectedIds.has(row.id) }">
               <td class="col-check"><input type="checkbox" :checked="selectedIds.has(row.id)" @change="toggleSelect(row.id)" /></td>
               <td class="td-label">{{ row.label }}</td>
               <td>{{ row.type || '—' }}</td>
@@ -88,7 +90,7 @@ async function confirmMerge() {
 
     <!-- 合并弹窗 -->
     <Teleport to="body">
-      <div v-if="mergeDialogVisible" class="modal-mask" @click.self="mergeDialogVisible = false">
+      <div v-if="mergeDialogVisible" class="modal-mask" @mousedown="mergeBd.onMouseDown" @mouseup="mergeBd.onMouseUp">
         <div class="modal-box">
           <div class="modal-title">合并实体</div>
           <p class="modal-desc">将已选的 {{ selectedIds.size }} 个实体合并为一个新节点，所有关联边将重定向。</p>
@@ -110,30 +112,33 @@ async function confirmMerge() {
 .node-card { padding: 20px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .panel-title { font-size: 15px; font-weight: 700; }
-.node-scroll { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--border-light, rgba(255,255,255,.06)); }
-.node-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.node-table th {
-  padding: 10px 14px;
+
+/* 复用全局 DataTable 样式，仅保留节点页特有覆盖 */
+.data-table-wrap { width: 100%; overflow-x: auto; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th {
   text-align: left;
-  background: var(--bg-tertiary, rgba(0,0,0,.15));
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .02em;
-  border-bottom: 1px solid var(--border-light, rgba(255,255,255,.06));
-}
-.node-table td {
   padding: 11px 14px;
-  border-bottom: 1px solid var(--border-light, rgba(255,255,255,.04));
-  transition: background var(--dur-fast);
+  color: var(--text-tertiary);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
 }
-.node-table tbody tr:hover { background: var(--bg-hover, rgba(255,255,255,.03)); }
-.node-table tbody tr.selected { background: var(--accent-blue-soft, rgba(59,130,246,.12)); }
-.node-table tbody tr:last-child td { border-bottom: none; }
-.col-check { width: 40px; text-align: center; }
-.col-check input[type="checkbox"] { cursor: pointer; accent-color: var(--brand); }
-.td-label { font-weight: 500; color: var(--text-primary); }
-.empty-cell { text-align: center; color: var(--text-tertiary); padding: 36px 0; }
+.data-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+.data-table tbody tr:hover { background: var(--bg-hover); }
+.data-table tbody tr.is-selected { background: var(--brand-soft); }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.col-check { width: 44px; padding-left: 14px; padding-right: 8px; text-align: center; }
+.col-check input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--brand); }
+.td-label { font-weight: 600; color: var(--text-primary); }
+.empty-cell { text-align: center; color: var(--text-tertiary); padding: 32px 14px; font-size: 13px; opacity: 0.5; }
 
 /* 合并弹窗 */
 .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 1000; }

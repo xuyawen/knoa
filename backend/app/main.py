@@ -69,6 +69,37 @@ from app.routers import (
 )
 
 
+async def _rollup_trending():
+    """将昨日 Redis 热搜计数落盘到 Trending 表。
+
+    幂等：若 DB 已存在昨日记录则跳过（重启不重复写入）。
+    best-effort：Redis 不可用 / 无数据时静默返回，不阻塞启动。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from redis.exceptions import RedisError
+
+    from app.db import Trending
+    from app.deps import get_redis
+
+    yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
+    try:
+        counts = await get_redis().get_day_counts(yesterday)
+    except RedisError:
+        return
+    if not counts:
+        return
+    async with AsyncSessionLocal() as session:
+        exists = await session.scalar(
+            select(Trending.id).where(Trending.date == yesterday).limit(1)
+        )
+        if exists:
+            return
+        for q, c in counts:
+            session.add(Trending(question=q, count=c, date=yesterday))
+        await session.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 生产环境配置强校验（弱密钥/弱口令/维度错配 → 直接启动失败，fail-fast）
@@ -77,6 +108,9 @@ async def lifespan(app: FastAPI):
     # 确保所有模型表已创建（幂等，已存在的表不受影响）
     from app.database import init_db
     await init_db()
+    # 热搜落盘：将昨日 Redis 计数写入 Trending 表（幂等），
+    # 保证 Redis 重启 / key 过期后榜单仍有历史数据可查。
+    await _rollup_trending()
     # Phase 2: 首次启动且无任何用户时，自动创建初始管理员（幂等）
     async with AsyncSessionLocal() as session:
         # 内置 admin 角色 id（_seed_roles 已保证存在）

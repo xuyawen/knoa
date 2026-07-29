@@ -12,7 +12,7 @@ import type { Announcement, AnnouncementCreate } from '@/types/api'
 const auth = useAuthStore()
 
 const announcements = ref<Announcement[]>([])
-async function loadAnnouncements() { announcements.value = (await getAnnouncements()).items }
+async function loadAnnouncements(force = false) { announcements.value = (await getAnnouncements(1, 20, force)).items }
 
 const showAnnModal = ref(false)
 const editingAnn = ref<Announcement | null>(null)
@@ -79,6 +79,7 @@ loadAnnouncements()
   <div class="dashboard">
     <div class="ann-panel card">
       <div v-if="auth.isAdmin" class="ann-toolbar">
+        <button class="icon-btn" title="刷新" @click="loadAnnouncements(true)"><Icon name="refresh" :size="14" /></button>
         <button class="btn btn-primary btn-sm" @click="openCreateAnn">
           <Icon name="plus" :size="14" /> 新建公告
         </button>

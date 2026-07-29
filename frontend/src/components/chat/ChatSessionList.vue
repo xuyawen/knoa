@@ -98,7 +98,7 @@ function commitRename(id: string) {
       <div v-if="loadingMore" class="conv-loading-more">
         <span class="dot-sm" /><span class="dot-sm" /><span class="dot-sm" />
       </div>
-      <p v-if="allLoaded && sessions.length > 0" class="conv-all-done">已全部加载</p>
+      <p v-if="allLoaded && total >= 20" class="conv-all-done">已全部加载</p>
     </div>
   </aside>
 </template>

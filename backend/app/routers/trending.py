@@ -1,7 +1,7 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import Trending, User
@@ -18,26 +18,35 @@ async def get_trending(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    # 优先从 Redis sorted set 读今日实时数据
+    """热门搜索榜：近 7 天滑窗聚合（搜索与问答均计数）。
+
+    数据源优先级：Redis 各日 key 合并 → DB 近 7 天 SUM → DB 全量（冷启动兜底）。
+    """
     redis = get_redis()
     try:
-        raw = await redis.get_trending(10)
+        raw = await redis.get_trending_range(days=7, limit=10)
         if raw:
             return [TrendingItemOut(question=q, count=c) for q, c in raw]
     except RedisError:
         pass  # ponytail: Redis 不可用时静默回退 DB
 
-    # 回退到 DB 种子数据
+    # 回退到 DB：近 7 天按问题聚合
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=6)
     result = await db.execute(
-        select(Trending)
-        .where(Trending.date == datetime.now(timezone.utc).date())
-        .order_by(Trending.count.desc())
+        select(Trending.question, func.sum(Trending.count).label("total"))
+        .where(Trending.date >= cutoff)
+        .group_by(Trending.question)
+        .order_by(func.sum(Trending.count).desc())
         .limit(10)
     )
-    rows = result.scalars().all()
+    rows = result.all()
     if not rows:
+        # 冷启动兜底：近 7 天无任何落盘数据时用全历史（种子数据）
         result = await db.execute(
-            select(Trending).order_by(Trending.count.desc()).limit(10)
+            select(Trending.question, func.sum(Trending.count).label("total"))
+            .group_by(Trending.question)
+            .order_by(func.sum(Trending.count).desc())
+            .limit(10)
         )
-        rows = result.scalars().all()
-    return [TrendingItemOut(question=r.question, count=r.count) for r in rows]
+        rows = result.all()
+    return [TrendingItemOut(question=r.question, count=int(r.total)) for r in rows]

@@ -20,13 +20,14 @@ import type {
   KGGapSignal,
   DashboardMetrics,
   TrendResponse,
-  DocCategory,
+  KbDistribution,
   OperationsResponse,
   Announcement,
   AnnouncementCreate,
   AnnouncementUpdate,
   Settings,
   SettingsUpdate,
+  SystemStatus,
   TtsResult,
   DocStats,
   UserStats,
@@ -49,12 +50,19 @@ import type {
 } from '@/types/api'
 import { TokenExpiredError, request, requestVoid, requestRaw } from './http'
 import { report } from '../lib/monitor'
+import { cachedDict, invalidateDict, invalidateDictPrefix } from './cache'
 
 export async function getKnowledgeBases(
   page = 1,
   size = 20,
+  q?: string,
+  force = false,
 ): Promise<KnowledgeBasesResponse> {
-  return request(`/api/knowledge-bases?page=${page}&size=${size}`)
+  if (force) invalidateDictPrefix('kb:')
+  const qs = new URLSearchParams({ page: String(page), size: String(size) })
+  if (q) qs.set('q', q)
+  const key = `kb:${page}:${size}:${q ?? ''}`
+  return cachedDict(key, () => request<KnowledgeBasesResponse>(`/api/knowledge-bases?${qs.toString()}`))
 }
 
 /** 新建知识库（菜单级库：合规管理 / 广告运营 …）。 */
@@ -62,7 +70,10 @@ export async function createKnowledgeBase(payload: {
   name: string
   icon?: string | null
   description?: string | null
+  category?: string | null
+  tags?: string[]
 }): Promise<{ id: string; name: string; icon: string }> {
+  invalidateDictPrefix('kb:')
   return request('/api/knowledge-bases', { method: 'POST', json: payload })
 }
 
@@ -103,18 +114,21 @@ export async function getKbEffectiveMembers(kbId: string): Promise<EffectiveMemb
 }
 
 /** 列出当前用户全部长期记忆（按时间倒序）。 */
-export async function getMemories(): Promise<MemoryItem[]> {
-  const data = await request<{ memories: MemoryItem[] }>('/api/memories')
+export async function getMemories(force = false): Promise<MemoryItem[]> {
+  if (force) invalidateDict('mem')
+  const data = await cachedDict('mem', () => request<{ memories: MemoryItem[] }>('/api/memories'))
   return data.memories
 }
 
 /** 删除一条记忆。 */
 export async function deleteMemory(id: string): Promise<void> {
+  invalidateDict('mem')
   await requestVoid(`/api/memories/${id}`, { method: 'DELETE' })
 }
 
 /** 清空当前用户全部记忆。 */
 export async function clearMemories(): Promise<number> {
+  invalidateDict('mem')
   const data = await request<{ deleted?: number }>('/api/memories', { method: 'DELETE' })
   return data.deleted ?? 0
 }
@@ -143,8 +157,10 @@ export async function searchDocs(
 /** 列出某知识库下的文档（服务端分页 + 真实过滤）。 */
 export async function getDocuments(
   kbId: string,
-  opts?: { page?: number; size?: number; scope?: string; type?: string; status?: string; q?: string; mine?: boolean; departmentId?: string; tags?: string },
+  opts?: { page?: number; size?: number; scope?: string; type?: string; status?: string; q?: string; mine?: boolean; departmentId?: string },
+  force = false,
 ): Promise<DocumentList> {
+  if (force) invalidateDictPrefix(`doc:${kbId}:`)
   const params = new URLSearchParams()
   if (opts?.page) params.set('page', String(opts.page))
   if (opts?.size) params.set('size', String(opts.size))
@@ -154,9 +170,9 @@ export async function getDocuments(
   if (opts?.q) params.set('q', opts.q)
   if (opts?.mine) params.set('mine', 'true')
   if (opts?.departmentId) params.set('department_id', opts.departmentId)
-  if (opts?.tags) params.set('tags', opts.tags)
   const qs = params.toString()
-  return request(`/api/knowledge-bases/${kbId}/documents${qs ? `?${qs}` : ''}`)
+  const key = `doc:${kbId}:${qs}`
+  return cachedDict(key, () => request<DocumentList>(`/api/knowledge-bases/${kbId}/documents${qs ? `?${qs}` : ''}`))
 }
 
 /** 上传单篇文档（.md / .txt / .docx / .pdf）。
@@ -175,6 +191,7 @@ export async function uploadDocument(
   if (opts?.scope) body.scope = opts.scope
   // 部门文档：显式指定归属部门；scope=department 不传则后端默认取上传者部门
   if (opts?.departmentId) body.departmentId = opts.departmentId
+  invalidateDictPrefix(`doc:${kbId}:`)
   return request(`/api/knowledge-bases/${kbId}/documents`, { method: 'POST', json: body })
 }
 
@@ -203,16 +220,28 @@ export async function getDocumentById(docId: string): Promise<DocumentDetail> {
 
 /** 审核通过：触发摄入，文档进入检索库。 */
 export async function approveDocument(kbId: string, docId: string): Promise<DocumentItem> {
+  invalidateDictPrefix(`doc:${kbId}:`)
   return request(`/api/knowledge-bases/${kbId}/documents/${docId}/approve`, { method: 'POST' })
+}
+
+/** 批量审核通过 */
+export async function batchApproveDocuments(kbId: string, docIds: string[]): Promise<{ approved: number; skipped: number; failed: number }> {
+  invalidateDictPrefix(`doc:${kbId}:`)
+  return request(`/api/knowledge-bases/${kbId}/documents/batch-approve`, {
+    method: 'POST',
+    json: { doc_ids: docIds },
+  })
 }
 
 /** 审核驳回：状态改为已拒绝，不摄入。 */
 export async function rejectDocument(kbId: string, docId: string): Promise<DocumentItem> {
+  invalidateDictPrefix(`doc:${kbId}:`)
   return request(`/api/knowledge-bases/${kbId}/documents/${docId}/reject`, { method: 'POST' })
 }
 
 /** 删除文档：级联清理 chunk / ES / 图谱 / 对象存储。 */
 export async function deleteDocument(kbId: string, docId: string): Promise<void> {
+  invalidateDictPrefix(`doc:${kbId}:`)
   await requestVoid(`/api/knowledge-bases/${kbId}/documents/${docId}`, { method: 'DELETE' })
 }
 
@@ -221,6 +250,7 @@ export async function aiReviewDocument(
   kbId: string,
   docId: string,
 ): Promise<AIReview> {
+  invalidateDictPrefix(`doc:${kbId}:`)
   return request(`/api/knowledge-bases/${kbId}/documents/${docId}/ai-review`, { method: 'POST' })
 }
 
@@ -240,13 +270,16 @@ export async function getSessions(
 /** 检索记录分页（服务端分页 + 来源类型过滤）。 */
 export async function getRecords(
   opts?: { page?: number; size?: number; filter?: string },
+  force = false,
 ): Promise<RecordsResponse> {
+  if (force) invalidateDictPrefix('rec:')
   const params = new URLSearchParams()
   if (opts?.page) params.set('page', String(opts.page))
   if (opts?.size) params.set('size', String(opts.size))
   if (opts?.filter) params.set('f', opts.filter)
   const qs = params.toString()
-  return request(`/api/records${qs ? `?${qs}` : ''}`)
+  const key = `rec:${qs}`
+  return cachedDict(key, () => request<RecordsResponse>(`/api/records${qs ? `?${qs}` : ''}`))
 }
 
 /** 新建空会话，返回 id。 */
@@ -294,11 +327,13 @@ export async function updateKnowledgeBase(
   id: string,
   payload: KBUpdate,
 ): Promise<KnowledgeBase> {
+  invalidateDictPrefix('kb:')
   return request(`/api/knowledge-bases/${id}`, { method: 'PUT', json: payload })
 }
 
 /** 删除单个知识库（级联清理其下文档 / 向量 / 图谱）。 */
 export async function deleteKnowledgeBase(id: string): Promise<void> {
+  invalidateDictPrefix('kb:')
   await requestVoid(`/api/knowledge-bases/${id}`, { method: 'DELETE' })
 }
 
@@ -412,6 +447,24 @@ export async function clearGraphGaps(kbId?: string | null, question?: string): P
   if (question) params.set('question', question)
   const qs = params.toString()
   return request(`/api/graph/gaps${qs ? `?${qs}` : ''}`, { method: 'DELETE' })
+}
+
+/** 重建知识库图谱：对已审核文档重新 LLM 抽取。clean=true 先清图再全量重抽。 */
+export async function rebuildGraph(
+  kbId: string,
+  clean = false,
+): Promise<{ kbId: string; queuedDocs: number; clean: boolean }> {
+  const params = new URLSearchParams()
+  params.set('kb_id', kbId)
+  params.set('clean', String(clean))
+  return request(`/api/graph/rebuild?${params.toString()}`, { method: 'POST' })
+}
+
+/** 查询某 KB 图谱重建进度（前端轮询用）。status: running/done/failed/idle */
+export async function getRebuildStatus(
+  kbId: string,
+): Promise<{ kbId: string; status: string; total: number; processed: number }> {
+  return request(`/api/graph/rebuild/status?kb_id=${encodeURIComponent(kbId)}`)
 }
 
 /**
@@ -537,9 +590,9 @@ export async function getTrend(range: 'today' | 'week' | 'month' = 'week'): Prom
   return request(`/api/analytics/trend?range=${range}`)
 }
 
-/** 文档分类占比（饼图数据源）。 */
-export async function getDocCategory(): Promise<DocCategory[]> {
-  return request('/api/analytics/doc-category')
+/** 知识库文档分布（饼图数据源；知识库即文档的天然分类）。 */
+export async function getKbDistribution(): Promise<KbDistribution[]> {
+  return request('/api/analytics/kb-distribution')
 }
 
 /** 用户统计：活跃/总用户/新增/角色/状态/近7天趋势（用户统计分区）。 */
@@ -561,12 +614,16 @@ export async function getOperations(page = 1, size = 20): Promise<OperationsResp
 export async function getAnnouncements(
   page = 1,
   size = 20,
+  force = false,
 ): Promise<Paginated<Announcement>> {
-  return request(`/api/announcements?page=${page}&size=${size}`)
+  if (force) invalidateDictPrefix('ann:')
+  const key = `ann:${page}:${size}`
+  return cachedDict(key, () => request<Paginated<Announcement>>(`/api/announcements?page=${page}&size=${size}`))
 }
 
 /** 新建公告（仅 admin）。 */
 export async function createAnnouncement(payload: AnnouncementCreate): Promise<Announcement> {
+  invalidateDictPrefix('ann:')
   return request('/api/announcements', { method: 'POST', json: payload })
 }
 
@@ -575,11 +632,13 @@ export async function updateAnnouncement(
   id: string,
   payload: AnnouncementUpdate,
 ): Promise<Announcement> {
+  invalidateDictPrefix('ann:')
   return request(`/api/announcements/${id}`, { method: 'PUT', json: payload })
 }
 
 /** 删除公告（仅 admin）。 */
 export async function deleteAnnouncement(id: string): Promise<void> {
+  invalidateDictPrefix('ann:')
   await requestVoid(`/api/announcements/${id}`, { method: 'DELETE' })
 }
 
@@ -598,27 +657,10 @@ export async function getKnowledgeGaps(): Promise<HotQueryItem[]> {
   return request('/api/analytics/knowledge-gaps')
 }
 
-/* ---------- 字典类接口缓存（P4）----------
- * 低频变化数据（部门树 / 个人设置）被多视图重复拉取：
- * 模块级 promise 缓存做 in-flight 去重 + TTL，写接口成功后主动失效。 */
-const _dictCache = new Map<string, { at: number; p: Promise<unknown> }>()
-const DICT_TTL_MS = 60_000
-
-function cachedDict<T>(key: string, loader: () => Promise<T>): Promise<T> {
-  const hit = _dictCache.get(key)
-  if (hit && Date.now() - hit.at < DICT_TTL_MS) return hit.p as Promise<T>
-  const p = loader().catch((e) => {
-    // 失败不缓存，下次调用重新请求
-    _dictCache.delete(key)
-    throw e
-  })
-  _dictCache.set(key, { at: Date.now(), p })
-  return p
-}
-
-function invalidateDict(key: string) {
-  _dictCache.delete(key)
-}
+/* ---------- 字典 / 列表接口缓存（P4）----------
+ * 实现抽到 ./cache（cachedDict / invalidateDict / invalidateDictPrefix / 5s TTL）。
+ * 低频变化、被多处重复拉取的数据做 in-flight 去重 + 短 TTL 防重复调用；
+ * 写接口成功后按 key（或前缀）主动失效，读取接口支持 force=true 绕过缓存。 */
 
 /** 读取个人系统设置（preferredModel / ttsEnabled）。P8 新增；带 60s 缓存。 */
 export async function getSettings(): Promise<Settings> {
@@ -632,13 +674,20 @@ export async function updateSettings(payload: SettingsUpdate): Promise<Settings>
   return data
 }
 
+/** 后端运行配置概览（只读、非机密）：模型配置页「当前状态」面板渲染用，
+ *  避免前端写死值与后端实际配置脱节。带 60s 缓存。 */
+export async function getSystemStatus(): Promise<SystemStatus> {
+  return cachedDict('system-status', () => request<SystemStatus>('/api/settings/system'))
+}
+
 /** 文本转语音：返回 base64 音频 + contentType。前端拼 data URI 播放。P8 新增。 */
 export async function ttsSpeak(text: string, voiceType?: number): Promise<TtsResult> {
   return request('/api/tts', { method: 'POST', json: { text, voiceType: voiceType ?? null } })
 }
 
 /** 部门树（嵌套）。P5 部门筛选使用；带 60s 缓存 + in-flight 去重。 */
-export async function getDepartments(): Promise<DepartmentNode[]> {
+export async function getDepartments(force = false): Promise<DepartmentNode[]> {
+  if (force) invalidateDict('departments')
   return cachedDict('departments', () => request<DepartmentNode[]>('/api/departments'))
 }
 
@@ -662,9 +711,13 @@ export async function deleteDepartment(id: string): Promise<void> {
   invalidateDict('departments')
 }
 
-/** 某知识库文档去重标签枚举。P5 标签筛选下拉使用。 */
-export async function getDocumentTags(kbId: string): Promise<string[]> {
-  return request(`/api/knowledge-bases/${kbId}/tags`)
+/** 同级部门拖拽排序（仅 admin）。parentId 为父级 id 或 null（顶级）；ids 为该层级完整有序列表。 */
+export async function reorderDepartments(
+  parentId: string | null,
+  ids: string[],
+): Promise<void> {
+  await request('/api/departments/reorder', { method: 'POST', json: { parentId, ids } })
+  invalidateDict('departments')
 }
 
 /** 轮询单个文档处理任务进度（P5 上传进度条）。 */

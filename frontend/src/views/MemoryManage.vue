@@ -46,10 +46,10 @@ function fmtTime(s: string | null) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-async function loadMemories() {
+async function loadMemories(force = false) {
   loading.value = true
   try {
-    memories.value = await getMemories()
+    memories.value = await getMemories(force)
   } catch (e: unknown) {
     memories.value = []
     toast.error(`加载记忆失败：${errMsg(e)}`)
@@ -107,6 +107,9 @@ onMounted(loadMemories)
       >
         <Icon name="trash" :size="13" /> 清空全部
       </button>
+      <button class="icon-btn" title="刷新" :disabled="loading" @click="loadMemories(true)" style="flex-shrink:0">
+        <Icon name="refresh" :size="15" :class="{ spin: loading }" />
+      </button>
     </div>
 
     <div class="card mem-body">
@@ -124,7 +127,7 @@ onMounted(loadMemories)
             <p class="mem-content">{{ m.content }}</p>
             <span class="mem-time">{{ fmtTime(m.createdAt) }}</span>
           </div>
-          <button class="action-btn" title="删除该条记忆" @click="deleteTarget = m">
+          <button class="action-btn danger" title="删除该条记忆" @click="deleteTarget = m">
             <Icon name="trash" :size="15" />
           </button>
         </li>
@@ -217,20 +220,10 @@ onMounted(loadMemories)
 }
 .mem-time { font-size: 12px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 
-/* 删除按钮（本页 scoped 自持，默认静默、悬停变危险色） */
-.action-btn {
-  flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
-}
-.action-btn:hover { color: var(--danger); background: var(--danger-soft); }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--radius-md); color: var(--text-secondary); transition: background var(--dur-fast), color var(--dur-fast); }
+.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.icon-btn:disabled { opacity: 0.5; cursor: default; }
+.spin { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
 </style>

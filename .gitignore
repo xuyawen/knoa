@@ -41,6 +41,8 @@ deploy/backup/*.sql
 .qoder/
 
 review/
+corpus/
+docs/
 
 # interview prep materials (user-only, NEVER commit to git)
 interview/

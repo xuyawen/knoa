@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -128,6 +129,64 @@ async def approve_document(
     await db.refresh(doc)
     await record_operation(db, user, "approve", related_doc_id=str(doc.id), detail=doc.title)
     return doc_out(doc)
+
+
+class BatchApproveRequest(BaseModel):
+    doc_ids: list[str]
+
+
+class BatchApproveResult(BaseModel):
+    approved: int
+    skipped: int
+    failed: int
+
+
+@router.post("/knowledge-bases/{kb_id}/documents/batch-approve", response_model=BatchApproveResult)
+async def batch_approve_documents(
+    kb_id: str,
+    body: BatchApproveRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_kb_access("edit")),
+):
+    """批量审核通过：对选中的文档逐一执行审核+摄入。幂等：已审核的跳过。"""
+    approved = 0
+    skipped = 0
+    failed = 0
+    for doc_id in body.doc_ids:
+        doc = await db.scalar(select(Document).where(Document.id == doc_id, Document.kb_id == kb_id))
+        if not doc:
+            failed += 1
+            continue
+        try:
+            await ensure_doc_scope_writable(db, doc, user)
+        except HTTPException:
+            failed += 1
+            continue
+        if doc.status == "已审核":
+            skipped += 1
+            continue
+        doc.status = "已审核"
+        doc.reviewed_at = datetime.now(timezone.utc)
+        doc.reviewed_by = str(user.id)
+        doc.parse_status = "done"
+        await db.flush()
+        task = await db.scalar(
+            select(DocumentTask)
+            .where(DocumentTask.document_id == doc.id)
+            .order_by(DocumentTask.created_at.desc())
+        )
+        if task is not None:
+            task.status = "processing"
+            task.progress = 50
+            task.current_step = "向量化中"
+            task.started_at = datetime.now(timezone.utc)
+        approved += 1
+    await db.commit()
+    # 逐篇触发后台摄入（独立会话，不阻塞响应）
+    for doc_id in body.doc_ids:
+        _spawn_background(_ingest_document_background(kb_id, doc_id, str(user.id)))
+    await record_operation(db, user, "batch_approve", detail=f"批量审核 {approved} 篇")
+    return BatchApproveResult(approved=approved, skipped=skipped, failed=failed)
 
 
 @router.post("/knowledge-bases/{kb_id}/documents/{doc_id}/reject", response_model=DocumentOut)

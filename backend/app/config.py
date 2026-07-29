@@ -129,7 +129,7 @@ class Settings(BaseSettings):
     TENCENT_TTS_SECRET_ID: str = ""
     TENCENT_TTS_SECRET_KEY: str = ""
     TENCENT_TTS_REGION: str = "ap-guangzhou"
-    TTS_VOICE_TYPE: int = 1004       # 1002 成熟男声 | 1004 温润女声 | 1050 新闻女声
+    TTS_VOICE_TYPE: int = 1002       # 1002 温润女声 | 1004 成熟男声 | 1050 新闻女声（实测 1004 为男声，ID↔名称已校正）
     TTS_CODEC: str = "mp3"           # mp3 便于长文本分块拼接（帧级可追加）
     TTS_SAMPLE_RATE: int = 16000
     LOG_LEVEL: str = "INFO"

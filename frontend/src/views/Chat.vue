@@ -96,14 +96,7 @@ const streaming = ref(false)
 const inputText = ref('')
 const inputRef = ref<HTMLTextAreaElement>()
 // 输入框高度自适应：初始单行，随内容增高（上限 180px 后滚动），
-// 避免固定高输入框挤占对话区；发送清空后自动收回单行
-function autoResize() {
-  const el = inputRef.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 180) + 'px'
-}
-watch(inputText, () => nextTick(autoResize))
+// 输入框固定高度，不随内容撑高
 const errorMsg = ref('')
 // V4：问答失败后保留上一问题（含附件），供内联「重试」按钮复发
 const retryPayload = ref<{ text: string; attachments: ChatAttachment[] | null } | null>(null)
@@ -135,9 +128,9 @@ async function openDocDetail(s: SourceItem) {
     window.open(s.url, '_blank', 'noopener,noreferrer')
     return
   }
-  // 知识库来源：必须有 kbId + docId 才能查文档详情
-  if (s.sourceType !== 'kb' || !s.kbId || !s.docId) {
-    toast.warning(s.sourceType === 'kb' ? '该引用缺少文档标识，无法查看详情' : '仅知识库来源支持查看文档详情')
+  // 知识库 / 图谱来源：必须有 kbId + docId 才能查文档详情
+  if (!s.kbId || !s.docId) {
+    toast.warning('该引用缺少文档标识，无法查看详情')
     return
   }
   docDetailSnippet.value = s.snippet ?? ''
@@ -293,7 +286,9 @@ function toChatMessage(m: SessionMessage): ChatMessage {
 
 /* ---------- 会话（懒加载；列表 UI 在 ChatSessionList） ---------- */
 async function loadSessions(append = false) {
-  if (sessionLoadingMore.value || allSessionsLoaded.value) return
+  if (sessionLoadingMore.value) return
+  // "已全部加载"仅阻止追加翻页，不阻止刷新（删除/新建后需重新拉取）
+  if (append && allSessionsLoaded.value) return
   const page = append ? sessionPage.value + 1 : 1
   try {
     if (append) sessionLoadingMore.value = true
@@ -333,16 +328,14 @@ async function selectSession(id: string) {
 async function newChat() {
   askAbort.value?.abort()
   streaming.value = false
-  try {
-    const s = await createSession()
-    activeId.value = s.id
-    messages.value = []
-    errorMsg.value = ''
-    followUps.value = []
-    await loadSessions()
-  } catch (e: unknown) {
-    toast.error(`新建会话失败：${errMsg(e)}`)
-  }
+  // 延迟创建：不立即调后端 createSession，等用户发第一条消息时再建。
+  // 避免点了「新建对话」却没提问，产生 0 条的空会话记录。
+  activeId.value = null
+  messages.value = []
+  inputText.value = ''
+  attached.value = []
+  errorMsg.value = ''
+  followUps.value = []
 }
 
 function onDeleteSession(id: string) {
@@ -404,6 +397,7 @@ async function send() {
       sessionsData.value = cur
         ? { ...cur, items: [s, ...cur.items], total: cur.total + 1 }
         : { items: [s], total: 1, page: 1, pageSize: 20, pages: 1 }
+      sessions.value.unshift(s)
       activeId.value = sid
     } catch (e: unknown) {
       toast.error(`创建会话失败：${errMsg(e)}`)
@@ -426,11 +420,13 @@ async function send() {
     feedback: null,
   }
   messages.value.push(userMsg, aiMsg)
+  // 取回 reactive proxy 引用（直接修改 raw 对象不触发 Vue 重渲染）
+  const reactiveAiMsg = messages.value[messages.value.length - 1]
   inputText.value = ''
   attached.value = []
   scrollToBottom(true)
 
-  await runStream(text, sid, userMsg.attachments ?? null, aiMsg)
+  await runStream(text, sid, userMsg.attachments ?? null, reactiveAiMsg)
 }
 
 /** SSE 流式核心：发送 / 重新生成共用。 */
@@ -448,6 +444,35 @@ async function runStream(
   const ac = new AbortController()
   askAbort.value = ac
 
+  // ── 打字机缓冲：后端 delta 可能一次来一大段，逐字释放让视觉更平滑 ──
+  let typeBuf = ''
+  let typeTimer: ReturnType<typeof setInterval> | null = null
+  let streamEnded = false
+  const startTypewriter = () => {
+    if (typeTimer) return
+    typeTimer = setInterval(() => {
+      if (!typeBuf) {
+        if (streamEnded) {
+          // 缓冲排空 + 流已结束 → 真正完成
+          clearInterval(typeTimer!); typeTimer = null
+          streaming.value = false
+        }
+        return
+      }
+      // 每次释放 2 个字符，节奏 ~30ms/字（~60 字/秒）
+      const chunk = typeBuf.slice(0, 2)
+      typeBuf = typeBuf.slice(2)
+      aiMsg.content += chunk
+      scrollToBottom()
+    }, 30)
+  }
+  /** 强制冲刷（用于 abort / error 时立即显示全部内容） */
+  const flushTypewriter = () => {
+    if (typeTimer) { clearInterval(typeTimer); typeTimer = null }
+    if (typeBuf) { aiMsg.content += typeBuf; typeBuf = ''; scrollToBottom() }
+    streaming.value = false
+  }
+
   try {
     for await (const ev of streamAsk(text, selectedKb.value || null, sid, attachments || undefined, {
       signal: ac.signal,
@@ -462,8 +487,8 @@ async function runStream(
         deepThinking.value = true
       } else if (ev.event === 'delta') {
         deepThinking.value = false
-        aiMsg.content += (ev.data as { content: string }).content
-        scrollToBottom()
+        typeBuf += (ev.data as { content: string }).content
+        startTypewriter()
       } else if (ev.event === 'done') {
         const d = ev.data as { messageId: string; sessionId: string }
         aiMsg.messageId = d.messageId
@@ -484,13 +509,17 @@ async function runStream(
       }
     }
   } catch (e: unknown) {
+    // 异常 / 主动取消 → 立即冲刷缓冲，不继续动画
+    flushTypewriter()
     if (!(e instanceof DOMException && e.name === 'AbortError')) {
       errorMsg.value = errorMsg.value || errMsg(e)
       retryPayload.value = { text, attachments }
       toast.error(`问答中断：${errMsg(e)}`)
     }
   } finally {
-    streaming.value = false
+    streamEnded = true
+    // 如果打字机从未启动（无 delta 事件，如纯错误响应），直接结束
+    if (!typeTimer) streaming.value = false
     deepThinking.value = false
     askAbort.value = null
     // 就地同步当前会话，不整页 reload，避免覆盖懒加载列表与滚动位置
@@ -621,8 +650,9 @@ async function regenerate(m: ChatMessage) {
   messages.value.splice(idx, 1)
   const aiMsg: ChatMessage = { id: genId(), role: 'assistant', content: '', thinkingSteps: [], feedback: null }
   messages.value.push(aiMsg)
+  const reactiveAiMsg = messages.value[messages.value.length - 1]
   scrollToBottom(true)
-  await runStream(prev.content, sid, prev.attachments ?? null, aiMsg)
+  await runStream(prev.content, sid, prev.attachments ?? null, reactiveAiMsg)
 }
 
 /** 导出当前对话为 Markdown 文件。 */
@@ -740,11 +770,11 @@ watch(messages, () => scrollToBottom(), { deep: false })
             <Icon name="plus" :size="14" />
             <span>新建对话</span>
           </button>
-          <button class="ghost-btn" title="导出当前对话为 Markdown" @click="exportSession">
+          <button class="btn btn-ghost btn-sm" title="导出当前对话为 Markdown" @click="exportSession">
             <Icon name="export" :size="14" />
             <span>导出</span>
           </button>
-          <button class="ghost-btn chat-clear" @click="showClearConfirm = true">
+          <button class="btn btn-ghost btn-sm chat-clear" @click="showClearConfirm = true">
             <Icon name="trash" :size="14" />
             <span>清空对话</span>
           </button>
@@ -833,7 +863,7 @@ watch(messages, () => scrollToBottom(), { deep: false })
                 <span>引用来源（{{ m.sources.length }}）</span>
               </div>
               <div class="refs-grid">
-                <div v-for="(s, i) in m.sources" :key="s.id ?? i" class="ref-card" :data-ref-id="s.id" :class="{ 'ref-clickable': s.sourceType === 'kb' }" @click="openDocDetail(s)" :title="s.sourceType === 'kb' ? '点击查看文档详情' : undefined">
+                <div v-for="(s, i) in m.sources" :key="s.id ?? i" class="ref-card" :data-ref-id="s.id" :class="{ 'ref-clickable': s.kbId && s.docId }" @click="openDocDetail(s)" :title="s.kbId && s.docId ? '点击查看文档详情' : undefined">
                   <span class="ref-icon" :class="`src-${s.sourceType || 'kb'}`">
                     <Icon :name="s.sourceType === 'web' ? 'globe' : s.sourceType === 'graph' ? 'graph' : 'doc'" :size="16" />
                   </span>
@@ -929,11 +959,11 @@ watch(messages, () => scrollToBottom(), { deep: false })
             <span class="composer-count">{{ inputText.length }} / 2000</span>
           </div>
           <div class="composer-right">
-            <button v-if="streaming" class="stop-btn" @click="stop">
+            <button v-if="streaming" class="btn btn-ghost" @click="stop">
               <Icon name="square" :size="13" />
               <span>停止</span>
             </button>
-            <button v-else class="send-btn" :disabled="!inputText.trim()" @click="send">
+            <button v-else class="btn btn-primary" :disabled="!inputText.trim()" @click="send">
               <span>发送</span>
               <Icon name="arrow-up" :size="15" />
             </button>
@@ -1041,19 +1071,8 @@ watch(messages, () => scrollToBottom(), { deep: false })
   white-space: nowrap;
   max-width: 60vw;
 }
-.ghost-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  transition: all var(--dur-fast) var(--ease-out);
-}
-.ghost-btn:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-strong); }
+/* 工具栏按钮跟随全局 .btn 系统；composer 区域按钮稍高以对齐输入框 */
+.composer-right .btn { height: 38px; }
 
 /* ============ 消息区 ============ */
 .messages-area {
@@ -1517,9 +1536,10 @@ watch(messages, () => scrollToBottom(), { deep: false })
   line-height: 1.6;
   color: var(--text-primary);
   height: 45px;
-  font-family: inherit;
   max-height: 45px;
-  padding: 2px 2px;
+  overflow-y: auto;
+  font-family: inherit;
+  padding: 11px 2px;
 }
 .composer-input::placeholder { color: var(--text-placeholder); }
 
@@ -1561,39 +1581,6 @@ watch(messages, () => scrollToBottom(), { deep: false })
 .composer-attach:hover { background: var(--bg-hover); color: var(--brand); }
 .composer-count { font-size: 12px; color: var(--text-tertiary); }
 .composer-right { display: flex; align-items: center; gap: 8px; }
-
-.send-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 38px;
-  padding: 0 18px;
-  border-radius: var(--radius-md);
-  background: var(--brand);
-  color: var(--text-on-brand);
-  font-size: 13px;
-  font-weight: 600;
-  transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast);
-}
-.send-btn:hover:not(:disabled) { background: var(--brand-hover); }
-.send-btn:active:not(:disabled) { transform: translateY(1px); }
-.send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.stop-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 38px;
-  padding: 0 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  transition: all var(--dur-fast) var(--ease-out);
-}
-.stop-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(10px); }

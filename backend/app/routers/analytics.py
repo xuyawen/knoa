@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import Document, OperationLog, Role, User
+from app.db import Document, KnowledgeBase, OperationLog, Role, User
 from app.deps import get_db
 from app.core.rbac import Perm
 from app.core.security import require_permission
@@ -134,18 +134,20 @@ async def trend(
     return {"range": period, "labels": labels, "points": points}
 
 
-@router.get("/analytics/doc-category")
-async def doc_category(
+@router.get("/analytics/kb-distribution")
+async def kb_distribution(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_permission(Perm.USER_MANAGE)),
 ):
-    """按 category 分组统计文档数（饼图数据源，替代前端硬编码饼图）。"""
+    """按知识库分组统计文档数（饼图数据源）。知识库即文档的天然分类——
+    上传时强制选定 kb_id（非空外键），无需额外维护分类词汇表。"""
     rows = (await db.execute(
-        select(Document.category, func.count())
-        .group_by(Document.category)
-        .order_by(func.count().desc())
+        select(KnowledgeBase.id, KnowledgeBase.name, func.count(Document.id))
+        .outerjoin(Document, Document.kb_id == KnowledgeBase.id)
+        .group_by(KnowledgeBase.id, KnowledgeBase.name)
+        .order_by(func.count(Document.id).desc())
     )).all()
-    return [{"category": (r[0] or "未分类"), "count": r[1]} for r in rows]
+    return [{"kbId": r[0], "name": r[1], "count": r[2]} for r in rows]
 
 
 @router.get("/analytics/user-stats")
@@ -184,15 +186,21 @@ async def user_stats(
     ) or 0
 
     by_role = (await db.execute(
-        select(Role.key, func.count())
-        .select_from(User)
-        .join(Role, Role.id == User.role_id)
-        .group_by(Role.key)
-        .order_by(func.count().desc())
+        select(Role.key, Role.name, func.count(User.id))
+        .select_from(Role)
+        .outerjoin(User, User.role_id == Role.id)
+        .group_by(Role.id)
+        .order_by(func.count(User.id).desc())
     )).all()
-    by_status = (await db.execute(
-        select(User.is_active, func.count()).group_by(User.is_active).order_by(func.count().desc())
+    # 状态分布：始终返回「启用」和「停用」两行，缺的补 0
+    status_rows = (await db.execute(
+        select(User.is_active, func.count()).group_by(User.is_active)
     )).all()
+    status_map = {row[0]: row[1] for row in status_rows}
+    by_status = [
+        {"status": "启用", "count": status_map.get(True, 0)},
+        {"status": "停用", "count": status_map.get(False, 0)},
+    ]
 
     recent_new: list[dict] = []
     for i in range(7):
@@ -209,8 +217,8 @@ async def user_stats(
         "activeUsers": active_users,
         "totalUsers": total_users,
         "newUsers30": new_users_30,
-        "byRole": [{"role": r[0], "count": r[1]} for r in by_role],
-        "byStatus": [{"status": ("启用" if r[0] else "停用"), "count": r[1]} for r in by_status],
+        "byRole": [{"role": r[0], "name": r[1], "count": r[2]} for r in by_role],
+        "byStatus": by_status,
         "recentNew": recent_new,
         "activeTrend": active_trend,
     }
@@ -221,11 +229,12 @@ async def doc_stats(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_permission(Perm.USER_MANAGE)),
 ):
-    """文档统计：按 category / status / type 聚合 + 近7天新增趋势（文档统计分区真实数据源）。"""
-    by_cat = (await db.execute(
-        select(Document.category, func.count())
-        .group_by(Document.category)
-        .order_by(func.count().desc())
+    """文档统计：按知识库 / 状态 / 类型聚合 + 近7天新增趋势（文档统计分区真实数据源）。"""
+    by_kb = (await db.execute(
+        select(KnowledgeBase.id, KnowledgeBase.name, func.count(Document.id))
+        .outerjoin(Document, Document.kb_id == KnowledgeBase.id)
+        .group_by(KnowledgeBase.id, KnowledgeBase.name)
+        .order_by(func.count(Document.id).desc())
     )).all()
     by_status = (await db.execute(
         select(Document.status, func.count())
@@ -260,7 +269,7 @@ async def doc_stats(
 
     return {
         "total": total,
-        "byCategory": [{"category": (r[0] or "未分类"), "count": r[1]} for r in by_cat],
+        "byKb": [{"kbId": r[0], "name": r[1], "count": r[2]} for r in by_kb],
         "byStatus": [{"status": (r[0] or "未知"), "count": r[1]} for r in by_status],
         "byType": [{"type": r[0], "count": r[1]} for r in by_type],
         "recentTrend": recent_trend,

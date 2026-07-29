@@ -16,7 +16,7 @@ import {
   Info, Heart,
   ArrowUpRight, ArrowDownRight, Pin, PinOff, UserPlus, Volume2, ArrowUpDown, Lightbulb,
   BrainCircuit, BookMarked, ThumbsUp, ThumbsDown, PenLine, ArrowUp, Square, Quote, FileCode,
-  Layers, Crosshair,
+  Layers, Crosshair, Image as ImageIcon, Scan, GripVertical,
 } from 'lucide-vue-next'
 
 const props = defineProps<{ name: string; size?: number | string }>()
@@ -47,6 +47,9 @@ const ICONS: Record<string, Component> = {
   'arrow-up-down': ArrowUpDown, lightbulb: Lightbulb,
   layers: Layers,
   crosshair: Crosshair,
+  image: ImageIcon,
+  scan: Scan,
+  'grip-vertical': GripVertical,
 }
 
 const comp = computed(() => ICONS[props.name] ?? AlertTriangle)

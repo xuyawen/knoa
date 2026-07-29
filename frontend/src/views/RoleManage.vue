@@ -22,10 +22,10 @@ const selectedRole = computed(() => roles.value.find((r) => r.id === selectedId.
 // 当前选中角色的权限草稿（开关切换只改这里，保存才写后端）
 const draftPerms = ref<Set<string>>(new Set())
 
-async function loadRoles() {
+async function loadRoles(force = false) {
   loading.value = true
   try {
-    roles.value = await getRoles()
+    roles.value = await getRoles(force)
     if (!selectedId.value && roles.value.length) selectedId.value = roles.value[0].id
     syncDraft()
   } catch (e: unknown) {
@@ -175,7 +175,10 @@ onMounted(loadRoles)
       <section class="card rm-list">
         <div class="rm-h-row">
           <h3 class="rm-h">角色</h3>
-          <button class="btn btn-primary btn-sm" @click="openCreate"><Icon name="plus" :size="13" /> 新建角色</button>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="icon-btn" title="刷新" :disabled="loading" @click="loadRoles(true)"><Icon name="refresh" :size="15" :class="{ spin: loading }" /></button>
+            <button class="btn btn-primary btn-sm" @click="openCreate"><Icon name="plus" :size="13" /> 新建角色</button>
+          </div>
         </div>
         <div v-if="loading" class="rm-loading"><Icon name="loader" :size="18" class="spin" /> 加载中…</div>
         <ul v-else class="rm-cards">
@@ -193,8 +196,8 @@ onMounted(loadRoles)
             <div class="rm-key">{{ r.key }}</div>
             <div class="rm-desc">{{ r.description || '—' }}</div>
             <div class="rm-card-actions" @click.stop>
-              <button class="action-btn" title="编辑信息" @click="selectRole(r.id); openEditName()"><Icon name="edit" :size="14" /></button>
-              <button class="action-btn" title="删除角色" :disabled="r.isBuiltin" @click="onDelete(r)"><Icon name="trash" :size="14" /></button>
+              <button class="action-btn edit" title="编辑信息" @click="selectRole(r.id); openEditName()"><Icon name="edit" :size="14" /></button>
+              <button class="action-btn danger" title="删除角色" :disabled="r.isBuiltin" @click="onDelete(r)"><Icon name="trash" :size="14" /></button>
             </div>
           </li>
         </ul>
@@ -325,12 +328,6 @@ onMounted(loadRoles)
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .rm-card-actions { position: absolute; top: 10px; right: 10px; display: flex; gap: 2px; opacity: 0; transition: opacity var(--dur-fast); }
 .rm-card:hover .rm-card-actions { opacity: 1; }
-.action-btn {
-  display: flex; align-items: center; justify-content: center; width: 26px; height: 26px;
-  border-radius: var(--radius-sm); color: var(--text-secondary); background: transparent; cursor: pointer; transition: all var(--dur-fast);
-}
-.action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-.action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .rm-detail { padding: 20px; min-height: 360px; }
 .rm-d-h { display: flex; align-items: flex-start; justify-content: space-between; }
@@ -386,6 +383,9 @@ onMounted(loadRoles)
 
 .spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--radius-md); color: var(--text-secondary); transition: background var(--dur-fast), color var(--dur-fast); }
+.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.icon-btn:disabled { opacity: 0.5; cursor: default; }
 
 @media (max-width: 900px) {
   .rm-body { grid-template-columns: 1fr; }

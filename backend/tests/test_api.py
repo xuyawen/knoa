@@ -19,6 +19,7 @@ import pytest_asyncio
 from sqlalchemy import func, select
 
 from app.db import DocChunk, Document, KnowledgeBase
+from app.config import settings
 from app.main import app
 
 
@@ -76,6 +77,31 @@ async def test_auth_login_and_me(client):
     )
     assert r.status_code == 200
     assert r.json()["username"] == "admin"
+
+
+async def test_settings_system_status(client):
+    """系统状态端点：返回后端真实运行配置（只读、非机密），供前端状态面板渲染。
+
+    断言与 settings 实际值一致（防写死值脱节），且响应中不含任何密钥字段。
+    """
+    token = await _token(client)
+    r = await client.get(
+        "/api/settings/system", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["embeddingModel"] == settings.EMBEDDING_MODEL
+    assert data["embeddingDim"] == settings.EMBEDDING_DIM
+    assert data["defaultModel"] == settings.LLM_MODEL
+    assert data["graphEnabled"] == settings.GRAPH_ENABLED
+    assert isinstance(data["webProviders"], list) and "ddg" in data["webProviders"]
+    # 信任边界：只报配置值/开关，绝不暴露密钥本身
+    assert not any("KEY" in k.upper() or "SECRET" in k.upper() for k in data)
+    # 未鉴权不得访问：登录会下发 HttpOnly Cookie 且 httpx 自动携带，
+    # 必须先清空 Cookie 才能构造真正的「无凭证」请求
+    client.cookies.clear()
+    r2 = await client.get("/api/settings/system")
+    assert r2.status_code in (401, 403)
 
 
 async def test_kb_crud(client):

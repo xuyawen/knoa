@@ -169,7 +169,7 @@ def parse_pdf(filename: str, data: bytes) -> ParseResult:
             return ParseResult(text, "pdf")
         except UnsupportedFormatError:
             raise
-        except Exception as e:  # noqa: BLE001 (intentional catch-all: fitz 解析异常兜底回退 pypdf)
+        except Exception:  # noqa: BLE001 (intentional catch-all: fitz 解析异常兜底回退 pypdf)
             # fitz 解析失败（损坏/加密 PDF）时退回 pypdf 再试一次
             pass
 

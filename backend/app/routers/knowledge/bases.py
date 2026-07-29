@@ -92,13 +92,18 @@ async def _kb_members(db: AsyncSession, kb_id: str) -> list[dict]:
 async def get_knowledge_bases(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
+    q: str | None = Query(None, max_length=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     # 按 order 列排序（拖拽持久化），同序再按创建时间稳定
-    result = await db.execute(
-        select(KnowledgeBase).order_by(KnowledgeBase.order, KnowledgeBase.created_at)
-    )
+    stmt = select(KnowledgeBase).order_by(KnowledgeBase.order, KnowledgeBase.created_at)
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        stmt = stmt.where(
+            KnowledgeBase.name.ilike(pattern) | KnowledgeBase.category.ilike(pattern)
+        )
+    result = await db.execute(stmt)
     kbs = result.scalars().all()
 
     # 库级权限：一次性聚合查询，替代原先「每库调一次 get_kb_permission_level」的 N+1
@@ -543,7 +548,7 @@ async def list_kb_effective_members(
 
     # 3) 合并输出
     members: list[dict] = []
-    for uid, (lv, u) in personal_map.items():
+    for _uid, (lv, u) in personal_map.items():
         members.append(
             EffectiveMemberOut(
                 userId=str(u.id),
@@ -553,7 +558,7 @@ async def list_kb_effective_members(
                 source="direct",
             ).model_dump(by_alias=True)
         )
-    for uid, (lv, dept_name, u) in dept_user_map.items():
+    for _uid, (lv, dept_name, u) in dept_user_map.items():
         members.append(
             EffectiveMemberOut(
                 userId=str(u.id),

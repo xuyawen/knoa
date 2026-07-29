@@ -52,7 +52,7 @@ const healthRows = computed(() =>
   })),
 )
 
-const docStatsCatTotal = computed(() => docStats.value?.byCategory?.reduce((s, c) => s + c.count, 0) || 0)
+const docStatsKbTotal = computed(() => docStats.value?.byKb?.reduce((s, k) => s + k.count, 0) || 0)
 function buildDocStatsBar(label: string, value: number, seg: number, total: number, max: number) {
   return {
     label,
@@ -63,11 +63,11 @@ function buildDocStatsBar(label: string, value: number, seg: number, total: numb
   }
 }
 const docStatsBarData = computed(() => {
-  const sorted = [...(docStats.value?.byCategory ?? [])].sort((a, b) => b.count - a.count)
-  const max = Math.max(1, ...sorted.map((c) => c.count))
+  const sorted = [...(docStats.value?.byKb ?? [])].sort((a, b) => b.count - a.count)
+  const max = Math.max(1, ...sorted.map((k) => k.count))
   const rest = sorted.slice(8)
-  const rows = sorted.slice(0, 8).map((c, i) => buildDocStatsBar(c.category || '未分类', c.count, (i % 5) + 1, docStatsCatTotal.value, max))
-  if (rest.length) rows.push(buildDocStatsBar(`其他 (${rest.length})`, rest.reduce((s, c) => s + c.count, 0), 0, docStatsCatTotal.value, max))
+  const rows = sorted.slice(0, 8).map((k, i) => buildDocStatsBar(k.name, k.count, (i % 5) + 1, docStatsKbTotal.value, max))
+  if (rest.length) rows.push(buildDocStatsBar(`其他 (${rest.length})`, rest.reduce((s, k) => s + k.count, 0), 0, docStatsKbTotal.value, max))
   return rows
 })
 
@@ -95,11 +95,11 @@ onMounted(() => {
 <template>
   <div class="dashboard">
     <div class="stats-row">
-      <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-blue-soft);color:var(--accent-blue)"><Icon name="doc" :size="22"/></div><div class="sc-body"><div class="sc-label">文档总数</div><div class="sc-value">{{ (docStats?.total ?? totalDocs).toLocaleString() }}</div></div></div>
-      <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-green-soft);color:var(--accent-green)"><Icon name="check" :size="22"/></div><div class="sc-body"><div class="sc-label">已审核</div><div class="sc-value">{{ (byStatusCount('已审核')).toLocaleString() }}</div></div></div>
-      <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-amber-soft);color:var(--accent-amber)"><Icon name="alert" :size="22"/></div><div class="sc-body"><div class="sc-label">待复核</div><div class="sc-value">{{ byStatusCount('待复核') }}</div></div></div>
-      <div class="stat-card card"><div class="sc-icon" style="background:#FEE2E2;color:#EF4444"><Icon name="close" :size="22"/></div><div class="sc-body"><div class="sc-label">已拒绝</div><div class="sc-value">{{ byStatusCount('已拒绝') }}</div></div></div>
-      <div class="stat-card card"><div class="sc-icon" style="background:var(--accent-violet-soft);color:var(--accent-violet)"><Icon name="folder" :size="22"/></div><div class="sc-body"><div class="sc-label">知识库数</div><div class="sc-value">{{ bases.length }}</div></div></div>
+      <div class="stat-card card" style="--card-accent: var(--accent-blue)"><div class="sc-icon"><Icon name="doc" :size="22"/></div><div class="sc-body"><div class="sc-label">文档总数</div><div class="sc-value">{{ (docStats?.total ?? totalDocs).toLocaleString() }}</div></div></div>
+      <div class="stat-card card" style="--card-accent: var(--accent-green)"><div class="sc-icon"><Icon name="check" :size="22"/></div><div class="sc-body"><div class="sc-label">已审核</div><div class="sc-value">{{ (byStatusCount('已审核')).toLocaleString() }}</div></div></div>
+      <div class="stat-card card" style="--card-accent: var(--accent-amber)"><div class="sc-icon"><Icon name="alert" :size="22"/></div><div class="sc-body"><div class="sc-label">待复核</div><div class="sc-value">{{ byStatusCount('待复核') }}</div></div></div>
+      <div class="stat-card card" style="--card-accent: var(--accent-rose)"><div class="sc-icon"><Icon name="close" :size="22"/></div><div class="sc-body"><div class="sc-label">已拒绝</div><div class="sc-value">{{ byStatusCount('已拒绝') }}</div></div></div>
+      <div class="stat-card card" style="--card-accent: var(--accent-violet)"><div class="sc-icon"><Icon name="folder" :size="22"/></div><div class="sc-body"><div class="sc-label">知识库数</div><div class="sc-value">{{ bases.length }}</div></div></div>
     </div>
 
     <div class="charts-row docs-row">
@@ -116,20 +116,21 @@ onMounted(() => {
           <template #empty>暂无数据</template>
         </DataTable>
       </div>
-      <div class="ops-section card">
-        <div class="panel-head"><span class="panel-title">按分类分布</span></div>
-        <div class="cat-bars slim">
-          <div v-for="b in docStatsBarData" :key="b.label" class="cat-bar-row">
-            <span class="cat-bar-label" :title="b.label">{{ b.label }}</span>
-            <div class="cat-bar-track"><div class="cat-bar-fill" :class="b.seg === 0 ? 'bar-uncat' : 'bar-seg-' + b.seg" :style="{ width: (b.width || 0) + '%' }"></div></div>
-            <span class="cat-bar-val">{{ b.value.toLocaleString() }}</span>
-            <span class="cat-bar-pct">{{ b.pct }}%</span>
+      <div class="chart-panel card">
+        <div class="panel-head"><span class="panel-title">近7天新增文档</span></div>
+        <div v-if="(docStats?.recentTrend ?? []).length" class="mini-bars">
+          <div v-for="p in docStats?.recentTrend" :key="p.date" class="mini-bar-col">
+            <div class="mini-bar-track-v">
+              <div class="mini-bar-fill-v" :style="{ height: (p.count / recentTrendMax) * 100 + '%' }"></div>
+            </div>
+            <span class="mini-bar-val">{{ p.count }}</span>
+            <span class="mini-bar-date">{{ p.date }}</span>
           </div>
-          <div v-if="!docStatsBarData.length" class="empty-hint">暂无数据</div>
         </div>
+        <div v-else class="empty-hint">暂无数据</div>
       </div>
     </div>
-
+    
     <div class="charts-row docs-row">
       <div class="ops-section card">
         <div class="panel-head"><span class="panel-title">按类型分布</span></div>
@@ -146,18 +147,17 @@ onMounted(() => {
           <div v-if="!typeBarData.length" class="empty-hint">暂无数据</div>
         </div>
       </div>
-      <div class="chart-panel card">
-        <div class="panel-head"><span class="panel-title">近7天新增文档</span></div>
-        <div v-if="(docStats?.recentTrend ?? []).length" class="mini-bars">
-          <div v-for="p in docStats?.recentTrend" :key="p.date" class="mini-bar-col">
-            <div class="mini-bar-track-v">
-              <div class="mini-bar-fill-v" :style="{ height: (p.count / recentTrendMax) * 100 + '%' }"></div>
-            </div>
-            <span class="mini-bar-val">{{ p.count }}</span>
-            <span class="mini-bar-date">{{ p.date }}</span>
+      <div class="ops-section card">
+        <div class="panel-head"><span class="panel-title">按知识库分布</span></div>
+        <div class="cat-bars slim">
+          <div v-for="b in docStatsBarData" :key="b.label" class="cat-bar-row">
+            <span class="cat-bar-label" :title="b.label">{{ b.label }}</span>
+            <div class="cat-bar-track"><div class="cat-bar-fill" :class="b.seg === 0 ? 'bar-uncat' : 'bar-seg-' + b.seg" :style="{ width: (b.width || 0) + '%' }"></div></div>
+            <span class="cat-bar-val">{{ b.value.toLocaleString() }}</span>
+            <span class="cat-bar-pct">{{ b.pct }}%</span>
           </div>
+          <div v-if="!docStatsBarData.length" class="empty-hint">暂无数据</div>
         </div>
-        <div v-else class="empty-hint">暂无数据</div>
       </div>
     </div>
 
