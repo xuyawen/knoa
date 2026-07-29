@@ -17,8 +17,7 @@ class KnowledgeBase(Base):
     name: Mapped[str] = mapped_column(String(100))
     icon: Mapped[str] = mapped_column(String(50))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # 标签/分类（架构图1：标签分类系统）
-    tags: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list, server_default="[]")
+    # 分类（架构图1：分类系统）
     category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # order 是 SQL 保留字；name="order" + quote=True 编译为带引号的 "order"
     order: Mapped[int] = mapped_column(Integer, name="order", default=0, server_default="0", nullable=False, quote=True)

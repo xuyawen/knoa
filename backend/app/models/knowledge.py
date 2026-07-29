@@ -17,7 +17,6 @@ class KnowledgeBaseOut(CamelModel):
     document_count: int = 0
     pending_count: int = 0
     description: str | None = None
-    tags: list[str] = []
     category: str | None = None
 
 
@@ -131,7 +130,6 @@ class KBCreateIn(CamelModel):
     name: str
     icon: str | None = None
     description: str | None = None
-    tags: list[str] | None = None
     category: str | None = None
 
 
@@ -140,7 +138,6 @@ class KBUpdateIn(CamelModel):
     name: str | None = None
     icon: str | None = None
     description: str | None = None
-    tags: list[str] | None = None
     category: str | None = None
 
 

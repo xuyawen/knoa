@@ -71,7 +71,6 @@ export async function createKnowledgeBase(payload: {
   icon?: string | null
   description?: string | null
   category?: string | null
-  tags?: string[]
 }): Promise<{ id: string; name: string; icon: string }> {
   invalidateDictPrefix('kb:')
   return request('/api/knowledge-bases', { method: 'POST', json: payload })

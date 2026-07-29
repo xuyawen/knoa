@@ -102,7 +102,6 @@ async def _migrate_columns(conn) -> None:
             text(f"ALTER TABLE document ADD COLUMN IF NOT EXISTS {name} {typ}")
         )
     kb_cols2 = [
-        ("tags", "JSONB"),
         ("category", "VARCHAR(50)"),
     ]
     for name, typ in kb_cols2:

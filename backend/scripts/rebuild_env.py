@@ -13,7 +13,7 @@ import uuid
 
 sys.path.insert(0, r"X:\workspace\knoa\backend")
 
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 
 from app.config import settings
 from app.database import AsyncSessionLocal, _seed_roles
@@ -65,7 +65,6 @@ async def main() -> None:
                     icon=icon,
                     description=desc,
                     category=key,
-                    tags=[key],
                 )
             )
             await db.flush()  # 必须立即落库，后续 KBDeptGrant 的 FK 才能满足

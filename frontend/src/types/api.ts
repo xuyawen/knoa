@@ -64,7 +64,6 @@ export interface KBUpdate {
   icon?: string | null
   description?: string | null
   category?: string | null
-  tags?: string[]
 }
 
 export interface KBReorder {

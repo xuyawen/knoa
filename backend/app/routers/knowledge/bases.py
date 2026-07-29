@@ -245,7 +245,6 @@ async def get_knowledge_bases(
                 document_count=doc_count or 0,
                 pending_count=pending_count or 0,
                 description=kb.description,
-                tags=kb.tags or [],
                 category=kb.category,
             )
         )
@@ -289,8 +288,6 @@ async def create_knowledge_base(
         icon=payload.icon or "📚",
         description=payload.description,
     )
-    if payload.tags is not None:
-        kb.tags = payload.tags
     if payload.category:
         kb.category = payload.category
     # 库与创建者的 admin 权限单事务提交（一次 commit）：原先的两段提交在
@@ -304,7 +301,7 @@ async def create_knowledge_base(
     await db.refresh(kb)
     return KnowledgeBaseOut(
         id=kb.id, name=kb.name, icon=kb.icon, description=kb.description,
-        tags=kb.tags or [], category=kb.category,
+        category=kb.category,
     )
 
 
@@ -325,15 +322,13 @@ async def update_knowledge_base(
         kb.icon = payload.icon
     if payload.description is not None:
         kb.description = payload.description
-    if payload.tags is not None:
-        kb.tags = payload.tags
     if payload.category is not None:
         kb.category = payload.category
     await db.commit()
     await db.refresh(kb)
     return KnowledgeBaseOut(
         id=kb.id, name=kb.name, icon=kb.icon, description=kb.description,
-        tags=kb.tags or [], category=kb.category,
+        category=kb.category,
     )
 
 
