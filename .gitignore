@@ -16,6 +16,8 @@ __pycache__/
 
 # env / secrets
 .env
+# one-time ops scripts carrying credentials — run in-container, NEVER commit
+backend/scripts/_seed_prod_users.py
 
 # logs
 *.log
