@@ -62,15 +62,6 @@ const myKBs = computed(() =>
   })),
 )
 
-/* ---------- 我的问答（用会话标题兜底） ---------- */
-const myQuestions = computed(() =>
-  (sessionsData.value?.items ?? []).slice(0, 3).map((s) => ({
-    title: s.title || '未命名问题',
-    meta: s.msgCount > 1 ? `${s.msgCount - 1} 个来源 · 已回答` : '新提问',
-    answered: s.msgCount > 1,
-  })),
-)
-
 /* ---------- 近期贡献（mock，后端暂无贡献流 API） ---------- */
 const recentContribs = [
   { title: '亚马逊美国站退货政策 2026 更新', action: '编辑', time: '3 小时前' },
@@ -116,68 +107,45 @@ const showEdit = ref(false)
 
     <!-- ====== 主体分栏 ====== -->
     <div class="content-grid">
-      <div class="content-left">
-        <!-- 我的知识库 -->
-        <section class="section-card card">
-          <div class="section-head">
-            <h2 class="section-title"><Icon name="folder" :size="15" class="sec-ico" /> 我的知识库</h2>
-            <span class="section-count">{{ kbData?.total ?? 0 }}</span>
-          </div>
-          <div v-if="myKBs.length" class="kb-list">
-            <div v-for="kb in myKBs" :key="kb.id" class="kb-item">
-              <div class="kb-icon" :style="{ background: kb.color }">
-                <span class="kb-initial">{{ kb.initial }}</span>
+      <!-- 我的知识库 -->
+      <section class="section-card card">
+        <div class="section-head">
+          <h2 class="section-title"><Icon name="folder" :size="15" class="sec-ico" /> 我的知识库</h2>
+          <span class="section-count">{{ kbData?.total ?? 0 }}</span>
+        </div>
+        <div v-if="myKBs.length" class="kb-list">
+          <div v-for="kb in myKBs" :key="kb.id" class="kb-item">
+            <div class="kb-icon" :style="{ background: kb.color }">
+              <span class="kb-initial">{{ kb.initial }}</span>
+            </div>
+            <div class="kb-body">
+              <div class="kb-name-row">
+                <span class="kb-name">{{ kb.name }}</span>
+                <span class="kb-role">{{ roleLabel }}</span>
               </div>
-              <div class="kb-body">
-                <div class="kb-name-row">
-                  <span class="kb-name">{{ kb.name }}</span>
-                  <span class="kb-role">{{ roleLabel }}</span>
-                </div>
-                <p class="kb-meta">{{ kb.documentCount }} 篇文档</p>
-              </div>
+              <p class="kb-meta">{{ kb.documentCount }} 篇文档</p>
             </div>
           </div>
-          <div v-else class="empty-state">
-            <Icon name="folder" :size="28" />
-            <span>暂无加入的知识库</span>
-          </div>
-        </section>
+        </div>
+        <div v-else class="empty-state">
+          <Icon name="folder" :size="28" />
+          <span>暂无加入的知识库</span>
+        </div>
+      </section>
 
-        <!-- 我的近期贡献 -->
-        <section class="section-card card">
-          <div class="section-head">
-            <h2 class="section-title"><Icon name="pen-line" :size="15" class="sec-ico" /> 我的近期贡献</h2>
-            <span class="section-count">{{ recentContribs.length }}</span>
+      <!-- 我的近期贡献 -->
+      <section class="section-card card">
+        <div class="section-head">
+          <h2 class="section-title"><Icon name="pen-line" :size="15" class="sec-ico" /> 我的近期贡献</h2>
+          <span class="section-count">{{ recentContribs.length }}</span>
+        </div>
+        <div class="contrib-list">
+          <div v-for="(c, i) in recentContribs" :key="i" class="contrib-item">
+            <p class="contrib-title">{{ c.title }}</p>
+            <p class="contrib-meta">{{ c.action }} · {{ c.time }}</p>
           </div>
-          <div class="contrib-list">
-            <div v-for="(c, i) in recentContribs" :key="i" class="contrib-item">
-              <p class="contrib-title">{{ c.title }}</p>
-              <p class="contrib-meta">{{ c.action }} · {{ c.time }}</p>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div class="content-right">
-        <!-- 我的问答 -->
-        <section class="section-card card">
-          <div class="section-head">
-            <h2 class="section-title"><Icon name="chat" :size="15" class="sec-ico" /> 我的问答</h2>
-            <span class="section-count">{{ sessionsData?.total ?? 0 }}</span>
-          </div>
-          <div v-if="myQuestions.length" class="qa-list">
-            <div v-for="(q, i) in myQuestions" :key="i" class="qa-item">
-              <p class="qa-title">{{ q.title }}</p>
-              <p class="qa-meta" :class="{ answered: q.answered }">{{ q.meta }}</p>
-            </div>
-          </div>
-          <div v-else class="empty-state">
-            <Icon name="chat" :size="28" />
-            <span>还没有提问</span>
-          </div>
-        </section>
-
-      </div>
+        </div>
+      </section>
     </div>
 
     <!-- ====== 设置弹窗 ====== -->
@@ -186,10 +154,6 @@ const showEdit = ref(false)
 </template>
 
 <style scoped>
-.profile-page {
-  max-width: 1100px;
-  margin: 0 auto;
-}
 
 /* ====== 顶部资料卡 ====== */
 .hero-card {
@@ -317,9 +281,8 @@ const showEdit = ref(false)
 /* ====== 主体分栏 ====== */
 .content-grid {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 18px;
-  align-items: start;
+  gap: 20px;
+  align-items: stretch;
 }
 .content-left,
 .content-right {

@@ -274,6 +274,45 @@ export interface GraphFilter {
   to?: string     // ISO 日期，created_at <=
 }
 
+/** 节点分页列表查询参数（GET /api/graph/nodes）。 */
+export interface GraphNodeListQuery {
+  kbId?: string
+  nodeType?: string
+  q?: string        // 名称模糊搜索
+  page?: number
+  pageSize?: number
+}
+
+/** 节点分页列表返回 — 真·全集分页，不受画布采样 limit 限制。 */
+export interface GraphNodeListResult {
+  items: GraphNode[]
+  total: number
+}
+
+/** 边分页列表查询参数（GET /api/graph/edges）。 */
+export interface GraphEdgeListQuery {
+  kbId?: string
+  relation?: string
+  q?: string        // 模糊搜索关系名/源实体/目标实体
+  page?: number
+  pageSize?: number
+}
+
+/** 边列表条目 — 直接携带源/目标 label（表格展示用）。 */
+export interface GraphEdgeListItem {
+  id: string
+  sourceLabel: string
+  targetLabel: string
+  relation: string
+  kbId: string
+}
+
+/** 边分页列表返回 — 真·全集分页，不受画布采样 limit 限制。 */
+export interface GraphEdgeListResult {
+  items: GraphEdgeListItem[]
+  total: number
+}
+
 /** 实体溯源信息（GET /api/graph/nodes/{id}/source）。 */
 export interface GraphNodeSource {
   docId: string | null
@@ -289,6 +328,29 @@ export interface GraphMergeRequest {
   sourceIds: string[]
   targetLabel: string
   targetType?: string | null
+}
+
+/** 合并影响摘要（preview 与 merge 共用同一套字段，保证“所见即所得”）。 */
+export interface GraphMergeImpact {
+  targetExists: boolean        // 目标名是否已是现有节点（将并入而非新建）
+  nodesRemoved: number         // 将被删除的源实体数
+  edgesRedirected: number      // 将被重定向的边数
+  selfLoopsRemoved: number     // 合并后变成自环而被删除的边数
+  duplicateEdgesRemoved: number // 重定向后重复而被去重的边数
+  sourceTypes: string[]        // 源实体的类型集合
+  typeConflict: boolean        // 源实体类型是否不一致
+}
+
+/** 合并预览响应。 */
+export interface GraphMergePreview extends GraphMergeImpact {
+  sources: GraphNode[]
+  targetLabel: string
+}
+
+/** 合并执行结果。 */
+export interface GraphMergeResult extends GraphMergeImpact {
+  merged: number
+  target: GraphNode
 }
 
 /** 知识缺口信号。 */

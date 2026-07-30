@@ -1,12 +1,12 @@
 // 知识图谱共享数据层：四个图谱视图（全局图 / 节点 / 关系 / 统计）共用同一份模块级状态。
 // 四个 tab 来回切换不会重复请求，筛选 / 分页 / 画布状态保留；「搜索」按钮或筛选变化强制刷新。
 // 力导向布局与画布交互仅在「全局图谱」视图内，其余三视图只消费这里的数据。
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
-import { getGraph, getGraphHotNodes, getGraphRecent, exportGraph, getGraphNodeSource, deleteGraphNode, updateGraphNode, createGraphNode, createGraphEdge, deleteGraphEdge, mergeGraphNodes, getGraphGaps, clearGraphGaps, rebuildGraph, getRebuildStatus } from '@/api'
-import type { GraphData, GraphNode, GraphFilter, GraphHotNode, GraphNodeSource, KGGapSignal } from '@/types/api'
+import { getGraph, getGraphNodes, getGraphEdges, getGraphHotNodes, getGraphRecent, exportGraph, getGraphNodeSource, deleteGraphNode, updateGraphNode, createGraphNode, createGraphEdge, deleteGraphEdge, mergeGraphNodes, previewMergeGraphNodes, getGraphGaps, clearGraphGaps, rebuildGraph, getRebuildStatus } from '@/api'
+import type { GraphData, GraphNode, GraphEdgeListItem, GraphFilter, GraphHotNode, GraphNodeSource, GraphMergePreview, GraphMergeResult, KGGapSignal } from '@/types/api'
 
 /* ---- 模块级共享状态：四个视图拿到同一套 refs ---- */
 const graph = ref<GraphData | null>(null)
@@ -218,31 +218,102 @@ export function useGraphData() {
     { key: 'kb', title: '知识库' },
     { key: 'degree', title: '度数' },
   ]
-  const pagedNodes = computed(() => {
-    const nodes = graph.value?.nodes || []
-    const start = (nodePage.value - 1) * nodePageSize.value
-    return nodes.slice(start, start + nodePageSize.value)
-  })
+  // 节点表筛选（透传后端 GET /api/graph/nodes 做真过滤，不再客户端过滤已加载节点）
+  const nodeFilterKb = ref('')
+  const nodeFilterTerm = ref('')
+  const nodeFilterType = ref('')
+  // 服务端列表数据：当前页条目 + 全集总数（独立于画布渲染采样）
+  const nodeListItems = ref<GraphNode[]>([])
+  const nodeTotal = ref(0)
+  const nodeListLoading = ref(false)
+  let nodeListSeq = 0
+  let nodeSearchTimer: ReturnType<typeof setTimeout> | null = null
 
-  /* ---- 关系检索 ---- */
-  const filteredEdges = computed(() => {
-    const t = relTerm.value.trim().toLowerCase()
-    const edges = graph.value?.edges || []
-    if (!t) return edges
-    return edges.filter(
-      (e) =>
-        e.relation.toLowerCase().includes(t) ||
-        nodeLabel(e.source).toLowerCase().includes(t) ||
-        nodeLabel(e.target).toLowerCase().includes(t),
-    )
+  // 类型下拉选项：从已加载图谱节点去重派生（仅供下拉展示，过滤本身走服务端）
+  const nodeTableTypeOpts = computed<{ label: string; value: string }[]>(() => {
+    const types = Array.from(
+      new Set((graph.value?.nodes || []).map((n) => n.type).filter((t): t is string => !!t)),
+    ).sort()
+    return [{ label: '全部类型', value: '' }, ...types.map((t) => ({ label: t, value: t }))]
   })
-  // 关系列表前端分页（同节点表格模式）：大图谱下避免全量渲染长列表卡顿
-  const pagedEdges = computed(() => {
-    const start = (relPage.value - 1) * relPageSize.value
-    return filteredEdges.value.slice(start, start + relPageSize.value)
+  const hasNodeFilter = computed(() => !!(nodeFilterKb.value || nodeFilterTerm.value.trim() || nodeFilterType.value))
+
+  async function fetchNodeList() {
+    const seq = ++nodeListSeq
+    nodeListLoading.value = true
+    try {
+      const res = await getGraphNodes({
+        kbId: nodeFilterKb.value || undefined,
+        nodeType: nodeFilterType.value || undefined,
+        q: nodeFilterTerm.value.trim() || undefined,
+        page: nodePage.value,
+        pageSize: nodePageSize.value,
+      })
+      if (seq !== nodeListSeq) return // 丢弃过期结果，防快速切换筛选的竞态
+      nodeListItems.value = res.items
+      nodeTotal.value = res.total
+    } catch (e: unknown) {
+      if (seq === nodeListSeq) toast.error(`加载节点列表失败：${errMsg(e)}`)
+    } finally {
+      if (seq === nodeListSeq) nodeListLoading.value = false
+    }
+  }
+
+  // pagedNodes 现为服务端返回的当前页数据（保持原名，视图消费方式不变）
+  const pagedNodes = computed(() => nodeListItems.value)
+
+  // 筛选变化先回第一页再请求：页码变了由下方 page 监听触发请求，避免重复拉取
+  function resetPageAndFetch() {
+    if (nodePage.value !== 1) nodePage.value = 1
+    else void fetchNodeList()
+  }
+  watch([nodeFilterKb, nodeFilterType], resetPageAndFetch)
+  // 名称搜索防抖，避免逐键请求
+  watch(nodeFilterTerm, () => {
+    if (nodeSearchTimer) clearTimeout(nodeSearchTimer)
+    nodeSearchTimer = setTimeout(resetPageAndFetch, 300)
   })
-  // 检索词变化时回到第一页，避免停在超出结果集的页码
-  watch(relTerm, () => { relPage.value = 1 })
+  watch([nodePage, nodePageSize], () => { void fetchNodeList() })
+  onUnmounted(() => { if (nodeSearchTimer) clearTimeout(nodeSearchTimer) })
+
+  /* ---- 关系检索（服务端分页/搜索，解耦画布采样）---- */
+  const edgeListItems = ref<GraphEdgeListItem[]>([])
+  const edgeTotal = ref(0)
+  const edgeListLoading = ref(false)
+  let edgeListSeq = 0
+  let relSearchTimer: ReturnType<typeof setTimeout> | null = null
+
+  async function fetchEdgeList() {
+    const seq = ++edgeListSeq
+    edgeListLoading.value = true
+    try {
+      const res = await getGraphEdges({
+        q: relTerm.value.trim() || undefined,
+        page: relPage.value,
+        pageSize: relPageSize.value,
+      })
+      if (seq !== edgeListSeq) return // 丢弃过期结果，防快速输入/切换的竞态
+      edgeListItems.value = res.items
+      edgeTotal.value = res.total
+    } catch (e: unknown) {
+      if (seq === edgeListSeq) toast.error(`加载关系列表失败：${errMsg(e)}`)
+    } finally {
+      if (seq === edgeListSeq) edgeListLoading.value = false
+    }
+  }
+  // 关系列表直接消费服务端当前页数据（不再从画布采样切片）
+  const pagedEdges = computed(() => edgeListItems.value)
+  function resetRelPageAndFetch() {
+    if (relPage.value !== 1) relPage.value = 1
+    else void fetchEdgeList()
+  }
+  // 检索词变化 300ms 防抖 + 回第一页（页码变了由 page watcher 触发请求）
+  watch(relTerm, () => {
+    if (relSearchTimer) clearTimeout(relSearchTimer)
+    relSearchTimer = setTimeout(resetRelPageAndFetch, 300)
+  })
+  watch([relPage, relPageSize], () => { void fetchEdgeList() })
+  onUnmounted(() => { if (relSearchTimer) clearTimeout(relSearchTimer) })
 
   function resetView() {
     tx.value = 0
@@ -341,6 +412,7 @@ export function useGraphData() {
       toast.success('实体已删除')
       selectedId.value = null
       await fetchGraph()
+      void fetchNodeList()
     } catch (e: unknown) {
       toast.error(`删除失败：${errMsg(e)}`)
     }
@@ -351,6 +423,7 @@ export function useGraphData() {
       await updateGraphNode(nodeId, { label, type })
       toast.success('实体已更新')
       await fetchGraph()
+      void fetchNodeList()
     } catch (e: unknown) {
       toast.error(`更新失败：${errMsg(e)}`)
     }
@@ -361,6 +434,7 @@ export function useGraphData() {
       await createGraphNode({ label, type, kbId })
       toast.success('实体已创建')
       await fetchGraph()
+      void fetchNodeList()
     } catch (e: unknown) {
       toast.error(`创建失败：${errMsg(e)}`)
     }
@@ -371,6 +445,7 @@ export function useGraphData() {
       await createGraphEdge({ fromId, toId, relation })
       toast.success('关系已创建')
       await fetchGraph()
+      void fetchEdgeList()
     } catch (e: unknown) {
       toast.error(`创建关系失败：${errMsg(e)}`)
     }
@@ -381,20 +456,36 @@ export function useGraphData() {
       await deleteGraphEdge(edgeId)
       toast.success('关系已删除')
       await fetchGraph()
+      void fetchEdgeList()
     } catch (e: unknown) {
       toast.error(`删除关系失败：${errMsg(e)}`)
     }
   }
 
-  async function mergeNodes(sourceIds: string[], targetLabel: string, targetType?: string) {
+  /** 合并预览：只读计算影响，不写入。报错时返回 null（不弹 toast，由调用方静默处理）。 */
+  async function previewMerge(sourceIds: string[], targetLabel: string): Promise<GraphMergePreview | null> {
     const kbId = effectiveKb.value || graph.value?.nodes.find(n => sourceIds.includes(n.id))?.kbId
-    if (!kbId) { toast.error('请先选择知识库'); return }
+    if (!kbId || !targetLabel.trim()) return null
     try {
-      await mergeGraphNodes({ kbId, sourceIds, targetLabel, targetType })
-      toast.success('实体已合并')
+      return await previewMergeGraphNodes({ kbId, sourceIds, targetLabel: targetLabel.trim() })
+    } catch {
+      return null
+    }
+  }
+
+  /** 执行合并。成功后刷新图谱并返回结构化摘要（供弹窗展示“发生了什么”），失败返回 null。 */
+  async function mergeNodes(sourceIds: string[], targetLabel: string, targetType?: string): Promise<GraphMergeResult | null> {
+    const kbId = effectiveKb.value || graph.value?.nodes.find(n => sourceIds.includes(n.id))?.kbId
+    if (!kbId) { toast.error('请先选择知识库'); return null }
+    try {
+      const res = await mergeGraphNodes({ kbId, sourceIds, targetLabel, targetType })
       await fetchGraph()
+      void fetchNodeList()
+      void fetchEdgeList()
+      return res
     } catch (e: unknown) {
       toast.error(`合并失败：${errMsg(e)}`)
+      return null
     }
   }
 
@@ -554,12 +645,15 @@ export function useGraphData() {
     stats, typeBars, maxDegree, avgDegree,
     selectedNode, selectedNeighbors,
     nodeColumns, nodePage, nodePageSize, pagedNodes,
-    relTerm, filteredEdges, relPage, relPageSize, pagedEdges,
+    nodeFilterKb, nodeFilterTerm, nodeFilterType, nodeTableTypeOpts, hasNodeFilter,
+    nodeTotal, nodeListLoading, fetchNodeList,
+    relTerm, relPage, relPageSize, pagedEdges,
+    edgeTotal, edgeListLoading, fetchEdgeList,
     // 画布
     tx, ty, k, resetView,
     // 动作
     fetchGraph, loadHotRecent, exportRemote, exportCSV, resetAll,
-    loadSource, removeNode, editNode, addNode, addEdge, removeEdge, mergeNodes,
+    loadSource, removeNode, editNode, addNode, addEdge, removeEdge, mergeNodes, previewMerge,
     rebuild, rebuilding, rebuildProgress, resumeRebuildIfRunning,
     loadGaps, dismissGap, enterFocus, exitFocus,
   }

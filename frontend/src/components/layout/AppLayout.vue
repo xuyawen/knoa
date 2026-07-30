@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 布局壳：顶部水平导航栏（logo+主导航+用户）+ 左侧页面子菜单 + 右侧主内容。
 // 按 6 张目标 UI 截图 1:1 还原。
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
@@ -176,8 +176,9 @@ const showSettings = ref(false)
 const user = computed(() => auth.user)
 const userInitial = computed(() => user.value?.name?.[0] ?? '管')
 
-/* ---------- 子侧栏折叠 ---------- */
-const sidebarCollapsed = ref(false)
+/* ---------- 子侧栏折叠（localStorage 持久化） ---------- */
+const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === '1')
+watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1' : '0'))
 </script>
 
 <template>
@@ -315,23 +316,25 @@ const sidebarCollapsed = ref(false)
             <span>{{ item.label }}</span>
           </router-link>
         </div>
-        <div class="sub-footer">
-          <button class="sub-collapse" @click="sidebarCollapsed = true">
+        <div class="sub-footer" @click="sidebarCollapsed = true">
+          <div class="sub-collapse">
             <Icon name="collapse" :size="14" /> 收起菜单
-          </button>
+          </div>
         </div>
       </aside>
 
+      <!-- 收起时的展开把手：放在 body-row 层（非滚动容器），避免随内容滚走 -->
+      <div
+        v-if="sidebarCollapsed && currentSubItems.length"
+        class="side-handle"
+        title="展开菜单"
+        @click="sidebarCollapsed = false"
+      >
+        <Icon name="chevrons-right" :size="16" />
+      </div>
+
       <!-- 主内容区 -->
       <main class="main-content">
-        <button
-          v-if="sidebarCollapsed && currentSubItems.length"
-          class="side-handle"
-          title="展开菜单"
-          @click="sidebarCollapsed = false"
-        >
-          <Icon name="chevrons-right" :size="16" />
-        </button>
         <router-view />
       </main>
     </div>
@@ -700,6 +703,7 @@ const sidebarCollapsed = ref(false)
   display: flex;
   flex: 1;
   min-height: 0;
+  position: relative;
 }
 
 /* 左侧子侧栏 */
@@ -768,7 +772,6 @@ const sidebarCollapsed = ref(false)
 }
 
 .sub-footer {
-  padding: 12px 18px;
   flex-shrink: 0;
   border-top: 1px solid var(--border);
 }
@@ -777,7 +780,7 @@ const sidebarCollapsed = ref(false)
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 12px;
+  padding: 10px 30px;
   border: none;
   background: transparent;
   border-radius: var(--radius-md);
@@ -805,13 +808,13 @@ const sidebarCollapsed = ref(false)
 /* 收起时：左边缘安静把手（像侧栏延伸，非浮块） */
 .side-handle {
   position: absolute;
-  top: 50%;
+  bottom: 0;
   left: 0;
   transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
+  width: 15px;
   height: 48px;
   border: none;
   border-right: 1px solid var(--border);

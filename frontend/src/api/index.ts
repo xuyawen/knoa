@@ -14,8 +14,14 @@ import type {
   GraphData,
   GraphFilter,
   GraphHotNode,
+  GraphMergePreview,
   GraphMergeRequest,
+  GraphMergeResult,
   GraphNode,
+  GraphNodeListQuery,
+  GraphNodeListResult,
+  GraphEdgeListQuery,
+  GraphEdgeListResult,
   GraphNodeSource,
   KGGapSignal,
   DashboardMetrics,
@@ -363,6 +369,28 @@ export async function getGraph(kbId?: string | null, filter?: GraphFilter): Prom
   return request(`/api/graph${qs ? `?${qs}` : ''}`)
 }
 
+/** 节点管理表格的分页列表 — 服务端过滤/分页/名称搜索，不受画布采样 limit 限制。 */
+export async function getGraphNodes(query: GraphNodeListQuery = {}): Promise<GraphNodeListResult> {
+  const params = new URLSearchParams()
+  if (query.kbId) params.set('kb_id', query.kbId)
+  if (query.nodeType) params.set('node_type', query.nodeType)
+  if (query.q) params.set('q', query.q)
+  params.set('page', String(query.page ?? 1))
+  params.set('page_size', String(query.pageSize ?? 15))
+  return request(`/api/graph/nodes?${params.toString()}`)
+}
+
+/** 关系检索表格的分页列表 — 服务端过滤/分页/搜索，不受画布采样 limit 限制。 */
+export async function getGraphEdges(query: GraphEdgeListQuery = {}): Promise<GraphEdgeListResult> {
+  const params = new URLSearchParams()
+  if (query.kbId) params.set('kb_id', query.kbId)
+  if (query.relation) params.set('relation', query.relation)
+  if (query.q) params.set('q', query.q)
+  params.set('page', String(query.page ?? 1))
+  params.set('page_size', String(query.pageSize ?? 15))
+  return request(`/api/graph/edges?${params.toString()}`)
+}
+
 /** 热门实体 TopN（按度数）。 */
 export async function getGraphHotNodes(limit = 5, kbId?: string | null): Promise<GraphHotNode[]> {
   const params = new URLSearchParams()
@@ -413,7 +441,7 @@ export async function updateGraphNode(nodeId: string, body: { label?: string; ty
 
 /** 删除实体节点（级联删边）。 */
 export async function deleteGraphNode(nodeId: string): Promise<void> {
-  return request(`/api/graph/nodes/${nodeId}`, { method: 'DELETE' })
+  return requestVoid(`/api/graph/nodes/${nodeId}`, { method: 'DELETE' })
 }
 
 /** 创建关系边。 */
@@ -423,12 +451,17 @@ export async function createGraphEdge(body: { fromId: string; toId: string; rela
 
 /** 删除关系边。 */
 export async function deleteGraphEdge(edgeId: string): Promise<void> {
-  return request(`/api/graph/edges/${edgeId}`, { method: 'DELETE' })
+  return requestVoid(`/api/graph/edges/${edgeId}`, { method: 'DELETE' })
 }
 
-/** 合并实体。 */
-export async function mergeGraphNodes(body: GraphMergeRequest): Promise<{ merged: number }> {
+/** 合并实体。返回结构化摘要（删除了几个、重定向/删除几条边）。 */
+export async function mergeGraphNodes(body: GraphMergeRequest): Promise<GraphMergeResult> {
   return request('/api/graph/merge', { method: 'POST', json: body })
+}
+
+/** 合并预览：只读计算合并影响（不写入），供确认前展示“会发生什么”。 */
+export async function previewMergeGraphNodes(body: { kbId: string; sourceIds: string[]; targetLabel: string }): Promise<GraphMergePreview> {
+  return request('/api/graph/merge/preview', { method: 'POST', json: body })
 }
 
 /** 知识缺口列表。 */

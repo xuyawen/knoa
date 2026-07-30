@@ -115,7 +115,7 @@ const canvasH = ref(680)
 // shallowRef：坐标是高频变更热点，绕过深代理；交互结束时手动 triggerRef 一次性触发渲染
 const lNodes = shallowRef<LNode[]>([])
 const svgRef = ref<SVGSVGElement | null>(null)
-const rootRef = ref<SVGGElement | null>(null)
+const contentRef = ref<HTMLDivElement | null>(null)
 const zoomLabelRef = ref<HTMLElement | null>(null)
 
 function computeLayout(nodes: GraphNode[], edges: GraphEdge[]): LNode[] {
@@ -398,12 +398,21 @@ watch(svgRef, (el) => {
   resizeRO.observe(el)
 }, { immediate: true })
 
+// 内容层挂载后应用初始视图变换：setup 阶段的 immediate watch([tx,ty,k]) 执行时 DOM 尚未挂载，
+// writeViewTransform 拿不到元素，这里在内容层 div 出现后补写一次
+watch(contentRef, (el) => {
+  if (el) writeViewTransform()
+})
+
 // 进入页面 / 切换知识库时，若该库仍在后台重建（如刷新后），恢复进度横幅 + 轮询
 watch(() => gFilterBiz.value || selectedKb.value, (kb) => {
   if (kb) void resumeRebuildIfRunning(kb)
 }, { immediate: true })
 
-/* ---- 高亮（悬浮 / 选中 / 搜索） ---- */
+/* ---- 高亮（悬浮 / 选中 / 搜索 / 图例透镜） ---- */
+// 图例悬浮类型（透镜）：须在 dimState 之前定义——dimState 的 getter 引用了它，
+// 而 watch(dimState) 注册时会立即求值一次，若此时它仍在 TDZ 会抛 ReferenceError
+const legendHoverType = ref<string | null>(null)
 const focusId = computed(() => hoveredId.value ?? selectedId.value)
 const activeIds = computed<Set<string> | null>(() => {
   const set = new Set<string>()
@@ -446,6 +455,24 @@ const dimState = computed(() => {
   }
   return { nodes, edges }
 })
+// dim 直写 DOM：模板不再绑 :class dim（避免悬浮时全树 diff），
+// 由此 watcher 在 DOM 更新后批量 toggle dim 类（O(n) 原生操作，绕过 Vue 重渲染）
+watch(dimState, (ds) => {
+  const svg = svgRef.value
+  if (!svg) return
+  // 节点 DOM 顺序与 lNodes 一致（v-show 不移除元素），按序对位即可
+  const nodeEls = svg.querySelectorAll<SVGGElement>('g.nodes > g.gnode')
+  const nodes = lNodes.value
+  for (let i = 0; i < nodeEls.length; i++) {
+    const id = nodes[i]?.id
+    nodeEls[i].classList.toggle('dim', id ? !!ds.nodes.get(id) : false)
+  }
+  // 边可能被 v-show 隐藏（聚焦模式），用 data-i 定位而非位置索引
+  const edgeEls = svg.querySelectorAll<SVGGElement>('g.edges > g[data-i]')
+  for (const el of edgeEls) {
+    el.classList.toggle('dim', !!ds.edges[Number(el.dataset.i)])
+  }
+}, { flush: 'post' })
 // 边标签降噪：有焦点时只显示焦点相关边，无焦点时边少才全显
 function edgeLabelShown(i: number, e: GraphEdge): boolean {
   if (dimState.value.edges[i]) return false
@@ -453,11 +480,29 @@ function edgeLabelShown(i: number, e: GraphEdge): boolean {
   if (f) return e.source === f || e.target === f
   return (graph.value?.edges.length || 0) <= 60
 }
-// 悬浮合并：快速掠过多个节点时 rAF 内只取最后一次，避免逐节点触发整树渲染
-let hoverRaf = 0
+// 悬浮防抖：鼠标停留超过 300ms 才提交高亮，避免快速划过节点时高频 dim/undim 交替
+// 导致“屏幕疯狂闪动”（每次提交都会重算 dimState 并批量 toggle 347 节点 + 406 边的 class）。
+// 离开用 150ms 短缓冲：缓冲期内重入同一节点（鼠标抖动/相邻节点间隙）高亮原样保留，
+// 避免“瞬间熄灭文重新点亮”；移到另一节点时立即清掉旧高亮，防止等待期间“陈旧高亮”残留
+const HOVER_ENTER_DELAY = 300
+const HOVER_LEAVE_DELAY = 150
+let hoverEnterTimer: ReturnType<typeof setTimeout> | null = null
+let hoverLeaveTimer: ReturnType<typeof setTimeout> | null = null
 function setHover(id: string | null) {
-  if (hoverRaf) cancelAnimationFrame(hoverRaf)
-  hoverRaf = requestAnimationFrame(() => { hoverRaf = 0; hoveredId.value = id })
+  if (id !== null) {
+    // pointerenter：取消待定的离开清除，重开 500ms 提交定时器
+    if (hoverLeaveTimer) { clearTimeout(hoverLeaveTimer); hoverLeaveTimer = null }
+    if (hoverEnterTimer) clearTimeout(hoverEnterTimer)
+    if (hoveredId.value === id) return // 重入当前正高亮的节点：原样保留
+    if (hoveredId.value !== null) hoveredId.value = null // 高亮着别的节点：立即清除避免陈旧高亮
+    hoverEnterTimer = setTimeout(() => { hoverEnterTimer = null; hoveredId.value = id }, HOVER_ENTER_DELAY)
+  } else {
+    // pointerleave：取消未提交的进入定时器；已提交的高亮短缓冲后再清除
+    if (hoverEnterTimer) { clearTimeout(hoverEnterTimer); hoverEnterTimer = null }
+    if (hoveredId.value !== null && !hoverLeaveTimer) {
+      hoverLeaveTimer = setTimeout(() => { hoverLeaveTimer = null; hoveredId.value = null }, HOVER_LEAVE_DELAY)
+    }
+  }
 }
 
 // 节点标签语义缩放：总览时只显示高度数 hub 节点的名字，随缩放增大逐步显示全部；
@@ -480,7 +525,6 @@ function nodeLabelShown(id: string): boolean {
  * 默认只展示节点数 Top N 的类型（带计数），其余收进「更多」；
  * 悬浮某类型时画布上只高亮该类型节点，图例即探索透镜。 ---- */
 const legendExpanded = ref(false)
-const legendHoverType = ref<string | null>(null)
 const LEGEND_COLLAPSED_COUNT = 10
 const visibleLegendTypes = computed(() =>
   legendExpanded.value ? typeBars.value : typeBars.value.slice(0, LEGEND_COLLAPSED_COUNT)
@@ -489,12 +533,12 @@ const hiddenTypeCount = computed(() => Math.max(0, typeBars.value.length - LEGEN
 
 /* ---- 交互：平移 / 拖拽 / 缩放 ----
  * 性能：原先每次 pointermove 都触发整棵 SVG（节点+边+标签，数百个元素）的全量 diff；
- * 现改为 rAF 合并 + 直接写 DOM——平移/缩放只更新根 <g> 的 transform（O(1)），
+ * 现改为 rAF 合并 + 直接写 DOM——平移/缩放只更新视口 div 的 CSS transform（O(1)，GPU 合成），
  * 节点拖拽只更新该节点与相连边（O(度数)）；交互结束再提交回共享 ref，触发一次校准渲染。
  */
 let panning = false
 let dragging: string | null = null
-let lastRoot: { x: number; y: number } | null = null
+let lastClient: { x: number; y: number } | null = null
 // 交互期间的本地视图状态（watcher 与共享 tx/ty/k 同步，交互结束时提交回去）
 let viewTx = 0
 let viewTy = 0
@@ -507,10 +551,14 @@ let zoomCommitTimer: ReturnType<typeof setTimeout> | null = null
 let dragEl: SVGGElement | null = null
 let dragPos: { x: number; y: number } | null = null
 let dragEdgeEls: { path: SVGPathElement; label: SVGTextElement | null; e: GraphEdge }[] = []
+// 节点拖拽按下时捕获的 屏幕→用户空间 逆矩阵（拖拽期间视图变换不变，矩阵稳定）
+let dragInv: DOMMatrix | null = null
 
-// 共享视图状态的外部变更（fitView / 缩放按钮）同步到本地镜像
+// 共享视图状态的外部变更（fitView / 缩放按钮）同步到本地镜像，并直写 DOM
+// （模板 :transform 属性绑定会被 CSS transform 覆盖，仅作为初始/降级值）
 watch([tx, ty, k], () => {
   viewTx = tx.value; viewTy = ty.value; viewK = k.value
+  writeViewTransform()
 }, { immediate: true })
 
 function cancelZoomCommit() {
@@ -519,26 +567,31 @@ function cancelZoomCommit() {
 }
 onUnmounted(() => {
   if (rafId) cancelAnimationFrame(rafId)
-  if (hoverRaf) cancelAnimationFrame(hoverRaf)
+  if (hoverEnterTimer) clearTimeout(hoverEnterTimer)
+  if (hoverLeaveTimer) clearTimeout(hoverLeaveTimer)
   cancelZoomCommit()
   resizeRO?.disconnect()
   if (resizeTimer) clearTimeout(resizeTimer)
 })
 
-function toRoot(clientX: number, clientY: number) {
-  const svg = svgRef.value
-  if (!svg) return { x: 0, y: 0 }
-  const ctm = svg.getScreenCTM()
-  if (!ctm) return { x: 0, y: 0 }
-  const inv = ctm.inverse()
-  return { x: clientX * inv.a + clientY * inv.b + inv.e, y: clientX * inv.c + clientY * inv.d + inv.f }
-}
-function toLocal(clientX: number, clientY: number) {
-  const r = toRoot(clientX, clientY)
-  return { x: (r.x - viewTx) / viewK, y: (r.y - viewTy) / viewK }
-}
 function writeViewTransform() {
-  rootRef.value?.setAttribute('transform', `translate(${viewTx},${viewTy}) scale(${viewK})`)
+  // 变换的是内层“内容层” div（canvas-content），而非接收指针事件的外层视口 div（canvas-viewport）：
+  // CSS transform 会连同命中测试区域一起移动——若变换事件层本身，平移后其可交互区域随之挪走，
+  // 原位置露出无法拖动的死区。故事件层固定铺满画布、内容层单独变换（d3-zoom/Leaflet 同款分层）。
+  // 变换用 CSS transform 而非内层 <g> 属性：Chrome 不会给 <svg> 及内部 <g> 建独立合成层
+  // （加 will-change 仍每帧重布局 + 重光栅全部元素，实测 ~45ms/帧），而 HTML div 可合成，
+  // 提升后平移/缩放只需 GPU 重组（实测 ~5ms/帧）。viewBox 与元素实际尺寸一致（缩放=1），
+  // translate(tx,ty) scale(k) 与原 <g> 属性 transform 数值等效
+  const el = contentRef.value
+  if (!el) return
+  // 平移量取整到设备像素整数：高分屏（如 DPR=1.5）下分数平移会让合成层纹理每帧被
+  // 分数偏移采样，细边线与文字的抗锯齿逐帧变化→视觉上“节点都在抖动”；取整后
+  // 图像每帧整体移动整数个设备像素，采样模式恒定，抠图稳定不抖（viewTx 本身仍保留
+  // 精确值用于增量计算与提交，只有显示值取整，误差不累积）
+  const dpr = window.devicePixelRatio || 1
+  const rx = Math.round(viewTx * dpr) / dpr
+  const ry = Math.round(viewTy * dpr) / dpr
+  el.style.transform = `translate(${rx}px, ${ry}px) scale(${viewK})`
 }
 function scheduleFrame() {
   if (!rafId) rafId = requestAnimationFrame(applyFrame)
@@ -557,8 +610,9 @@ function applyFrame() {
   if (pendingPointer) {
     const p = pendingPointer
     pendingPointer = null
-    if (dragging && dragEl && dragPos) {
-      const l = toLocal(p.x, p.y)
+    if (dragging && dragEl && dragPos && dragInv) {
+      // dragInv 已含内容层 div 的 CSS transform，直接把屏幕坐标映射到节点坐标（无需再解 viewTx/viewK）
+      const l = { x: p.x * dragInv.a + p.y * dragInv.b + dragInv.e, y: p.x * dragInv.c + p.y * dragInv.d + dragInv.f }
       dragPos.x = l.x
       dragPos.y = l.y
       dragEl.setAttribute('transform', `translate(${l.x},${l.y})`)
@@ -576,11 +630,12 @@ function applyFrame() {
           label.setAttribute('y', String(edgeLabelY(sx, sy, ex, ey)))
         }
       }
-    } else if (panning && lastRoot) {
-      const r = toRoot(p.x, p.y)
-      viewTx += r.x - lastRoot.x
-      viewTy += r.y - lastRoot.y
-      lastRoot = r
+    } else if (panning && lastClient) {
+      // 平移增量直接用 client 坐标差：内容层 div 的 translate 与屏幕像素 1:1（平移分量在 scale 之外），
+      // 不经 getScreenCTM 反算——其结果含 div 自身 scale，逐帧重取会产生累积漂移（图谱“追不上”鼠标）
+      viewTx += p.x - lastClient.x
+      viewTy += p.y - lastClient.y
+      lastClient = { x: p.x, y: p.y }
       writeViewTransform()
     }
   }
@@ -588,14 +643,17 @@ function applyFrame() {
 function onCanvasDown(e: PointerEvent) {
   if (dragging) return
   panning = true
-  lastRoot = toRoot(e.clientX, e.clientY)
+  lastClient = { x: e.clientX, y: e.clientY }
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
 }
 function onNodeDown(e: PointerEvent, id: string) {
   e.stopPropagation()
   dragging = id
-  lastRoot = null
+  lastClient = null
   dragEl = e.currentTarget as SVGGElement
+  // 拖拽起始捕获 屏幕→用户空间 逆矩阵：getScreenCTM 已含视口 div 的 CSS transform，
+  // 其逆把屏幕坐标直接映射到节点坐标；拖拽期间视图变换不变，矩阵保持稳定
+  dragInv = svgRef.value?.getScreenCTM()?.inverse() ?? null
   const nd = lNodes.value.find((x) => x.id === id)
   dragPos = nd ? { x: nd.x, y: nd.y } : null
   // 一次性收集相连边的 DOM 元素（之后每帧更新是 O(度数)，绕过全树 diff）
@@ -629,6 +687,7 @@ function onUp() {
   dragging = null
   dragEl = null
   dragPos = null
+  dragInv = null
   dragEdgeEls = []
 }
 function onWheel(e: WheelEvent) {
@@ -723,18 +782,22 @@ function confirmRebuild() {
           <p class="empty-sub">上传并审核文档后，系统会自动抽取实体与关系构建知识图谱。</p>
         </div>
 
-        <svg
+        <div
           v-else
-          ref="svgRef"
-          :viewBox="`0 0 ${canvasW} ${canvasH}`"
-          class="force-graph"
-          preserveAspectRatio="xMidYMid meet"
+          class="canvas-viewport"
           @pointerdown="onCanvasDown"
           @pointermove="onMove"
           @pointerup="onUp"
           @pointerleave="onUp"
           @wheel.prevent="onWheel"
           @dblclick="selectedId = null"
+        >
+        <div ref="contentRef" class="canvas-content">
+        <svg
+          ref="svgRef"
+          :viewBox="`0 0 ${canvasW} ${canvasH}`"
+          class="force-graph"
+          preserveAspectRatio="xMidYMid meet"
         >
           <defs>
             <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="2.5" orient="auto-start-reverse" markerUnits="strokeWidth">
@@ -746,26 +809,30 @@ function confirmRebuild() {
             </filter>
           </defs>
 
-          <g ref="rootRef" :transform="`translate(${tx},${ty}) scale(${k})`">
+          <g>
             <!-- 边（曲线） -->
             <g class="edges" fill="none">
-              <template v-for="(e, i) in (graph?.edges || [])" :key="'e' + i">
-                <g v-if="edgeRender[i] && (!focusedNodeIds || (focusedNodeIds.has(e.source) && focusedNodeIds.has(e.target)))" :data-i="i" :class="{ dim: dimState.edges[i] }">
-                  <path
-                    :d="edgeRender[i]!.d"
-                    :stroke="dimState.edges[i] ? 'rgba(100,116,139,.15)' : 'rgba(148,163,184,.38)'"
-                    :stroke-width="focusId && (e.source === focusId || e.target === focusId) ? 2 : 1.2"
-                    marker-end="url(#arrow)"
-                  />
-                  <text
-                    v-if="edgeLabelShown(i, e)"
-                    :x="edgeRender[i]!.lx"
-                    :y="edgeRender[i]!.ly"
-                    class="edge-label"
-                    text-anchor="middle"
-                  >{{ e.relation }}</text>
-                </g>
-              </template>
+              <g
+                v-for="(e, i) in (graph?.edges || [])"
+                v-show="edgeRender[i] && (!focusedNodeIds || (focusedNodeIds.has(e.source) && focusedNodeIds.has(e.target)))"
+                v-memo="[edgeRender[i]?.d, edgeLabelShown(i, e), focusId === e.source || focusId === e.target, !focusedNodeIds || (focusedNodeIds.has(e.source) && focusedNodeIds.has(e.target)), e.relation]"
+                :key="'e' + i"
+                :data-i="i"
+              >
+                <path
+                  :d="edgeRender[i]?.d || ''"
+                  stroke="rgba(148,163,184,.38)"
+                  :stroke-width="focusId && (e.source === focusId || e.target === focusId) ? 2 : 1.2"
+                  marker-end="url(#arrow)"
+                />
+                <text
+                  v-if="edgeLabelShown(i, e)"
+                  :x="edgeRender[i]?.lx ?? 0"
+                  :y="edgeRender[i]?.ly ?? 0"
+                  class="edge-label"
+                  text-anchor="middle"
+                >{{ e.relation }}</text>
+              </g>
             </g>
 
             <!-- 节点 -->
@@ -773,9 +840,9 @@ function confirmRebuild() {
               <g
                 v-for="(n, i) in lNodes"
                 v-show="!focusedNodeIds || focusedNodeIds.has(n.id)"
+                v-memo="[nodeRender[i].tf, nodeRender[i].fill, nodeRender[i].label, hoveredId === n.id, selectedId === n.id, focusNodeId === n.id, nodeLabelShown(n.id), !focusedNodeIds || focusedNodeIds.has(n.id)]"
                 :key="n.id"
                 :transform="nodeRender[i].tf"
-                :class="{ dim: dimState.nodes.get(n.id) }"
                 class="gnode"
                 @pointerenter="setHover(n.id)"
                 @pointerleave="setHover(null)"
@@ -815,6 +882,8 @@ function confirmRebuild() {
             </g>
           </g>
         </svg>
+        </div>
+        </div>
 
         <div v-if="graph && graph.nodes.length" class="canvas-footer">
           <div class="zoom-controls">

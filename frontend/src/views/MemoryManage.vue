@@ -92,24 +92,22 @@ onMounted(loadMemories)
 
 <template>
   <div class="mem-page fade-up">
-    <div class="mem-head">
-      <div>
-        <h1 class="mem-title">
-          记忆管理
-          <span v-if="!loading && memories.length" class="mem-count">{{ memories.length }} 条</span>
-        </h1>
+    <div class="mem-head card">
+      <div class="mem-head-left">
         <p class="mem-sub">系统会在问答过程中自动学习关于你的长期记忆（用户画像、偏好、关键事实等），你可以在此查看或遗忘。</p>
       </div>
-      <button
-        class="btn btn-danger btn-sm"
-        :disabled="!memories.length || clearing"
-        @click="showClearConfirm = true"
-      >
-        <Icon name="trash" :size="13" /> 清空全部
-      </button>
-      <button class="icon-btn" title="刷新" :disabled="loading" @click="loadMemories(true)" style="flex-shrink:0">
-        <Icon name="refresh" :size="15" :class="{ spin: loading }" />
-      </button>
+      <div class="mem-actions">
+        <button class="icon-btn" title="刷新" :disabled="loading" @click="loadMemories(true)">
+          <Icon name="refresh" :size="15" :class="{ spin: loading }" />
+        </button>
+        <button
+          class="btn btn-danger btn-sm"
+          :disabled="!memories.length || clearing"
+          @click="showClearConfirm = true"
+        >
+          <Icon name="trash" :size="13" /> 清空全部
+        </button>
+      </div>
     </div>
 
     <div class="card mem-body">
@@ -156,15 +154,16 @@ onMounted(loadMemories)
 </template>
 
 <style scoped>
-.mem-page { max-width: 880px; margin: 0 auto; }
 .mem-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
+  padding: 14px 16px;
   margin-bottom: 16px;
 }
-.mem-title { font-size: 20px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px; display: flex; align-items: center; gap: 10px; }
+.mem-head-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mem-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .mem-count {
   font-size: 12px;
   font-weight: 600;
@@ -174,9 +173,10 @@ onMounted(loadMemories)
   padding: 2px 10px;
   border-radius: var(--radius-pill);
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
-.mem-sub { margin: 0; font-size: 13px; color: var(--text-tertiary); line-height: 1.6; max-width: 640px; }
-.mem-body { padding: 6px; }
+.mem-sub { margin: 0; font-size: 13px; color: var(--text-tertiary); line-height: 1.6; }
+.mem-body { padding: 0; overflow: hidden; }
 .mem-hint, .mem-empty {
   display: flex;
   flex-direction: column;
@@ -187,15 +187,16 @@ onMounted(loadMemories)
   color: var(--text-tertiary);
   font-size: 13px;
 }
-.mem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.mem-list { list-style: none; margin: 0; padding: 0; }
 .mem-item {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 12px 14px;
-  border-radius: var(--radius-md);
+  border-bottom: 1px solid var(--border);
   transition: background var(--dur-fast) var(--ease-out);
 }
+.mem-item:last-child { border-bottom: none; }
 .mem-item:hover { background: var(--bg-hover); }
 .mem-item-main { flex: 1; min-width: 0; }
 .mem-type {
@@ -220,10 +221,9 @@ onMounted(loadMemories)
 }
 .mem-time { font-size: 12px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 
-.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--radius-md); color: var(--text-secondary); transition: background var(--dur-fast), color var(--dur-fast); }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--radius-md); color: var(--text-secondary); cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); }
 .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .icon-btn:disabled { opacity: 0.5; cursor: default; }
 .spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-
 </style>

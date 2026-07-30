@@ -651,6 +651,11 @@ async function confirmBatchDelete() {
 
         <!-- 右侧操作组 -->
         <div class="toolbar-actions">
+          <!-- 刷新 -->
+          <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDocs(true)">
+            <Icon name="refresh" :size="15" :class="{ spin: loading }" />
+          </button>
+
           <!-- 批量上传（归档视图不显示） -->
           <button
             v-if="scope !== 'archive'"
@@ -659,11 +664,6 @@ async function confirmBatchDelete() {
             @click="openUploadModal"
           >
             <Icon name="upload" :size="13" /> {{ hasActiveUpload ? '上传中…' : '批量上传' }}
-          </button>
-
-          <!-- 刷新 -->
-          <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDocs(true)">
-            <Icon name="refresh" :size="15" :class="{ spin: loading }" />
           </button>
 
           <span class="action-divider"></span>
@@ -867,37 +867,48 @@ async function confirmBatchDelete() {
     </div>
 
     <!-- 网格视图 -->
-    <div class="file-grid card" v-else>
-      <div v-if="scope === 'archive'" class="scope-banner warn">
+    <template v-else>
+      <div v-if="scope === 'archive'" class="scope-banner warn card">
         <Icon name="archive" :size="14" />
         <span>文档归档：仅展示状态为「已拒绝」的文档。</span>
       </div>
-      <div
-        v-for="d in docs"
-        :key="d.id"
-        class="doc-card"
-        :class="{ 'row-selected': isSelected(d.id) }"
-        @click="toggleSelect(d.id)"
-      >
-        <div class="doc-card-top">
-          <span class="file-icon-sm" :style="{ background: fileMeta(d.type).color + '18', color: fileMeta(d.type).color }">
-            <Icon :name="fileMeta(d.type).icon" :size="18" />
-          </span>
-          <span class="status-badge mini" :class="statusType(d.status)">{{ d.status }}</span>
+      <div class="file-grid">
+        <div
+          v-for="d in docs"
+          :key="d.id"
+          class="doc-card"
+          :class="{ 'row-selected': isSelected(d.id) }"
+          @click="toggleSelect(d.id)"
+        >
+          <div class="doc-card-top">
+            <span class="file-icon-sm" :style="{ background: fileMeta(d.type).color + '18', color: fileMeta(d.type).color }">
+              <Icon :name="fileMeta(d.type).icon" :size="18" />
+            </span>
+            <span class="status-badge mini" :class="statusType(d.status)">{{ d.status }}</span>
+          </div>
+          <div class="doc-card-title" :title="d.title">{{ d.title }}</div>
+          <div class="doc-card-meta">{{ d.type }} · {{ fmtTime(d.updatedAt) }}</div>
+          <div class="doc-card-actions" @click.stop>
+            <button class="action-btn preview" title="预览" @click="onPreview(d)"><Icon name="eye" :size="15" /></button>
+            <button class="action-btn approve" title="通过审核" @click="onApprove(d)"><Icon name="check" :size="15" /></button>
+            <button class="action-btn reject" title="驳回" @click="onReject(d)"><Icon name="close" :size="15" /></button>
+            <button class="action-btn danger" title="删除" @click="onDelete(d)"><Icon name="trash" :size="15" /></button>
+          </div>
         </div>
-        <div class="doc-card-title" :title="d.title">{{ d.title }}</div>
-        <div class="doc-card-meta">{{ d.type }} · {{ fmtTime(d.updatedAt) }}</div>
-        <div class="doc-card-actions" @click.stop>
-          <button class="action-btn preview" title="预览" @click="onPreview(d)"><Icon name="eye" :size="15" /></button>
-          <button class="action-btn approve" title="通过审核" @click="onApprove(d)"><Icon name="check" :size="15" /></button>
-          <button class="action-btn reject" title="驳回" @click="onReject(d)"><Icon name="close" :size="15" /></button>
-          <button class="action-btn danger" title="删除" @click="onDelete(d)"><Icon name="trash" :size="15" /></button>
+        <div v-if="!loading && !docs.length" class="grid-empty">
+          {{ selectedKb ? '该知识库暂无文档' : '请选择左侧知识库' }}
         </div>
       </div>
-      <div v-if="!loading && !docs.length" class="grid-empty">
-        {{ selectedKb ? '该知识库暂无文档' : '请选择左侧知识库' }}
-      </div>
-    </div>
+      <Pagination
+        v-if="total > 0"
+        v-model:page="currentPage"
+        v-model:page-size="pageSize"
+        :total="total"
+        :page-sizes="[10, 20, 50]"
+        @update:page="loadDocs()"
+        @update:page-size="currentPage = 1; loadDocs()"
+      />
+    </template>
 
     <!-- ====== 预览弹窗（含 AI 辅助审核；拆分组件） ====== -->
     <DocPreviewModal
@@ -1315,17 +1326,17 @@ async function confirmBatchDelete() {
 /* ---- 网格视图 ---- */
 .file-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 14px;
 }
 .doc-card {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 14px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
   transition: all var(--dur-fast);
 }
@@ -1344,7 +1355,9 @@ async function confirmBatchDelete() {
 .doc-card-actions {
   display: flex;
   gap: 2px;
-  margin-top: 2px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 .grid-empty {
   grid-column: 1 / -1;

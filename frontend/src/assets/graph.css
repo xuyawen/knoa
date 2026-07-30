@@ -40,7 +40,16 @@
 
 /* ---- 图布主体 ---- */
 .graph-body { display: grid; grid-template-columns: 1fr 300px; gap: 14px; min-height: 540px; }
-.canvas-area { display: flex; flex-direction: column; overflow: hidden; padding: 0; position: relative; }
+.canvas-area {
+  display: flex; flex-direction: column; overflow: hidden; padding: 0; position: relative;
+  /* 画布背景渐变：原本在 .force-graph 上，但 svg 整体要做 GPU 变换实现平移，背景不能跟着动，
+     故移到容器；末层 var(--bg-surface) 保住 .card 的底色 */
+  background:
+    radial-gradient(ellipse at 25% 35%, rgba(59, 130, 246, 0.05) 0%, transparent 55%),
+    radial-gradient(ellipse at 75% 65%, rgba(139, 92, 246, 0.04) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 50%, rgba(16, 185, 129, 0.02) 0%, transparent 70%),
+    var(--bg-surface);
+}
 
 /* 聚焦模式标签（画布内悬浮） */
 /* 聚焦节点发光环 */
@@ -64,14 +73,31 @@
 .empty-title { font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px; }
 .empty-sub { font-size: 13px; line-height: 1.6; margin: 0; }
 
-.force-graph {
-  width: 100%; flex: 1; min-height: 480px; cursor: grab; touch-action: none;
-  background:
-    radial-gradient(ellipse at 25% 35%, rgba(59, 130, 246, 0.05) 0%, transparent 55%),
-    radial-gradient(ellipse at 75% 65%, rgba(139, 92, 246, 0.04) 0%, transparent 55%),
-    radial-gradient(ellipse at 50% 50%, rgba(16, 185, 129, 0.02) 0%, transparent 70%);
+.canvas-viewport {
+  /* 事件层：固定铺满画布、接收全部指针事件，自身不做任何 transform。
+     不能变换这个 div——CSS transform 会连同命中测试区域一起移动，平移后原位置会露出
+     无法拖动的死区；真正被平移/缩放的是内层 .canvas-content（事件层与内容层分离，d3-zoom/Leaflet 同款） */
+  flex: 1; position: relative; min-height: 480px; cursor: grab; touch-action: none;
+  overflow: hidden; /* 裁剪被变换后溢出视口的内容层 */
+  /* 禁止画布内文本选中：否则真实拖拽会触发浏览器原生选择——选中高亮即“文字虚影”，
+     且原生选择会接管指针/释放 pointer capture，导致平移中断（“动一点就拖不动”）；user-select 可继承到 svg 及节点标签 */
+  user-select: none; -webkit-user-select: none;
 }
-.force-graph:active { cursor: grabbing; }
+.canvas-viewport:active { cursor: grabbing; }
+.canvas-content {
+  /* 内容层：唯一被 transform 的元素（平移/缩放）。Chrome 不会给 <svg> 及内部 <g> 建独立
+     合成层（加 will-change 变换 svg 仍每帧重布局 + 重光栅，实测 ~45ms/帧），而 HTML div 可合成，
+     提升为图层后平移/缩放只需 GPU 重组（实测 ~5ms/帧）；svg 作为图层纹理随之移动，无需重绘 */
+  position: absolute; inset: 0; will-change: transform; transform-origin: 0 0;
+}
+.force-graph {
+  /* svg 作为视口 div 的图层纹理，绝对定位铺满容器；viewBox 动态跟随实际尺寸（缩放=1）。
+     必须显式 width/height 100%：SVG 带 viewBox 时有固有宽高比，height:auto 会按 viewBox
+     比例算高（无视 bottom:0），导致 svg 填不满视口、图谱在矮 svg 里被 overflow:hidden 截断 */
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  /* 禁止原生拖拽（避免拖影）；user-select 从视口 div 继承，双保险禁止选中文本 */
+  -webkit-user-drag: none; user-select: none; -webkit-user-select: none;
+}
 .edge-label {
   font-size: 10px; font-weight: 500; fill: var(--text-tertiary); pointer-events: none;
   paint-order: stroke; stroke: var(--bg-surface); stroke-width: 3px; stroke-linejoin: round;
@@ -82,7 +108,7 @@
   font-size: 11px; fill: var(--text-primary); pointer-events: none; font-weight: 600;
   paint-order: stroke; stroke: var(--bg-surface); stroke-width: 3.5px; stroke-linejoin: round;
 }
-.gnode.dim, .edges .dim { opacity: 0.1; transition: opacity var(--dur-fast); }
+.gnode.dim, .edges .dim { opacity: 0.1; }
 
 .canvas-footer {
   display: flex; align-items: center; justify-content: space-between;

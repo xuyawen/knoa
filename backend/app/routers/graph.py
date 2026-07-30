@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user, get_accessible_kb_ids, get_kb_permission_level
 from app.core.graph import GraphStore, _invalidate_graph
+from app.core.pagination import paginate
 from app.database import AsyncSessionLocal
 from app.db import DocChunk, Document, KGEdge, KGGapSignal, KGNode, KnowledgeBase, User
 from app.deps import get_db, get_embedder, get_llm
@@ -79,23 +80,27 @@ def _base_node_q(
     biz_category: str | None,
     dt_from: datetime | None,
     dt_to: datetime | None,
+    q: str | None = None,
 ) -> Select:
     """带全部筛选条件的节点基础查询。
 
     恒内联 knowledge_base（kb_id 为外键、KB.id 为主键，不会增减行数），
     以便同一查询派生 subquery 复用于 count / group_by / 全集 label 采集。
+    q 非空时追加实体名称模糊过滤（ilike，大小写不敏感）。
     """
-    q = select(KGNode).join(KnowledgeBase, KnowledgeBase.id == KGNode.kb_id)
-    q = q.where(KGNode.kb_id == kb_id if kb_id else KGNode.kb_id.in_(allowed))
+    stmt = select(KGNode).join(KnowledgeBase, KnowledgeBase.id == KGNode.kb_id)
+    stmt = stmt.where(KGNode.kb_id == kb_id if kb_id else KGNode.kb_id.in_(allowed))
     if node_type:
-        q = q.where(KGNode.type == node_type)
+        stmt = stmt.where(KGNode.type == node_type)
     if biz_category:
-        q = q.where(KnowledgeBase.category == biz_category)
+        stmt = stmt.where(KnowledgeBase.category == biz_category)
     if dt_from:
-        q = q.where(KGNode.created_at >= dt_from)
+        stmt = stmt.where(KGNode.created_at >= dt_from)
     if dt_to:
-        q = q.where(KGNode.created_at <= dt_to)
-    return q
+        stmt = stmt.where(KGNode.created_at <= dt_to)
+    if q:
+        stmt = stmt.where(KGNode.label.ilike(f"%{q.strip()}%"))
+    return stmt
 
 
 def _edge_kb_scope(q: Select, kb_id: str | None, allowed: list[str]) -> Select:
@@ -179,6 +184,29 @@ async def get_graph(
             "typeCounts": type_counts,
         },
     }
+
+
+@router.get("/graph/nodes")
+async def list_graph_nodes(
+    kb_id: str | None = Query(default=None, description="按知识库过滤；不传返回全部"),
+    node_type: str | None = Query(default=None, description="按实体类别过滤（KGNode.type）"),
+    q: str | None = Query(default=None, description="按实体名称模糊搜索（大小写不敏感）"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=15, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _current: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """节点管理表格的分页列表 — 真·全集分页，不受画布渲染采样 limit 限制。
+
+    与 GET /api/graph 共用同一套过滤/RBAC 逻辑（_base_node_q）；只返回当前页节点 + total，
+    不计算边/stats（那些是画布渲染数据，表格不需要），翻页开销恒定。
+    """
+    allowed = await get_accessible_kb_ids(db, _current)
+    if kb_id and kb_id not in allowed:
+        raise HTTPException(status_code=403, detail="无权访问该知识库的图谱")
+    base = _base_node_q(kb_id, allowed, node_type, None, None, None, q)
+    rows, total = await paginate(db, base.order_by(KGNode.created_at.desc(), KGNode.id), page=page, page_size=page_size)
+    return {"items": [_node_out(r[0]) for r in rows], "total": total}
 
 
 @router.get("/graph/hot-nodes")
@@ -427,7 +455,9 @@ async def create_graph_node(
         embedding=embedding,
     )
     db.add(node)
-    await db.flush()
+    # 必须 commit：get_db 请求结束只 close（未提交即回滚），仅 flush 不会落库。
+    # commit 隐含 flush（node.id 已分配），expire_on_commit=False 保证 _node_out 仍可读。
+    await db.commit()
     _invalidate_graph(body.kb_id)
     return _node_out(node)
 
@@ -472,7 +502,7 @@ async def update_graph_node(
         node.embedding = (await embedder.embed([body.label]))[0]
     if body.type is not None:
         node.type = body.type
-    await db.flush()
+    await db.commit()
     _invalidate_graph(node.kb_id)
     return _node_out(node)
 
@@ -500,8 +530,50 @@ async def delete_graph_node(
         )
     )
     await db.delete(node)
-    await db.flush()
+    await db.commit()
     _invalidate_graph(node.kb_id)
+
+
+@router.get("/graph/edges")
+async def list_graph_edges(
+    kb_id: str | None = Query(default=None, description="按知识库过滤；不传返回全部"),
+    relation: str | None = Query(default=None, description="按关系类型过滤（KGEdge.relation）"),
+    q: str | None = Query(default=None, description="模糊搜索关系名/源实体/目标实体（大小写不敏感）"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=15, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _current: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """关系检索表格的分页列表 — 真·全集分页，不受画布渲染采样 limit 限制。
+
+    与 GET /api/graph 共用 RBAC 逻辑（_edge_kb_scope）；q 同时匹配关系名/源实体/目标实体。
+    只返回当前页边 + total，items 直接携带源/目标 label（表格展示用，无需再查节点）。
+    """
+    allowed = await get_accessible_kb_ids(db, _current)
+    if kb_id and kb_id not in allowed:
+        raise HTTPException(status_code=403, detail="无权访问该知识库的图谱")
+    stmt = _edge_kb_scope(select(KGEdge), kb_id, allowed)
+    if relation:
+        stmt = stmt.where(KGEdge.relation == relation)
+    if q:
+        pat = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(KGEdge.relation.ilike(pat), KGEdge.from_label.ilike(pat), KGEdge.to_label.ilike(pat))
+        )
+    rows, total = await paginate(db, stmt.order_by(KGEdge.created_at.desc(), KGEdge.id), page=page, page_size=page_size)
+    return {
+        "items": [
+            {
+                "id": str(e.id),
+                "sourceLabel": e.from_label,
+                "targetLabel": e.to_label,
+                "relation": e.relation,
+                "kbId": e.kb_id,
+            }
+            for (e,) in rows
+        ],
+        "total": total,
+    }
 
 
 @router.post("/graph/edges", status_code=201)
@@ -541,7 +613,7 @@ async def create_graph_edge(
         relation=body.relation,
     )
     db.add(edge)
-    await db.flush()
+    await db.commit()
     _invalidate_graph(from_node.kb_id)
     return {"id": str(edge.id), "source": str(from_node.id), "target": str(to_node.id), "relation": edge.relation}
 
@@ -562,8 +634,105 @@ async def delete_graph_edge(
         raise HTTPException(status_code=404, detail="关系不存在")
     await _require_kb_write(db, user, edge.kb_id, "admin")
     await db.delete(edge)
-    await db.flush()
+    await db.commit()
     _invalidate_graph(edge.kb_id)
+
+
+async def _load_merge_sources(db: AsyncSession, kb_id: str, source_ids: list[str]) -> list[KGNode]:
+    """加载合并源节点并校验：无效 ID → 400；一个都找不到 → 404；
+    查回数少于请求数（不存在 / 跨库）→ 400。绝不静默丢弃。"""
+    source_uuids = []
+    for sid in source_ids:
+        try:
+            source_uuids.append(_uuid.UUID(sid))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"无效的节点 ID: {sid}") from None
+    sources = list((await db.execute(
+        select(KGNode).where(KGNode.id.in_(source_uuids), KGNode.kb_id == kb_id)
+    )).scalars().all())
+    if not sources:
+        raise HTTPException(status_code=404, detail="未找到源实体")
+    if len(sources) != len(set(source_uuids)):
+        raise HTTPException(
+            status_code=400,
+            detail="部分源实体不存在或不属于该知识库，请仅合并同一知识库内的实体",
+        )
+    return sources
+
+
+async def _merge_plan(
+    db: AsyncSession, kb_id: str, sources: list[KGNode], target_label: str,
+) -> dict[str, Any]:
+    """只读计算合并影响：模拟边重定向 → 自环删除 → 去重，给出各项变更计数。
+
+    预览接口与实际合并共用这一套规则，保证“所见即所得”；
+    合并端点先执行它、再应用变更，并将其作为结果摘要返回。
+    """
+    source_labels = {n.label for n in sources}
+    target_exists = await db.scalar(
+        select(KGNode.id).where(KGNode.kb_id == kb_id, KGNode.label == target_label)
+    ) is not None
+
+    # 端点命中 source_labels 或 target_label 的所有边——恰是合并会波及的全集
+    candidates = list((await db.execute(
+        select(KGEdge).where(
+            KGEdge.kb_id == kb_id,
+            or_(
+                KGEdge.from_label.in_(source_labels | {target_label}),
+                KGEdge.to_label.in_(source_labels | {target_label}),
+            ),
+        )
+    )).scalars().all())
+
+    redirected = 0
+    self_loops = 0
+    groups: dict[tuple[str, str, str], int] = {}
+    for e in candidates:
+        nf = target_label if e.from_label in source_labels else e.from_label
+        nt = target_label if e.to_label in source_labels else e.to_label
+        if nf == nt:  # 重定向后变成自环 → 删除
+            self_loops += 1
+            continue
+        if nf != e.from_label or nt != e.to_label:
+            redirected += 1
+        key = (nf, nt, e.relation)
+        groups[key] = groups.get(key, 0) + 1
+    duplicates = sum(c - 1 for c in groups.values() if c > 1)
+
+    src_types = sorted({n.type for n in sources if n.type})
+    return {
+        "targetExists": target_exists,
+        "nodesRemoved": sum(1 for n in sources if n.label != target_label),
+        "edgesRedirected": redirected,
+        "selfLoopsRemoved": self_loops,
+        "duplicateEdgesRemoved": duplicates,
+        "sourceTypes": src_types,
+        "typeConflict": len(src_types) > 1,
+    }
+
+
+class _MergePreviewRequest(BaseModel):
+    kb_id: str = Field(..., alias="kbId")
+    source_ids: list[str] = Field(..., alias="sourceIds", min_length=1)
+    target_label: str = Field(..., alias="targetLabel", min_length=1, max_length=200)
+
+    model_config = {"populate_by_name": True}
+
+
+@router.post("/graph/merge/preview")
+async def preview_merge(
+    body: _MergePreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """合并预览：只读计算合并影响（将删除几个实体、重定向/删除几条边），不写入。
+
+    供用户选好实体、输入目标名后，在确认前于弹窗里展示“会发生什么”。
+    """
+    await _require_kb_write(db, user, body.kb_id, "admin")
+    sources = await _load_merge_sources(db, body.kb_id, body.source_ids)
+    plan = await _merge_plan(db, body.kb_id, sources, body.target_label)
+    return {"sources": [_node_out(n) for n in sources], "targetLabel": body.target_label, **plan}
 
 
 @router.post("/graph/merge")
@@ -572,20 +741,14 @@ async def merge_graph_nodes(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """合并多个同义实体为一个 target。边重定向，源节点删除。需要 admin。"""
+    """合并多个同义实体为一个 target。边重定向，源节点删除。需要 admin。
+
+    返回结构化摘要（字段与 preview 一致），供前端明确告知用户发生了什么。
+    """
     await _require_kb_write(db, user, body.kb_id, "admin")
-    # 加载源节点
-    source_uuids = []
-    for sid in body.source_ids:
-        try:
-            source_uuids.append(_uuid.UUID(sid))
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"无效的节点 ID: {sid}") from None
-    sources = list((await db.execute(
-        select(KGNode).where(KGNode.id.in_(source_uuids), KGNode.kb_id == body.kb_id)
-    )).scalars().all())
-    if not sources:
-        raise HTTPException(status_code=404, detail="未找到源实体")
+    sources = await _load_merge_sources(db, body.kb_id, body.source_ids)
+    # 先只读算影响、再执行；预览与结果摘要共用同一套规则
+    plan = await _merge_plan(db, body.kb_id, sources, body.target_label)
     source_labels = {n.label for n in sources}
 
     # 查找或创建 target
@@ -593,14 +756,18 @@ async def merge_graph_nodes(
         select(KGNode).where(KGNode.kb_id == body.kb_id, KGNode.label == body.target_label)
     )
     if not target:
-        # 用第一个源节点的 chunk_id 和 embedding
+        # 新建 target：向量必须对应 target_label 重新计算——不能沿用第一个源节点的向量，
+        # 否则合并后节点“名向量不匹配”（向量是源节点 label 的），拉低 Graph RAG 余弦选种质量；
+        # 与 editNode 改 label 后重算 embedding 的行为保持一致
         first = sources[0]
+        embedder = get_embedder()
+        target_embedding = (await embedder.embed([body.target_label]))[0]
         target = KGNode(
             kb_id=body.kb_id,
             label=body.target_label,
             type=body.target_type or first.type,
             chunk_id=first.chunk_id,
-            embedding=first.embedding,
+            embedding=target_embedding,
         )
         db.add(target)
         await db.flush()
@@ -648,9 +815,10 @@ async def merge_graph_nodes(
     for s in sources:
         if s.label != body.target_label:
             await db.delete(s)
-    await db.flush()
+    # 先 commit 再失效缓存：避免 commit 前缓存被并发 GET 重新填回旧数据
+    await db.commit()
     _invalidate_graph(body.kb_id)
-    return {"merged": len(sources), "target": _node_out(target)}
+    return {"merged": len(sources), "target": _node_out(target), **plan}
 
 
 # ======================================================================
@@ -711,7 +879,7 @@ async def clear_graph_gaps(
     if question:
         q = q.where(KGGapSignal.question == question)
     await db.execute(q)
-    await db.flush()
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
