@@ -141,7 +141,7 @@ async def _seed_departments() -> None:
         if cnt:
             return
         # ponytail: 扁平顶层部门即可，树形靠 parent_id 后续自由建
-        for i, name in enumerate(["产品部", "市场部", "财务部", "HR", "管理层", "运维部"], 1):
+        for i, name in enumerate(["财务", "产品", "运营", "客服", "物流", "HR", "研发", "法务"], 1):
             session.add(Department(name=name, sort_order=i))
         await session.commit()
 
