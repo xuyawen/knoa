@@ -27,7 +27,7 @@
 | 编排文件 | `docker-compose.prod-lean.yml`（**不是**默认 `docker-compose.yml`） |
 | 容器 | 5 个：postgres / redis / backend / frontend / edge（nginx 反代） |
 | 代码源 | **Gitee**（阿里云 ECS 出网连不上 GitHub）→ `https://gitee.com/xuyawenmy/knoa.git`，remote 名 `origin` |
-| 最近发版 HEAD | `bca2e22`（2026-07-31，LLM 调用日志监控 + 热搜部门隔离 + 个人中心真实数据 + UI 打磨） |
+| 最近发版 HEAD | `ffee1fa`（2026-08-01，前端事件结构化字段 + DeepSeek thinking 修复 + knowledge store 重置） |
 
 > 服务器上 `git remote -v` 应看到 origin = `https://gitee.com/xuyawenmy/knoa.git`。若看到 github，说明环境被改过，发版前先 `git remote set-url origin https://gitee.com/xuyawenmy/knoa.git`。
 
