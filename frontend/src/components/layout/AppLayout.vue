@@ -645,7 +645,7 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
 .avatar {
   width: 30px;
   height: 30px;
-  border-radius: 50%;
+  border-radius: 5px;
   background: var(--brand);
   color: #fff;
   font-size: 13px;

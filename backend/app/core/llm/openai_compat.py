@@ -84,9 +84,13 @@ class OpenAICompatProvider:
                 if top_p is not None:
                     params["top_p"] = top_p
                 if enable_thinking is not None:
-                    # DeepSeek 等推理模型支持显式关闭思考链；不支持的 provider 会忽略或报错，
-                    # 仅在调用方显式传值时才下发（None = 不干预）
-                    params["enable_thinking"] = enable_thinking
+                    # DeepSeek 思考模式开关（官方文档：api-docs.deepseek.com/guides/thinking_mode）：
+                    # 参数名 thinking，格式 {"type": "enabled"|"disabled"}，通过 extra_body 传递。
+                    # 关闭思考链后 token 预算全部留给正文输出（结构化抽取场景必传，
+                    # 否则思考链吃光 max_tokens 导致 JSON 截断）。
+                    # 注意：思考模式下 temperature/top_p 不生效（设置不报错但被忽略）。
+                    thinking_type = "enabled" if enable_thinking else "disabled"
+                    params["extra_body"] = {"thinking": {"type": thinking_type}}
                 params["messages"] = self._normalize_messages(messages)
                 stream = await self.client.chat.completions.create(**params)
             except Exception as e:  # noqa: BLE001  (intentional catch-all: convert any API failure to ValueError)
