@@ -68,16 +68,34 @@ def _extract_json(text: str):
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # 去 ```json ``` 围栏
-    cleaned = re.sub(r"```(?:json)?", "", text).strip()
+    # 去 ```json ``` 围栏（更宽松：允许前后有空白 / 额外文字）
+    cleaned = re.sub(r"```(?:json)?\s*", "", text).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    # 括号配平提取：跳过字符串内的括号（JSON 值可能含 { [ } ]）
     opens = [i for i, ch in enumerate(cleaned) if ch in "{["]
     if not opens:
         return None
 
     def _match_from(start: int):
         depth = 0
+        in_string = False
+        escape = False
         for i in range(start, len(cleaned)):
             ch = cleaned[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"' and not escape:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
             if ch in "{[":
                 depth += 1
             elif ch in "}]":
@@ -94,7 +112,31 @@ def _extract_json(text: str):
         obj = _match_from(start)
         if isinstance(obj, (dict, list)):
             return obj
-    return None
+    # 兜底：正则提取 entities + relations 块（LLM 输出截断时尽可能抢救实体）
+    return _regex_salvage(cleaned)
+
+
+def _regex_salvage(text: str):
+    """最后手段：正则从截断 JSON 中抢救实体列表（至少能恢复部分节点）。
+
+    当 LLM 输出在 relations 段之前被截断时，entities 数组可能已经完整。
+    """
+    # 非贪婪匹配 entities 数组内容（截断 JSON 可能没有闭合 ]）
+    m = re.search(r'"entities"\s*:\s*\[(.+?)\]', text, re.DOTALL)
+    if not m:
+        # 截断场景：没有闭合 ]，但实体对象可能已经完整
+        m = re.search(r'"entities"\s*:\s*\[(.+)', text, re.DOTALL)
+        if not m:
+            return None
+    block = m.group(1)
+    items = re.findall(r'\{[^}]*"label"\s*:\s*"([^"]+)"[^}]*\}', block)
+    if not items:
+        return None
+    types = {}
+    for full in re.finditer(r'\{[^}]*"label"\s*:\s*"([^"]+)"[^}]*"type"\s*:\s*"([^"]+)"[^}]*\}', block):
+        types[full.group(1)] = full.group(2)
+    logger.info("regex_salvage: recovered %d entities from truncated JSON", len(items))
+    return {"entities": [{"label": lbl, "type": types.get(lbl, "unknown")} for lbl in items], "relations": []}
 
 
 def _coerce_graph(obj) -> dict:
@@ -215,8 +257,8 @@ class GraphStore:
         relations = graph["relations"]
         if not entities:
             logger.warning(
-                "graph extract: LLM returned no entities (doc=%s, raw_len=%d, head=%r) — skip graph",
-                doc_title, len(raw), raw[:120],
+                "graph extract: LLM returned no entities (doc=%s, raw_len=%d, head=%r, tail=%r) — skip graph",
+                doc_title, len(raw), raw[:120], raw[-80:],
             )
             return
 
