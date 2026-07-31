@@ -8,6 +8,8 @@
 
 /* 重建进度横幅（画布内嵌顶部） */
 .rebuild-banner { position: absolute; top: 0; left: 0; right: 0; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 13px; border-left: 3px solid var(--brand); background: var(--bg-tertiary); border-radius: 0; box-shadow: 0 1px 0 var(--border); }
+/* 非画布页面（节点/关系/统计）横幅：相对定位 + 圆角，内联在页面顶部 */
+.graph-page > .rebuild-banner { position: relative; border-radius: var(--radius-md); }
 .rebuild-banner.rb-running { border-left-color: var(--accent-blue); }
 .rebuild-banner.rb-done { border-left-color: var(--accent-green); }
 .rebuild-banner.rb-failed { border-left-color: var(--accent-rose); }

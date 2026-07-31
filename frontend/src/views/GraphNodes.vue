@@ -17,6 +17,7 @@ const {
   nodeFilterKb, nodeFilterTerm, nodeFilterType, nodeTableTypeOpts, hasNodeFilter,
   nodeTotal, fetchNodeList,
   bizCatOpts,
+  rebuildProgress,
 } = useGraphData()
 const auth = useAuthStore()
 const toast = useToastStore()
@@ -142,6 +143,18 @@ async function confirmMerge() {
 
 <template>
   <div class="graph-page">
+    <!-- 图谱重建进度横幅 -->
+    <div v-if="rebuildProgress" class="rebuild-banner" :class="`rb-${rebuildProgress.status}`">
+      <span v-if="rebuildProgress.status === 'running'" class="rb-spinner" />
+      <Icon v-else :name="rebuildProgress.status === 'done' ? 'check' : 'alert'" :size="16" class="rb-icon" />
+      <span v-if="rebuildProgress.status === 'running'" class="rb-text">
+        正在重建「{{ rebuildProgress.kbName }}」图谱… 已处理 {{ rebuildProgress.processed }}/{{ rebuildProgress.total }} 篇
+      </span>
+      <span v-else-if="rebuildProgress.status === 'done'" class="rb-text">「{{ rebuildProgress.kbName }}」图谱重建完成</span>
+      <span v-else class="rb-text">「{{ rebuildProgress.kbName }}」图谱重建异常，请重试</span>
+      <span v-if="rebuildProgress.status === 'running' && rebuildProgress.total" class="rb-track"
+        ><i class="rb-fill" :style="{ width: Math.round(rebuildProgress.processed / rebuildProgress.total * 100) + '%' }" /></span>
+    </div>
     <div class="card node-card">
       <div class="panel-head">
         <span class="panel-title">实体节点（{{ nodeTotal }}）</span>

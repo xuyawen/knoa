@@ -625,6 +625,9 @@ export function useGraphData() {
     } else if (!fetched && !loading.value) {
       await fetchGraph()
     }
+    // 进入任意图谱子页时，若后台仍有重建任务（如刷新/从其他页面切回），恢复进度横幅 + 轮询
+    const kb = gFilterBiz.value || selectedKb.value || knowledge.bases[0]?.id
+    if (kb) void resumeRebuildIfRunning(kb)
   })
 
   // 三个筛选下拉变化 → 重新拉图（后端真实过滤，节点集合随之变化）
