@@ -13,6 +13,14 @@ interface MonitorEvent {
   value?: number
   domInteractive?: number
   level?: 'info' | 'warn' | 'error'
+  /** HTTP 方法（GET/POST/PUT/DELETE 等） */
+  method?: string
+  /** HTTP 状态码 */
+  statusCode?: number
+  /** 请求路径（不含域名，如 /api/knowledge-bases/kb_xxx/documents） */
+  path?: string
+  /** 请求体参数（POST/PUT/PATCH 时携带，截断到 500 字符） */
+  requestBody?: string
 }
 
 function send(ev: MonitorEvent): void {

@@ -99,6 +99,15 @@ async def receive_event(request: Request):
     msg = _sanitize(payload.get("message", ""))
     src = _sanitize(payload.get("url", ""), 512)
 
+    # 提取前端上报的结构化 HTTP 字段（http.error / http.network 事件携带）
+    method = _sanitize(payload.get("method", ""), 10).upper() or None
+    req_path = _sanitize(payload.get("path", ""), 500) or None
+    status_code_raw = payload.get("statusCode")
+    status_code: int | None = None
+    if isinstance(status_code_raw, (int, float)) and 100 <= status_code_raw <= 599:
+        status_code = int(status_code_raw)
+    request_body = _sanitize(payload.get("requestBody", ""), 2000) or None
+
     # 结构化日志：前端事件统一进 knoa.frontend logger（已单行化，防注入）
     if level == "error":
         logger.error("frontend %s: %s @ %s", etype, msg, src)
@@ -111,6 +120,9 @@ async def receive_event(request: Request):
     capture_error(
         source="frontend",
         level=level,
+        method=method,
+        path=req_path,
+        status_code=status_code,
         etype=etype,
         message=msg,
         stack=_sanitize(payload.get("stack", "")) or None,
@@ -118,6 +130,7 @@ async def receive_event(request: Request):
         ip=_client_ip(request),
         user_agent=_sanitize(request.headers.get("user-agent", ""), 300) or None,
         rid=request.headers.get("x-request-id"),
+        request_body=request_body,
     )
 
     # 语义指标：与 HTTP 传输层(/api/events)分开计，方便单独看前端错误量

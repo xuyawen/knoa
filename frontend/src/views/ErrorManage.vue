@@ -216,6 +216,7 @@ async function confirmClear() {
         <div class="d-row" v-if="detail.path"><label>路径</label><span class="mono">{{ detail.path }}</span></div>
         <div class="d-row" v-if="detail.etype"><label>类型</label><span class="mono">{{ detail.etype }}</span></div>
         <div class="d-row" v-if="detail.url"><label>页面 URL</label><span class="mono">{{ detail.url }}</span></div>
+        <div class="d-row" v-if="detail.requestBody"><label>请求体</label><span class="mono req-body">{{ detail.requestBody }}</span></div>
         <div class="d-row" v-if="detail.rid"><label>Request ID</label><span class="mono">{{ detail.rid }}</span></div>
         <div class="d-row" v-if="detail.ip"><label>IP</label><span>{{ detail.ip }}</span></div>
         <div class="d-row" v-if="detail.userAgent"><label>User-Agent</label><span class="ua">{{ detail.userAgent }}</span></div>
@@ -316,6 +317,7 @@ async function confirmClear() {
 .d-row span { color: var(--text-primary); word-break: break-all; }
 .d-row .ua { font-size: 12px; color: var(--text-secondary); }
 .mono { font-family: var(--font-mono, monospace); font-size: 12px; }
+.req-body { word-break: break-all; white-space: pre-wrap; max-height: 120px; overflow: auto; display: block; }
 .d-block { display: flex; flex-direction: column; gap: 6px; }
 .d-block label { font-size: 13px; color: var(--text-tertiary); }
 .d-pre {

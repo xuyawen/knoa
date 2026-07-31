@@ -37,6 +37,7 @@ class ErrorEventOut(CamelModel):
     ip: str | None = None
     userAgent: str | None = None
     url: str | None = None
+    requestBody: str | None = None
     createdAt: str
 
     @classmethod
@@ -55,6 +56,7 @@ class ErrorEventOut(CamelModel):
             ip=e.ip,
             userAgent=e.user_agent,
             url=e.url,
+            requestBody=e.request_body,
             createdAt=e.created_at.isoformat() if e.created_at else "",
         )
 
@@ -73,6 +75,7 @@ def capture_error(
     ip: str | None = None,
     user_agent: str | None = None,
     url: str | None = None,
+    request_body: str | None = None,
 ) -> None:
     """fire-and-forget 记录一条错误事件（同步调用，内部派生后台任务异步落库）。
 
@@ -91,6 +94,7 @@ def capture_error(
                 source=source, level=level, method=method, path=path,
                 status_code=status_code, rid=rid, etype=etype, message=message,
                 stack=stack, ip=ip, user_agent=user_agent, url=url,
+                request_body=request_body,
             )
         )
         _BG_TASKS.add(task)

@@ -18,7 +18,12 @@ const HTTP_MSG: Record<number, string> = {
   503: '服务正在维护中，请稍后再试',
 }
 
-export async function throwHttpError(resp: Response, fallback?: string): Promise<never> {
+export async function throwHttpError(
+  resp: Response,
+  /** 原始请求上下文：方法、请求体，用于错误上报（结构化字段） */
+  reqCtx?: { method?: string; body?: unknown },
+  fallback?: string,
+): Promise<never> {
   const defaultMsg = HTTP_MSG[resp.status] || fallback || `请求失败(${resp.status})`
   let detail = ''
   try {
@@ -36,11 +41,23 @@ export async function throwHttpError(resp: Response, fallback?: string): Promise
   // 登录失败属预期交互，都不算系统异常。
   if (resp.status !== 401) {
     const rid = resp.headers.get('X-Request-ID') || ''
+    const method = reqCtx?.method || ''
+    const reqPath = extractPath(resp.url)
+    // 请求体截断（仅 POST/PUT/PATCH 有实际意义，限制 500 字符避免撑爆上报 payload）
+    let requestBody: string | undefined
+    if (reqCtx?.body !== undefined) {
+      const s = typeof reqCtx.body === 'string' ? reqCtx.body : JSON.stringify(reqCtx.body)
+      requestBody = s.length > 500 ? s.slice(0, 500) + '…' : s
+    }
     report({
       type: 'http.error',
       message: `${resp.status} ${resp.url}${rawDetail ? ` :: ${rawDetail}` : ''}`,
       level: resp.status >= 500 ? 'error' : 'warn',
       info: rid ? `rid=${rid}` : undefined,
+      method,
+      statusCode: resp.status,
+      path: reqPath,
+      requestBody,
     })
   }
   const err = new Error(detail || defaultMsg) as Error & { status: number }
@@ -59,6 +76,17 @@ export interface RequestOptions {
   signal?: AbortSignal
 }
 
+/** 从完整 URL 提取路径部分（不含域名和查询串），用于错误上报 path 字段。 */
+function extractPath(url: string): string {
+  try {
+    const u = new URL(url)
+    return u.pathname
+  } catch {
+    // 相对 URL 或解析失败，直接截取到 ? 之前
+    return url.split('?')[0]
+  }
+}
+
 async function doFetch(url: string, opts?: RequestOptions): Promise<Response> {
   const init: RequestInit = { method: opts?.method, signal: opts?.signal }
   if (opts?.json !== undefined) {
@@ -66,7 +94,7 @@ async function doFetch(url: string, opts?: RequestOptions): Promise<Response> {
     init.body = JSON.stringify(opts.json)
   }
   const resp = await fetch(url, init)
-  if (!resp.ok) await throwHttpError(resp)
+  if (!resp.ok) await throwHttpError(resp, { method: opts?.method, body: opts?.json })
   return resp
 }
 
@@ -188,7 +216,14 @@ async function trackedFetch(
   } catch (err) {
     if (err instanceof TokenExpiredError) throw err
     // 网络层失败（断网/超时/CORS）fetch 会抛到这
-    report({ type: 'http.network', message: `${reqUrl(input)} -> ${String(err)}`, level: 'error' })
+    const method = init?.method || (typeof input === 'object' && 'method' in input ? (input as Request).method : '') || 'GET'
+    report({
+      type: 'http.network',
+      message: `${reqUrl(input)} -> ${String(err)}`,
+      level: 'error',
+      method,
+      path: extractPath(reqUrl(input)),
+    })
     throw err
   } finally {
     inFlight.delete(ctrl)

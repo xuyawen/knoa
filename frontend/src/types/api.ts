@@ -547,6 +547,7 @@ export interface ErrorEvent {
   ip: string | null
   userAgent: string | null
   url: string | null
+  requestBody: string | null
   createdAt: string
 }
 
