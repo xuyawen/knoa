@@ -10,13 +10,15 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
-import { getKnowledgeBases, createKnowledgeBase, updateKnowledgeBase, deleteKnowledgeBase } from '@/api'
-import type { KnowledgeBase } from '@/types/api'
+import { getKnowledgeBases, createKnowledgeBase, updateKnowledgeBase, deleteKnowledgeBase, getDepartments } from '@/api'
+import type { KnowledgeBase, DepartmentNode, KBUpdate } from '@/types/api'
 
 const router = useRouter()
 const store = useKnowledgeStore()
+const auth = useAuthStore()
 const toast = useToastStore()
 
 // --- 列表数据（服务端分页 + 按名称/分类搜索） ---
@@ -63,39 +65,26 @@ function onPageSizeChange(s: number) {
   void load()
 }
 
-// --- 分类中文映射（与后端 category 枚举一致，未收录的原样兜底） ---
-const CAT_LABELS: Record<string, string> = {
-  ops: '运营',
-  finance: '财务',
-  product: '产品',
-  impl: '实施',
-  logistics: '物流',
-  compliance: '合规',
-}
-function catLabel(c?: string | null): string {
-  if (!c) return '—'
-  return CAT_LABELS[c] || c
-}
-// 表单下拉选项（含「未分类」）
-const catOptions = [
-  { label: '未分类', value: '' },
-  { label: '运营', value: 'ops' },
-  { label: '财务', value: 'finance' },
-  { label: '产品', value: 'product' },
-  { label: '实施', value: 'impl' },
-  { label: '物流', value: 'logistics' },
-  { label: '合规', value: 'compliance' },
-]
-
 // --- 新建 / 编辑弹窗（共用一套表单，editing 为 null 表示新建） ---
 const showForm = ref(false)
 const editing = ref<KnowledgeBase | null>(null)
 const saving = ref(false)
-const form = ref({ name: '', category: '', description: '' })
+const form = ref({ name: '', description: '', ownerDeptId: '' })
+// 部门列表（超管建库/编辑时选择归属部门）
+const deptOptions = ref<{ label: string; value: string }[]>([])
+async function loadDepts() {
+  if (deptOptions.value.length) return
+  const tree = await getDepartments()
+  const flat: { label: string; value: string }[] = []
+  const walk = (nodes: DepartmentNode[]) => nodes.forEach(n => { flat.push({ label: n.name, value: n.id }); walk(n.children) })
+  walk(tree)
+  deptOptions.value = flat
+}
 
 function openCreate() {
   editing.value = null
-  form.value = { name: '', category: '', description: '' }
+  form.value = { name: '', description: '', ownerDeptId: '' }
+  if (auth.hasPerm('kb_super')) loadDepts()
   showForm.value = true
 }
 
@@ -103,9 +92,10 @@ function openEdit(kb: KnowledgeBase) {
   editing.value = kb
   form.value = {
     name: kb.name,
-    category: kb.category || '',
     description: kb.description || '',
+    ownerDeptId: kb.ownerDeptId || '',
   }
+  if (auth.hasPerm('kb_super')) loadDepts()
   showForm.value = true
 }
 
@@ -117,10 +107,11 @@ async function submitForm() {
   }
   saving.value = true
   try {
-    const payload = {
+    const payload: KBUpdate & { name: string } = {
       name,
-      category: form.value.category || null,
       description: form.value.description.trim() || null,
+      // 归属部门：超管（kb_super）可指定/变更；非超管由后端强制本部门
+      ...(auth.hasPerm('kb_super') ? { ownerDeptId: form.value.ownerDeptId || null } : {}),
     }
     if (editing.value) {
       await updateKnowledgeBase(editing.value.id, payload)
@@ -200,7 +191,7 @@ onMounted(load)
           <thead>
             <tr>
               <th>名称</th>
-              <th>分类</th>
+              <th>归属部门</th>
               <th>描述</th>
               <th class="col-num">文档数</th>
               <th class="col-num">待审核</th>
@@ -212,7 +203,7 @@ onMounted(load)
               <td class="td-name">
                 <span class="kb-name">{{ kb.name }}</span>
               </td>
-              <td>{{ catLabel(kb.category) }}</td>
+              <td>{{ kb.ownerDeptName || '—' }}</td>
               <td class="td-desc">{{ kb.description || '—' }}</td>
               <td class="col-num">{{ kb.documentCount }}</td>
               <td class="col-num">
@@ -256,8 +247,13 @@ onMounted(load)
         <input v-model="form.name" class="form-input" placeholder="如：运营知识库" />
       </div>
       <div class="form-row">
-        <label class="form-label">分类</label>
-        <CustomSelect v-model="form.category" :options="catOptions" width="100%" />
+        <label class="form-label">归属部门</label>
+        <template v-if="auth.hasPerm('kb_super')">
+          <CustomSelect v-model="form.ownerDeptId" :options="deptOptions" width="100%" placeholder="选择归属部门" />
+        </template>
+        <template v-else>
+          <span class="form-static">{{ auth.user?.department || '—' }}（自动归属本部门）</span>
+        </template>
       </div>
       <div class="form-row">
         <label class="form-label">描述</label>
@@ -384,6 +380,7 @@ onMounted(load)
 /* 表单 */
 .form-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .form-label { width: 60px; flex-shrink: 0; font-size: 13px; color: var(--text-secondary); }
+.form-static { font-size: 13px; color: var(--text-primary); }
 .form-input {
   flex: 1; height: 36px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md);
   font-size: 13px; background: var(--bg-surface); color: var(--text-primary); transition: all var(--dur-fast);

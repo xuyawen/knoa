@@ -3,7 +3,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
-import { getSessions, getKnowledgeBases } from '@/api'
+import { getSessions, getKnowledgeBases, getAcceptedCount, getMyDocCount } from '@/api'
 import Icon from '@/components/ui/Icon.vue'
 import UserProfileSettingsModal from '@/components/user/UserProfileSettingsModal.vue'
 import type { ChatSession, Paginated, KnowledgeBasesResponse } from '@/types/api'
@@ -24,14 +24,20 @@ const employeeId = computed(() => auth.user?.employeeId || '—')
 const loading = ref(true)
 const sessionsData = ref<Paginated<ChatSession> | null>(null)
 const kbData = ref<KnowledgeBasesResponse | null>(null)
+const acceptedCount = ref(0)
+const docCount = ref(0)
 onMounted(async () => {
   try {
-    const [sList, kbResp] = await Promise.all([
+    const [sList, kbResp, accCount, dCount] = await Promise.all([
       getSessions(1, 3),
       getKnowledgeBases(1, 4),
+      getAcceptedCount(),
+      getMyDocCount(),
     ])
     sessionsData.value = sList
     kbData.value = kbResp
+    acceptedCount.value = accCount
+    docCount.value = dCount
   } catch {
     toast.error('加载个人数据失败')
   } finally {
@@ -41,9 +47,9 @@ onMounted(async () => {
 
 /* ---------- 统计 ---------- */
 const stats = computed(() => [
-  { label: '贡献文档', value: '—', icon: 'doc', tone: 'blue' }, // ponytail: 后端暂无用户贡献文档 API，先占位
+  { label: '贡献文档', value: docCount.value, icon: 'doc', tone: 'blue' },
   { label: '提问', value: sessionsData.value?.total ?? 0, icon: 'chat', tone: 'violet' },
-  { label: '采纳回答', value: '—', icon: 'check', tone: 'green' }, // ponytail: 后端暂无采纳统计 API，先占位
+  { label: '采纳回答', value: acceptedCount.value, icon: 'check', tone: 'green' },
   { label: '加入知识库', value: kbData.value?.total ?? 0, icon: 'folder', tone: 'amber' },
 ])
 
@@ -99,7 +105,7 @@ const showEdit = ref(false)
     <section class="stats-row">
       <div v-for="s in stats" :key="s.label" class="stat-card card" :class="`tone-${s.tone}`">
         <div class="stat-top">
-          <span class="stat-num" :class="{ dim: s.value === '—' }">{{ s.value }}</span>
+          <span class="stat-num">{{ s.value }}</span>
         </div>
         <span class="stat-label">{{ s.label }}</span>
       </div>

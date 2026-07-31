@@ -17,13 +17,14 @@ class KnowledgeBase(Base):
     name: Mapped[str] = mapped_column(String(100))
     icon: Mapped[str] = mapped_column(String(50))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # 分类（架构图1：分类系统）
-    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # order 是 SQL 保留字；name="order" + quote=True 编译为带引号的 "order"
     order: Mapped[int] = mapped_column(Integer, name="order", default=0, server_default="0", nullable=False, quote=True)
     pending_count: Mapped[int] = mapped_column(Integer, default=0)
+    # 归属部门（库级隔离的部门维度）：非超管建库强制 = 创建者部门；超管可跨部门指定或留空。
+    owner_dept_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("department.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     documents: Mapped[list["Document"]] = relationship(back_populates="kb")
+    owner_dept: Mapped["Department | None"] = relationship(lazy="joined")
 
 
 class Document(Base):
@@ -384,3 +385,28 @@ class UserAnnouncementRead(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), primary_key=True)
     announcement_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("announcement.id"), primary_key=True)
     read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ErrorEvent(Base):
+    """错误事件（错误管理页数据源）。
+
+    两个来源：backend=后端 HTTP 4xx/5xx（observability 中间件捕获）；
+    frontend=前端上报（monitor.ts → /api/events）。fire-and-forget 异步写入，
+    绝不阻塞主流程；created_at/source/status_code 加索引供错误管理页过滤。
+    """
+    __tablename__ = "error_event"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] = mapped_column(String(16), index=True)   # backend | frontend
+    level: Mapped[str] = mapped_column(String(16), default="error")  # info | warn | error
+    method: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    rid: Mapped[str | None] = mapped_column(String(32), nullable=True)  # 请求 id，可与后端日志串联
+    etype: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 事件类型（http.error / vue.error …）
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stack: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

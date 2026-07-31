@@ -7,15 +7,15 @@ import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
-import { createRole, deleteRole, getRoles, setRolePermissions, updateRole } from '@/api/auth'
-import type { RoleOut, RoleCreate } from '@/types/api'
-import { PERMISSIONS } from '@/types/api'
+import { createRole, deleteRole, getRoles, setRolePermissions, updateRole, getPermissions } from '@/api/auth'
+import type { RoleOut, RoleCreate, PermissionDef } from '@/types/api'
 
 const toast = useToastStore()
 
 const roles = ref<RoleOut[]>([])
 const loading = ref(false)
 const selectedId = ref<string | null>(null)
+const permissions = ref<PermissionDef[]>([])
 
 const selectedRole = computed(() => roles.value.find((r) => r.id === selectedId.value) || null)
 
@@ -165,7 +165,10 @@ async function saveName() {
   }
 }
 
-onMounted(loadRoles)
+onMounted(async () => {
+  permissions.value = await getPermissions()
+  await loadRoles()
+})
 </script>
 
 <template>
@@ -221,7 +224,7 @@ onMounted(loadRoles)
 
           <h4 class="rm-sub">权限配置</h4>
           <div class="perm-rows">
-            <div v-for="p in PERMISSIONS" :key="p.key" class="perm-row">
+            <div v-for="p in permissions" :key="p.key" class="perm-row">
               <div class="perm-meta">
                 <span class="perm-label">{{ p.label }}</span>
                 <span class="perm-group">{{ p.group }}</span>
@@ -261,7 +264,7 @@ onMounted(loadRoles)
       <div class="form-row form-row-col">
         <label class="form-label">初始权限</label>
         <div class="perm-checks">
-          <label v-for="p in PERMISSIONS" :key="p.key" class="perm-check" @click.prevent="toggleNewPerm(p.key)">
+          <label v-for="p in permissions" :key="p.key" class="perm-check" @click.prevent="toggleNewPerm(p.key)">
             <input type="checkbox" :checked="newForm.perms.has(p.key)" />
             <span>{{ p.label }}</span>
           </label>

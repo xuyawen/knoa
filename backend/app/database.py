@@ -101,13 +101,6 @@ async def _migrate_columns(conn) -> None:
         await conn.execute(
             text(f"ALTER TABLE document ADD COLUMN IF NOT EXISTS {name} {typ}")
         )
-    kb_cols2 = [
-        ("category", "VARCHAR(50)"),
-    ]
-    for name, typ in kb_cols2:
-        await conn.execute(
-            text(f"ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS {name} {typ}")
-        )
     # 模型配置偏好（JSONB）：从服务端读取，前端不再存 localStorage
     user_cols = [("model_prefs", "JSONB")]
     for name, typ in user_cols:

@@ -11,6 +11,8 @@ class Perm:
     """权限 key 常量（与前端角色管理矩阵一一对应）。"""
 
     KB_VIEW = "kb_view"          # 知识库查看
+    KB_EDIT = "kb_edit"          # 知识库编辑（管理成员/授权/编辑库信息）
+    KB_SUPER = "kb_super"        # 知识库超管（全部库 admin 级 + 跨部门建库/授权/改归属）
     DOC_UPLOAD = "doc_upload"    # 文档上传
     DOC_EDIT = "doc_edit"        # 文档编辑
     DOC_DELETE = "doc_delete"    # 文档删除
@@ -30,6 +32,8 @@ class PermissionDef:
 # 权限清单（前端矩阵渲染 + 后端校验共用）
 PERMISSIONS: list[PermissionDef] = [
     PermissionDef(Perm.KB_VIEW, "知识库查看", "知识库"),
+    PermissionDef(Perm.KB_EDIT, "知识库编辑", "知识库"),
+    PermissionDef(Perm.KB_SUPER, "知识库超管", "知识库"),
     PermissionDef(Perm.DOC_UPLOAD, "文档上传", "知识库"),
     PermissionDef(Perm.DOC_EDIT, "文档编辑", "知识库"),
     PermissionDef(Perm.DOC_DELETE, "文档删除", "知识库"),
@@ -50,11 +54,25 @@ BUILTIN_ROLES: dict[str, dict] = {
     },
     "editor": {
         "name": "编辑",
-        "description": "可维护知识库内容（上传/编辑文档、管理图谱）",
+        "description": "可维护知识库内容（上传/编辑文档、管理图谱、管理库成员）",
         "perms": [
             Perm.KB_VIEW,
+            Perm.KB_EDIT,
             Perm.DOC_UPLOAD,
             Perm.DOC_EDIT,
+            Perm.AI_QA,
+            Perm.GRAPH_MANAGE,
+        ],
+    },
+    "demo": {
+        "name": "演示",
+        "description": "功能演示账号，除系统管理外拥有全部功能权限",
+        "perms": [
+            Perm.KB_VIEW,
+            Perm.KB_EDIT,
+            Perm.DOC_UPLOAD,
+            Perm.DOC_EDIT,
+            Perm.DOC_DELETE,
             Perm.AI_QA,
             Perm.GRAPH_MANAGE,
         ],

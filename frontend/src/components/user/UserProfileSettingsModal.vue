@@ -354,7 +354,7 @@ const pwdStrength = computed(() => {
   font-size: 12px;
   font-weight: 600;
 }
-.r-admin { color: var(--brand); background: var(--brand-soft); }
+.r-admin { color: var(--accent-violet); background: var(--accent-violet-soft); }
 .r-editor { color: var(--accent-amber); background: var(--accent-amber-soft); }
 .r-viewer { color: var(--text-secondary); background: var(--bg-subtle); }
 .dot-status {

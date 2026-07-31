@@ -64,7 +64,7 @@ async def main() -> None:
                     name=f"{name}知识库",
                     icon=icon,
                     description=desc,
-                    category=key,
+                    owner_dept_id=d.id,
                 )
             )
             await db.flush()  # 必须立即落库，后续 KBDeptGrant 的 FK 才能满足

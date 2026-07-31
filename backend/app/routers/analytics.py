@@ -7,8 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import Document, KnowledgeBase, OperationLog, Role, User
 from app.deps import get_db
-from app.core.rbac import Perm
-from app.core.security import require_permission
+from app.core.security import get_current_user
 
 router = APIRouter()
 
@@ -52,7 +51,7 @@ async def _distinct_users(db: AsyncSession, start: datetime, end: datetime | Non
 @router.get("/analytics/dashboard")
 async def dashboard(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission(Perm.USER_MANAGE)),
+    _: User = Depends(get_current_user),
 ):
     t_start, t_end = _today_range()
     y_start, y_end = _yesterday_range()
@@ -95,7 +94,7 @@ async def dashboard(
 async def trend(
     period: str = Query("week", alias="range", pattern="^(today|week|month)$"),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission(Perm.USER_MANAGE)),
+    _: User = Depends(get_current_user),
 ):
     """按时间桶聚合问答次数（真实数据源：OperationLog.action='ask'）。"""
     now = datetime.now(timezone.utc)
@@ -137,7 +136,7 @@ async def trend(
 @router.get("/analytics/kb-distribution")
 async def kb_distribution(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission(Perm.USER_MANAGE)),
+    _: User = Depends(get_current_user),
 ):
     """按知识库分组统计文档数（饼图数据源）。知识库即文档的天然分类——
     上传时强制选定 kb_id（非空外键），无需额外维护分类词汇表。"""
@@ -152,7 +151,7 @@ async def kb_distribution(
 
 @router.get("/analytics/user-stats")
 async def user_stats(
-    current: User = Depends(require_permission(Perm.USER_MANAGE)),
+    current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """用户统计：活跃数 / 总用户 / 新增 / 角色分布 / 状态分布 / 近7天趋势。
@@ -227,7 +226,7 @@ async def user_stats(
 @router.get("/analytics/doc-stats")
 async def doc_stats(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission(Perm.USER_MANAGE)),
+    _: User = Depends(get_current_user),
 ):
     """文档统计：按知识库 / 状态 / 类型聚合 + 近7天新增趋势（文档统计分区真实数据源）。"""
     by_kb = (await db.execute(
@@ -284,7 +283,7 @@ def _window(days: int) -> datetime:
 @router.get("/analytics/hot-ask")
 async def hot_ask(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission(Perm.USER_MANAGE)),
+    _: User = Depends(get_current_user),
 ):
     """热门问答榜：近 30 天 action=ask 的提问按文本聚合，取 Top 10。"""
     cutoff = _window(30)
@@ -306,7 +305,7 @@ async def hot_ask(
 @router.get("/analytics/knowledge-gaps")
 async def knowledge_gaps(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission(Perm.USER_MANAGE)),
+    _: User = Depends(get_current_user),
 ):
     """知识缺口榜：近 30 天 action∈(ask,search) 且检索命中数为 0 的提问，
     按文本聚合取 Top 10，提示运营该补哪些文档。"""

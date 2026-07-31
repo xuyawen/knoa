@@ -78,7 +78,7 @@ loadAnnouncements()
 <template>
   <div class="dashboard">
     <div class="ann-panel card">
-      <div v-if="auth.isAdmin" class="ann-toolbar">
+      <div v-if="auth.hasPerm('doc_edit')" class="ann-toolbar">
         <button class="icon-btn" title="刷新" @click="loadAnnouncements(true)"><Icon name="refresh" :size="14" /></button>
         <button class="btn btn-primary btn-sm" @click="openCreateAnn">
           <Icon name="plus" :size="14" /> 新建公告
@@ -92,7 +92,7 @@ loadAnnouncements()
           <span v-if="a.pinned" class="ann-pin">置顶</span>
           <span class="ann-level" :class="'lvl-' + a.level">{{ { info: '普通', warning: '警告', success: '成功', error: '严重' }[a.level] }}</span>
           <span class="ann-time">{{ fmtTime(a.createdAt) }}</span>
-          <template v-if="auth.isAdmin">
+          <template v-if="auth.hasPerm('doc_edit')">
             <button class="ann-action" title="编辑" @click="openEditAnn(a)"><Icon name="edit" :size="14" /></button>
             <button class="ann-action" :title="a.pinned ? '取消置顶' : '置顶'" @click="togglePin(a)">
               <Icon :name="a.pinned ? 'pin-off' : 'pin'" :size="14" />

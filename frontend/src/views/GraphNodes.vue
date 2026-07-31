@@ -54,9 +54,9 @@ const crossKb = computed(() => {
   return kbs.size > 1
 })
 // 合并仅 admin 可用（后端 _require_kb_write(..., "admin")），按钮同步门控，避免非管理员点了确认才收到 403
-const canMerge = computed(() => auth.isAdmin && selectedIds.value.size >= 2 && !crossKb.value)
+const canMerge = computed(() => auth.hasPerm('graph_manage') && selectedIds.value.size >= 2 && !crossKb.value)
 const mergeDisabledHint = computed(() => {
-  if (!auth.isAdmin) return '仅管理员可合并实体'
+  if (!auth.hasPerm('graph_manage')) return '无图谱管理权限，无法合并实体'
   if (crossKb.value) return '不能跨知识库合并，请仅选择同一知识库内的实体'
   if (selectedIds.value.size < 2) return '请至少选择 2 个实体'
   return ''

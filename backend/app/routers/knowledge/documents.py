@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -382,6 +382,25 @@ async def upload_document(
     await record_operation(db, user, "upload", related_doc_id=str(doc.id), detail=filename)
 
     return doc_out(doc)
+
+
+@router.get("/documents/my-count")
+async def my_document_count(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """当前用户已审核入库的文档总数（跨所有知识库）。
+
+    个人中心「贡献文档」统计用：按 uploader_id 归属只数自己上传的，
+    且仅计 status='已审核'（已入库可检索）；待复核/已拒绝不计入贡献。
+    须注册在 /documents/{doc_id} 之前，否则 "my-count" 会被动态路由抢匹配。
+    """
+    cnt = await db.scalar(
+        select(func.count())
+        .select_from(Document)
+        .where(Document.uploader_id == user.id, Document.status == "已审核")
+    )
+    return {"count": cnt or 0}
 
 
 @router.get("/documents/{doc_id}", response_model=DocumentDetailOut)

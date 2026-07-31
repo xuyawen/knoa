@@ -117,7 +117,7 @@ async def list_departments(
 async def create_department(
     payload: DepartmentCreateIn,
     db: AsyncSession = Depends(get_db),
-    _: Department = Depends(require_permission(Perm.SYS_SETTINGS)),
+    _: Department = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     parent_id = None
     if payload.parent_id:
@@ -151,7 +151,7 @@ async def update_department(
     dept_id: str,
     payload: DepartmentUpdateIn,
     db: AsyncSession = Depends(get_db),
-    _: Department = Depends(require_permission(Perm.SYS_SETTINGS)),
+    _: Department = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     d = await db.scalar(select(Department).where(Department.id == uuid.UUID(dept_id)))
     if d is None:
@@ -205,7 +205,7 @@ async def update_department(
 async def reorder_departments(
     payload: DepartmentReorderIn,
     db: AsyncSession = Depends(get_db),
-    _: Department = Depends(require_permission(Perm.SYS_SETTINGS)),
+    _: Department = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     """同级部门拖拽排序：传入某父级（或顶级 None）下的完整有序 id 列表，按序重设 sort_order。
 
@@ -236,7 +236,7 @@ async def reorder_departments(
 async def delete_department(
     dept_id: str,
     db: AsyncSession = Depends(get_db),
-    _: Department = Depends(require_permission(Perm.SYS_SETTINGS)),
+    _: Department = Depends(require_permission(Perm.USER_MANAGE)),
 ):
     d = await db.scalar(select(Department).where(Department.id == uuid.UUID(dept_id)))
     if d is None:

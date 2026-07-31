@@ -65,7 +65,7 @@ async def _resolve_department_id(db: AsyncSession, department_id: str | None) ->
     return did
 
 
-def _to_out(u: User) -> UserOut:
+def _to_out(u: User, perms: list[str] | None = None) -> UserOut:
     return UserOut(
         id=str(u.id),
         username=u.username,
@@ -80,6 +80,7 @@ def _to_out(u: User) -> UserOut:
         department_id=str(u.department_id) if u.department_id else None,
         department=u.department_ref.name if u.department_ref else None,
         employee_id=u.employee_id,
+        permissions=perms or [],
     )
 
 
@@ -149,7 +150,8 @@ async def login(payload: LoginIn, response: Response, db: AsyncSession = Depends
     token = create_access_token(str(user.id), user.username, user.role)
     _set_auth_cookie(response, token)
     await record_operation(db, user, "login")
-    return TokenOut(access_token=token, user=_to_out(user))
+    perms = sorted(await get_role_permissions(db, user.role_id))
+    return TokenOut(access_token=token, user=_to_out(user, perms))
 
 
 @router.post("/auth/logout")
@@ -170,8 +172,9 @@ async def logout(request: Request, response: Response):
 
 
 @router.get("/auth/me", response_model=UserOut)
-async def me(user: User = Depends(get_current_user)):
-    return _to_out(user)
+async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    perms = sorted(await get_role_permissions(db, user.role_id))
+    return _to_out(user, perms)
 
 
 @router.put("/auth/change-password")

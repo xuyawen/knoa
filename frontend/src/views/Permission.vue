@@ -222,7 +222,7 @@ const roleSelectOptions = computed(() =>
             <Icon name="refresh" :size="15" :class="{ spin: loading }" />
           </button>
           <div class="perm-h-row" style="margin-left:auto">
-            <button v-if="auth.isAdmin" class="btn btn-primary btn-sm" @click="openCreate">
+            <button v-if="auth.hasPerm('user_manage')" class="btn btn-primary btn-sm" @click="openCreate">
               <Icon name="plus" :size="13" /> 新建用户
             </button>
           </div>
@@ -383,7 +383,7 @@ const roleSelectOptions = computed(() =>
   display: inline-flex; padding: 2px 10px; border-radius: var(--radius-pill);
   font-size: 12px; font-weight: 500;
 }
-.role-admin { background: var(--danger-soft); color: var(--danger); }
+.role-admin { background: var(--accent-violet-soft); color: var(--accent-violet); }
 .role-editor { background: var(--accent-blue-soft); color: var(--accent-blue); }
 .role-viewer { background: var(--bg-subtle); color: var(--text-secondary); }
 

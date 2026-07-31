@@ -300,7 +300,7 @@ async function confirmDelete() {
       <button type="button" class="icon-btn" title="刷新" :disabled="loading" @click="loadDepts(true)">
         <Icon name="refresh" :size="15" :class="{ spin: loading }" />
       </button>
-      <button v-if="auth.isAdmin" class="btn btn-primary btn-sm" style="margin-left:auto" @click="openCreate">
+      <button v-if="auth.hasPerm('user_manage')" class="btn btn-primary btn-sm" style="margin-left:auto" @click="openCreate">
         <Icon name="plus" :size="13" /> 新增部门
       </button>
     </div>
@@ -329,7 +329,7 @@ async function confirmDelete() {
         <template v-else-if="col.key === 'actions'">
           <div class="row-actions">
             <button class="action-btn edit" title="编辑" @click="openEdit(row)"><Icon name="edit" :size="15" /></button>
-            <button v-if="auth.isAdmin" class="action-btn danger" title="删除" @click="onDelete(row)">
+            <button v-if="auth.hasPerm('user_manage')" class="action-btn danger" title="删除" @click="onDelete(row)">
               <Icon name="trash" :size="15" />
             </button>
           </div>

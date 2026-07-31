@@ -16,6 +16,7 @@ from collections import defaultdict
 from fastapi import APIRouter, Request
 
 from app.core.metrics import record
+from app.models.errors import capture_error
 
 logger = logging.getLogger("knoa.frontend")
 router = APIRouter()
@@ -105,6 +106,19 @@ async def receive_event(request: Request):
         logger.warning("frontend %s: %s @ %s", etype, msg, src)
     else:
         logger.info("frontend %s: %s @ %s", etype, msg, src)
+
+    # 同步落库错误管理页（fire-and-forget）：前端错误可在页面上浏览检索，不必上机翻日志
+    capture_error(
+        source="frontend",
+        level=level,
+        etype=etype,
+        message=msg,
+        stack=_sanitize(payload.get("stack", "")) or None,
+        url=src or None,
+        ip=_client_ip(request),
+        user_agent=_sanitize(request.headers.get("user-agent", ""), 300) or None,
+        rid=request.headers.get("x-request-id"),
+    )
 
     # 语义指标：与 HTTP 传输层(/api/events)分开计，方便单独看前端错误量
     record("frontend_event", 0.0, 200, level == "error")

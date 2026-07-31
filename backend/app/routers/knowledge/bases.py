@@ -13,6 +13,7 @@ from app.core.security import (
     LEVEL_ORDER,
     _is_kb_super_admin,
     dept_ancestors,
+    dept_descendants,
     require_kb_access,
     require_permission,
     get_current_user,
@@ -100,16 +101,13 @@ async def get_knowledge_bases(
     stmt = select(KnowledgeBase).order_by(KnowledgeBase.order, KnowledgeBase.created_at)
     if q and q.strip():
         pattern = f"%{q.strip()}%"
-        stmt = stmt.where(
-            KnowledgeBase.name.ilike(pattern) | KnowledgeBase.category.ilike(pattern)
-        )
+        stmt = stmt.where(KnowledgeBase.name.ilike(pattern))
     result = await db.execute(stmt)
     kbs = result.scalars().all()
 
     # 库级权限：一次性聚合查询，替代原先「每库调一次 get_kb_permission_level」的 N+1
-    # 合并语义：个人显式优先 → 部门继承 → 开放库兜底 / 严格库拒绝。
+    # 合并语义：个人显式优先 → 部门继承 → 无授权即不可见（fail-close）。
     perm_map: dict[str, str] = {}
-    strict_kbs: set[str] = set()
     is_super = await _is_kb_super_admin(db, user)
     if not is_super:
         kb_ids = [kb.id for kb in kbs]
@@ -143,24 +141,12 @@ async def get_knowledge_bases(
                 cur = dept_map.get(g.kb_id)
                 if cur is None or LEVEL_ORDER.get(g.level, 0) > LEVEL_ORDER.get(cur, 0):
                     dept_map[g.kb_id] = g.level
-        # 3) 合并：个人优先，否则部门最高
+        # 3) 合并：个人优先，否则部门最高（fail-close：无授权记录的库不进 perm_map → 不可见）
         for kid in kb_ids:
             if kid in personal_map:
                 perm_map[kid] = personal_map[kid]
             elif kid in dept_map:
                 perm_map[kid] = dept_map[kid]
-        # 4) 严格库集合：存在任意授权记录（个人或部门）的库
-        any_rows = (
-            await db.execute(
-                select(KBPermission.kb_id).where(KBPermission.kb_id.in_(kb_ids))
-            )
-        ).scalars().all()
-        any_dept_rows = (
-            await db.execute(
-                select(KBDeptGrant.kb_id).where(KBDeptGrant.kb_id.in_(kb_ids))
-            )
-        ).scalars().all()
-        strict_kbs = set(any_rows) | set(any_dept_rows)
 
     # 一次聚合查询替代「每库 3 次查询」的 N+1 模式：
     # 按 kb_id 汇总 文档数 / 最新更新时间 / 待复核数。
@@ -195,10 +181,10 @@ async def get_knowledge_bases(
     kb_list = []
     health_list = []
     for kb in kbs:
-        # 库级权限过滤（权限已上方一次性聚合算出，避免每库一次查询的 N+1）：
-        #  - admin / 用户在 perm_map 中有记录 / 遗留开放库（无任何权限记录）→ 可见
-        #  - 严格隔离库（存在他人权限记录但用户无记录）→ 不可见
-        if not is_super and kb.id not in perm_map and kb.id in strict_kbs:
+        # 库级权限过滤（fail-close，权限已上方一次性聚合算出，避免每库一次查询的 N+1）：
+        #  - 超管 / 用户在 perm_map 中有授权记录（个人或部门）→ 可见
+        #  - 无任何授权（含遗留开放库）或仅有他人授权而用户无记录 → 不可见
+        if not is_super and kb.id not in perm_map:
             continue
 
         stat = stats_map.get(kb.id)
@@ -245,7 +231,8 @@ async def get_knowledge_bases(
                 document_count=doc_count or 0,
                 pending_count=pending_count or 0,
                 description=kb.description,
-                category=kb.category,
+                owner_dept_id=kb.owner_dept_id,
+                owner_dept_name=kb.owner_dept.name if kb.owner_dept else None,
             )
         )
         health_list.append(
@@ -280,28 +267,47 @@ async def create_knowledge_base(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Perm.DOC_UPLOAD)),
 ):
-    """新建知识库。创建者自动获得该库的 admin 级库级权限（隔离起点）。"""
+    """新建知识库（库级隔离起点）。
+
+    归属部门规则：
+      - 非超管：强制归属创建者所在部门，payload 里的 ownerDeptId 一律忽略；
+        无部门者拒绝建库（无归属即无法隔离）。
+      - 超管：可显式指定 ownerDeptId 跨部门建库；不传则归属自己部门（若有）或留空。
+    授权起点（单事务）：
+      - 创建者获该库 admin 级个人授权；
+      - 归属部门自动获 view 级部门授权（归属部门默认 view，同部门同事可见）。
+    """
+    is_super = await _is_kb_super_admin(db, user)
+    if is_super:
+        owner_dept_id = payload.owner_dept_id or user.department_id
+    else:
+        if not user.department_id:
+            raise HTTPException(status_code=400, detail="未分配部门的用户不能创建知识库")
+        # 非超管一律归属本部门，杜绝跨部门建库
+        owner_dept_id = user.department_id
+
     kb_id = f"kb_{uuid.uuid4().hex[:8]}"
     kb = KnowledgeBase(
         id=kb_id,
         name=payload.name,
         icon=payload.icon or "📚",
         description=payload.description,
+        owner_dept_id=owner_dept_id,
     )
-    if payload.category:
-        kb.category = payload.category
-    # 库与创建者的 admin 权限单事务提交（一次 commit）：原先的两段提交在
-    # 第二次 commit 失败时会留下「无权限记录的开放库」，对全员可见。
-    # 注意：两个 mapper 间无 relationship()，UOW 不保证按 FK 依赖排序 insert，
-    # 必须先 flush 父行（同事务内，非提交）再写权限行。
+    # 库 + 创建者 admin 权限 + 归属部门 view 授权 单事务提交（一次 commit）：
+    # 分段提交在中途失败时会留下「无权限记录的开放库」。注意 mapper 间无
+    # relationship()，UOW 不保证按 FK 依赖排序 insert，必须先 flush 父行再写子行。
     db.add(kb)
     await db.flush()
     db.add(KBPermission(kb_id=kb_id, user_id=user.id, level="admin"))
+    if owner_dept_id is not None:
+        db.add(KBDeptGrant(kb_id=kb_id, dept_id=owner_dept_id, level="view"))
     await db.commit()
     await db.refresh(kb)
     return KnowledgeBaseOut(
         id=kb.id, name=kb.name, icon=kb.icon, description=kb.description,
-        category=kb.category,
+        owner_dept_id=kb.owner_dept_id,
+        owner_dept_name=kb.owner_dept.name if kb.owner_dept else None,
     )
 
 
@@ -310,9 +316,12 @@ async def update_knowledge_base(
     kb_id: str,
     payload: KBUpdateIn,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_kb_access("admin")),
+    user: User = Depends(require_kb_access("admin")),
 ):
-    """编辑知识库：更新名称 / 图标 / 描述（库 admin 级或全局 admin 可执行）。"""
+    """编辑知识库：更新名称 / 图标 / 描述 / 归属部门（库 admin 级或全局 admin 可执行）。
+
+    归属部门变更仅超管生效；非超管传 ownerDeptId 会被忽略。
+    """
     kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
@@ -322,13 +331,15 @@ async def update_knowledge_base(
         kb.icon = payload.icon
     if payload.description is not None:
         kb.description = payload.description
-    if payload.category is not None:
-        kb.category = payload.category
+    # 归属部门变更：仅超管可操作
+    if "owner_dept_id" in payload.model_fields_set and await _is_kb_super_admin(db, user):
+        kb.owner_dept_id = payload.owner_dept_id
     await db.commit()
     await db.refresh(kb)
     return KnowledgeBaseOut(
         id=kb.id, name=kb.name, icon=kb.icon, description=kb.description,
-        category=kb.category,
+        owner_dept_id=kb.owner_dept_id,
+        owner_dept_name=kb.owner_dept.name if kb.owner_dept else None,
     )
 
 
@@ -425,6 +436,7 @@ async def set_kb_dept_grants(
 
     - deptId 必须存在；level 须为 view/edit/admin。
     - 同一部门按最高级别去重。
+    - 非超管只能授权给自己部门子树内的部门（本部门及其下级），不能授权给其它部门。
     """
     seen: dict[uuid.UUID, str] = {}
     for g in payload.grants:
@@ -436,6 +448,14 @@ async def set_kb_dept_grants(
             raise HTTPException(status_code=400, detail=f"非法的权限级别: {g.level}")
         if did not in seen or LEVEL_ORDER[g.level] > LEVEL_ORDER[seen[did]]:
             seen[did] = g.level
+    # 非超管：授权范围限定在本部门子树（含本部门），防止跨部门扩散可见性
+    if not await _is_kb_super_admin(db, _):
+        if not _.department_id:
+            raise HTTPException(status_code=403, detail="未分配部门的用户不能设置部门授权")
+        allowed = set(await dept_descendants(db, _.department_id))
+        for did in seen:
+            if did not in allowed:
+                raise HTTPException(status_code=403, detail="只能授权给自己部门及其下级部门")
     # 校验部门存在
     for did in seen:
         dept = (
@@ -628,11 +648,11 @@ async def delete_knowledge_base(
 async def reorder_knowledge_bases(
     payload: KBReorderIn,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission(Perm.SYS_SETTINGS)),
+    _: User = Depends(require_permission(Perm.KB_EDIT)),
 ):
     """拖拽排序：前端传回当前列表的完整 id 顺序，后端按数组下标赋 order。
 
-    全局排序操作无单一 kb_id，故要求 SYS_SETTINGS 权限（内置 admin 拥有）。
+    全局排序操作无单一 kb_id，故要求 KB_EDIT 系统权限。
     """
     kbs = (
         await db.execute(select(KnowledgeBase).where(KnowledgeBase.id.in_(payload.ordered_ids)))
@@ -648,7 +668,7 @@ async def reorder_knowledge_bases(
 async def batch_delete_knowledge_bases(
     payload: KBBatchDeleteIn,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission(Perm.SYS_SETTINGS)),
+    _: User = Depends(require_permission(Perm.KB_EDIT)),
 ):
     """批量删除知识库：对每个 id 走与单删相同的级联清理。"""
     for kb_id in payload.ids:

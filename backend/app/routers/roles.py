@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.rbac import PERMISSION_KEYS
-from app.core.security import require_permission
+from app.core.rbac import PERMISSIONS, PERMISSION_KEYS
+from app.core.security import require_permission, get_current_user
 from app.core.rbac import Perm
 from app.db import Role, RolePermission, User
 from app.deps import get_db
@@ -20,6 +20,12 @@ from app.models.roles import (
 )
 
 router = APIRouter()
+
+
+@router.get("/permissions")
+async def list_permissions(_: User = Depends(get_current_user)):
+    """返回系统全量权限定义（key/label/group），供前端角色管理矩阵渲染。"""
+    return [{"key": p.key, "label": p.label, "group": p.group} for p in PERMISSIONS]
 
 
 async def _role_permissions(db: AsyncSession, role_id: uuid.UUID) -> list[str]:

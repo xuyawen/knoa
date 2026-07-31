@@ -86,7 +86,7 @@ const topNavItems = computed(() => {
     { to: '/graph', label: '知识图谱' },
     { to: '/search', label: '智能搜索' },
   ]
-  if (auth.isAdmin) items.push({ to: '/permission', label: '系统管理' })
+  if (auth.hasPerm('user_manage') || auth.hasPerm('sys_settings')) items.push({ to: '/permission', label: '系统管理' })
   return items
 })
 
@@ -136,6 +136,7 @@ const subMenus: Record<string, SubItem[]> = {
     { label: '用户管理', icon: 'users', to: '/permission', activeNames: ['permission'], adminOnly: true },
     { label: '角色管理', icon: 'shield-check', to: '/permission/roles', activeNames: ['perm-roles'], adminOnly: true },
     { label: '部门管理', icon: 'layers', to: '/permission/departments', activeNames: ['perm-departments'], adminOnly: true },
+    { label: '错误管理', icon: 'alert', to: '/permission/errors', activeNames: ['perm-errors'], adminOnly: true },
   ],
   profile: [
     { label: '个人资料', icon: 'user', to: '/profile', activeNames: ['profile'] },
@@ -146,7 +147,7 @@ const subMenus: Record<string, SubItem[]> = {
 const currentSubItems = computed<SubItem[]>(() => {
   const name = route.name as string
   const group = Object.values(subMenus).find((g) => g.some((i) => i.activeNames.includes(name))) ?? []
-  return group.filter((i) => !i.adminOnly || auth.isAdmin)
+  return group.filter((i) => !i.adminOnly || auth.hasPerm('user_manage'))
 })
 
 function isSubActive(item: SubItem): boolean {

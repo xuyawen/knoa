@@ -170,11 +170,11 @@ async def test_department_doc_visible_to_dept_subtree_only(db_session):
     assert not await can_see(user_nodept), "无部门用户不应可见部门文档"
 
 
-async def test_open_kb_grants_view_only_even_for_editor(db_session):
-    """#2 遗留开放库（无任何权限记录）现在仅隐式 view：
+async def test_open_kb_denied_under_fail_close(db_session):
+    """fail-close：无任何权限记录的库对非超管不可见（返回 None）。
 
-    即使 editor 角色（角色权限含 doc_edit）也不再被隐式授予 edit，
-    写操作必须显式授权——堵住"建库忘加权限记录 → 所有 editor 能改/删全库"。
+    即使是 editor 角色（角色权限含 doc_edit）也不被隐式授予任何库级权限，
+    访问/写操作都必须显式授权——从"开放库隐式 view"收紧为"未授权即拒绝"。
     """
     kb_id = await _make_kb(db_session, name="open-kb")  # 不写任何 KBPermission
     editor_role = await db_session.scalar(select(Role.id).where(Role.key == "editor"))
@@ -187,7 +187,7 @@ async def test_open_kb_grants_view_only_even_for_editor(db_session):
     await db_session.commit()
     user = await db_session.get(User, uid)
     level = await get_kb_permission_level(db_session, kb_id, user)
-    assert level == "view", f"开放库应仅隐式 view，实际 {level}"
+    assert level is None, f"fail-close 下开放库应拒绝（None），实际 {level}"
 
 
 async def test_write_path_scope_blocks_non_uploader(db_session):

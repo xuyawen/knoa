@@ -95,15 +95,15 @@ const uploadScopeOptions = computed(() => {
     { label: '公开可见', value: 'public' },
     { label: '本人可见', value: 'private' },
   ]
-  if (auth.isAdmin || auth.user?.departmentId) {
+  if (auth.hasPerm('kb_super') || auth.user?.departmentId) {
     opts.splice(1, 0, { label: '部门可见', value: 'department' })
   }
   return opts
 })
-// 部门必填判断：仅管理员选了「部门可见」且未指定部门时必填。
-// 非管理员有部门时锁定本人部门（无需选择），无部门时看不到 department 选项。
+// 部门必填判断：仅超管（kb_super）选了「部门可见」且未指定部门时必填。
+// 非超管有部门时锁定本人部门（无需选择），无部门时看不到 department 选项。
 const deptRequired = computed(
-  () => uploadScope.value === 'department' && auth.isAdmin && !auth.user?.departmentId,
+  () => uploadScope.value === 'department' && auth.hasPerm('kb_super') && !auth.user?.departmentId,
 )
 const deptMissing = computed(() => deptRequired.value && !uploadDeptId.value)
 // 上传模态框开关（表单 + 进度条一体化）
@@ -747,7 +747,7 @@ async function confirmBatchDelete() {
                   归属部门
                   <span v-if="deptRequired" class="req-mark">*</span>
                 </span>
-                <template v-if="!auth.isAdmin && auth.user?.departmentId">
+                <template v-if="!auth.hasPerm('kb_super') && auth.user?.departmentId">
                   <span class="up-scope-fixed scope-department">本人部门：{{ auth.user.department }}</span>
                 </template>
                 <DepartmentSelect

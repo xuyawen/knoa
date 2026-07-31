@@ -4,12 +4,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import paginate
-from app.db import OperationLog
+from app.core.security import get_current_user
+from app.db import OperationLog, User
 from app.deps import get_db
 from app.models.common import PaginatedOut
 from app.models.operation_log import OperationLogOut
-from app.core.security import require_permission
-from app.core.rbac import Perm
 
 router = APIRouter()
 
@@ -19,9 +18,9 @@ async def list_operations(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(require_permission(Perm.SYS_SETTINGS)),
+    _: User = Depends(get_current_user),
 ):
-    """操作日志分页列表，按时间倒序。仅系统设置权限可见。"""
+    """操作日志分页列表，按时间倒序。"""
     stmt = select(OperationLog).order_by(OperationLog.created_at.desc())
     rows, total = await paginate(db, stmt, page=page, page_size=size)
     pages = max(1, (total + size - 1) // size) if total else 1

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy import and_, not_, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -180,13 +180,14 @@ async def get_role_permissions(db: AsyncSession, role_id: uuid.UUID) -> set[str]
 
 
 async def _is_kb_super_admin(db: AsyncSession, user: User) -> bool:
-    """内置 admin 角色（拥有 user_manage 权限）隐式拥有全部知识库的 admin 级权限。
+    """知识库超管：持有 kb_super 系统权限的角色隐式拥有全部知识库的 admin 级权限。
 
-    RBAC 重构后 User.role 字符串列已废弃，改用 role_id → 角色权限集合判定，
-    与 routers/auth.py 的 _is_admin 保持一致。
+    RBAC 重构后 User.role 字符串列已废弃，改用 role_id → 角色权限集合判定。
+    与 user_manage（用户/角色/部门管理）解耦：超管能力由独立的 kb_super
+    权限配置，不再与账号管理权限隐式绑定。
     """
     perms = await get_role_permissions(db, user.role_id)
-    return Perm.USER_MANAGE in perms
+    return Perm.KB_SUPER in perms
 
 
 def require_permission(permission: str) -> Callable[..., Awaitable[User]]:
@@ -218,7 +219,11 @@ async def get_kb_permission_level(
 
 
 def require_kb_access(min_level: str = "view"):
-    """依赖工厂：要求当前用户对路径中的 kb_id 拥有 >= min_level 的权限。"""
+    """依赖工厂：要求当前用户对路径中的 kb_id 拥有 >= min_level 的权限。
+
+    特殊规则：当 min_level="admin" 时，持有系统权限 KB_EDIT 且 KB 级别 >= edit
+    的用户视同 admin（可管理成员/授权/编辑库信息）。
+    """
 
     async def _dep(
         kb_id: str,
@@ -226,9 +231,14 @@ def require_kb_access(min_level: str = "view"):
         user: User = Depends(get_current_user),
     ) -> User:
         level = await get_kb_permission_level(db, kb_id, user)
-        if level is None or LEVEL_ORDER.get(level, 0) < LEVEL_ORDER.get(min_level, 0):
-            raise HTTPException(status_code=403, detail="无权访问该知识库")
-        return user
+        if level is not None and LEVEL_ORDER.get(level, 0) >= LEVEL_ORDER.get(min_level, 0):
+            return user
+        # KB_EDIT 系统权限 + KB 级 edit → 视同 admin（可管理成员/授权）
+        if min_level == "admin" and level is not None and LEVEL_ORDER.get(level, 0) >= LEVEL_ORDER.get("edit", 0):
+            perms = await get_role_permissions(db, user.role_id)
+            if Perm.KB_EDIT in perms:
+                return user
+        raise HTTPException(status_code=403, detail="无权访问该知识库")
 
     return _dep
 
@@ -236,7 +246,7 @@ def require_kb_access(min_level: str = "view"):
 async def get_accessible_kb_ids(db: AsyncSession, user: User) -> list[str]:
     """返回当前用户对 view+ 可见的全部 KB id（用于「未指定 KB 时」的检索范围限定）。
 
-    统一语义：个人授权 + 部门继承 + 遗留开放库。
+    统一语义（fail-close）：仅个人授权 + 部门继承可见；未授权的库对非超管不可见。
     """
     if await _is_kb_super_admin(db, user):
         rows = (await db.execute(select(KnowledgeBase.id))).scalars().all()
@@ -257,12 +267,8 @@ async def get_accessible_kb_ids(db: AsyncSession, user: User) -> list[str]:
             .where(KBDeptGrant.kb_id == KnowledgeBase.id, KBDeptGrant.dept_id.in_(ancestors))
             .exists()
         )
-    # 遗留开放库（无任何授权记录）
-    any_personal = select(KBPermission.id).where(KBPermission.kb_id == KnowledgeBase.id).exists()
-    any_dept = select(KBDeptGrant.id).where(KBDeptGrant.kb_id == KnowledgeBase.id).exists()
-    open_kb = not_(or_(any_personal, any_dept))
-    # 合并：个人授权 | 部门授权（若有） | 开放库
-    conditions = [user_perm, open_kb]
+    # 合并（fail-close）：个人授权 | 部门授权（若有）；未授权的库不可见
+    conditions = [user_perm]
     if dept_clause is not None:
         conditions.append(dept_clause)
     condition = or_(*conditions)
@@ -327,6 +333,7 @@ async def compute_kb_effective_level(
 
     合并语义：个人显式优先——有个人记录用个人的（哪怕低于部门），
     无个人记录则取部门祖先链上的最高授权。删除个人记录 = 回归部门继承。
+    fail-close：无任何授权记录的库对非超管返回 None（不可见），不再有开放库隐式 view。
     """
     if await _is_kb_super_admin(db, user):
         return "admin"
@@ -353,16 +360,8 @@ async def compute_kb_effective_level(
         ).scalars().all()
         if dept_rows:
             return max(dept_rows, key=lambda lv: LEVEL_ORDER.get(lv, 0))
-    # 3) 开放库兆底 / 严格库拒绝
-    any_personal = await db.scalar(
-        select(KBPermission.id).where(KBPermission.kb_id == kb_id).limit(1)
-    )
-    any_dept = await db.scalar(
-        select(KBDeptGrant.id).where(KBDeptGrant.kb_id == kb_id).limit(1)
-    )
-    if any_personal is None and any_dept is None:
-        return "view"  # 遗留开放库（无任何授权记录）
-    return None  # 严格库，当前用户未被授权
+    # 3) fail-close：无任何授权记录的库 → 非超管不可见
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +388,7 @@ class ScopeContext:
 
 
 async def is_super_admin(db: AsyncSession, user: User) -> bool:
-    """超级管理员（拥有 user_manage 权限）公开判定，供检索/列表注入 ScopeContext。"""
+    """知识库超管（持有 kb_super 权限）公开判定，供检索/列表注入 ScopeContext。"""
     return await _is_kb_super_admin(db, user)
 
 

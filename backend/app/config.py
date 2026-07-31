@@ -133,6 +133,9 @@ class Settings(BaseSettings):
     TTS_CODEC: str = "mp3"           # mp3 便于长文本分块拼接（帧级可追加）
     TTS_SAMPLE_RATE: int = 16000
     LOG_LEVEL: str = "INFO"
+    # 日志落盘目录（相对 backend/ 解析）：app.log 全量 + error.log 仅 ERROR+，
+    # 均 10MB 轮转保留 5 份；置空字符串则只走 stdout 不落盘。出问题先翻 error.log。
+    LOG_DIR: str = "logs"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

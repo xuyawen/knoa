@@ -100,7 +100,7 @@ async def mark_announcement_read(
 async def create_announcement(
     payload: AnnouncementCreate,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(require_permission(Perm.SYS_SETTINGS)),
+    _: None = Depends(require_permission(Perm.DOC_EDIT)),
 ):
     a = Announcement(
         id=uuid.uuid4(),
@@ -120,7 +120,7 @@ async def update_announcement(
     ann_id: str,
     payload: AnnouncementUpdate,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(require_permission(Perm.SYS_SETTINGS)),
+    _: None = Depends(require_permission(Perm.DOC_EDIT)),
 ):
     a = await db.scalar(select(Announcement).where(Announcement.id == ann_id))
     if a is None:
@@ -142,7 +142,7 @@ async def update_announcement(
 async def delete_announcement(
     ann_id: str,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(require_permission(Perm.SYS_SETTINGS)),
+    _: None = Depends(require_permission(Perm.DOC_EDIT)),
 ):
     a = await db.scalar(select(Announcement).where(Announcement.id == ann_id))
     if a is None:

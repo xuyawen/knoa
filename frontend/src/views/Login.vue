@@ -88,7 +88,7 @@ async function handleLogin() {
               v-model="form.username"
               type="text"
               class="field-input"
-              placeholder="请输入手机号 / 邮箱"
+              placeholder="请输入用户名"
               autocomplete="username"
             />
           </div>

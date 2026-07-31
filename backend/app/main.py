@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import time
@@ -15,7 +16,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, update
 
@@ -28,6 +29,7 @@ for _ls_key in ("LANGSMITH_TRACING", "LANGSMITH_API_KEY", "LANGSMITH_PROJECT", "
     if _ls_val and not os.environ.get(_ls_key):
         os.environ[_ls_key] = str(_ls_val)
 from app.core.logging_config import request_id_var, setup_logging
+from app.models.errors import capture_error
 from app.core.metrics import (
     dec_active,
     get_slow_threshold,
@@ -50,6 +52,7 @@ from app.routers import (
     ask,
     auth,
     departments,
+    errors,
     events,
     feedback,
     oss,
@@ -260,6 +263,43 @@ async def sliding_session(request: Request, call_next):
     return response
 
 
+async def _extract_error_detail(response) -> tuple[str | None, Response]:
+    """读出错误响应体里的 detail（FastAPI 统一错误结构 {"detail": ...}）。
+
+    BaseHTTPMiddleware 的 call_next 返回 StreamingResponse，body_iterator 只能消费
+    一次；这里消费后用原状态码/头/媒体类型重建一个 Response 返回，客户端无感知。
+    解析失败（非 JSON / 无 detail）也要重建响应，detail 返回 None。消息截断防超长。
+    """
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk if isinstance(chunk, bytes) else chunk.encode("utf-8"))
+    body = b"".join(chunks)
+    detail: str | None = None
+    try:
+        payload = json.loads(body)
+        raw = payload.get("detail") if isinstance(payload, dict) else None
+        if isinstance(raw, str):
+            detail = raw
+        elif raw is not None:
+            detail = json.dumps(raw, ensure_ascii=False)
+    except (ValueError, UnicodeDecodeError):
+        detail = None
+    if detail and len(detail) > 500:
+        detail = detail[:500] + "…"
+    # content-length/content-type 由 Response 按 body+media_type 重算，避免与旧头冲突
+    headers = {
+        k: v for k, v in response.headers.items()
+        if k.lower() not in ("content-length", "content-type")
+    }
+    rebuilt = Response(
+        content=body,
+        status_code=response.status_code,
+        headers=headers,
+        media_type=response.media_type,
+    )
+    return detail, rebuilt
+
+
 @app.middleware("http")
 async def observability(request: Request, call_next):
     rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16]
@@ -271,6 +311,14 @@ async def observability(request: Request, call_next):
     try:
         response = await call_next(request)
         status = response.status_code
+        # 4xx/5xx 读出响应体里的 detail，供错误管理页展示「具体报错」（重建响应，
+        # 客户端拿到的 body/状态码不变）。只读错误响应，200/SSE 流式响应不受影响。
+        if status >= 400:
+            err_detail, response = await _extract_error_detail(response)
+            if err_detail:
+                request.state.error_detail = err_detail
+        # 回传 rid：前端上报错误时携带它，可与后端日志按 rid 精确串联同一次请求
+        response.headers["X-Request-ID"] = rid
         return response
     except Exception:
         logger.exception("unhandled %s %s", request.method, request.url.path)
@@ -280,10 +328,36 @@ async def observability(request: Request, call_next):
         dec_active()
         record(normalize_path(request.url.path), elapsed, status, status >= 500)
         request_id_var.reset(ctx)
+        path = request.url.path
+        # 业务错误落日志：此前只有未捕获异常(5xx)有 traceback，4xx（参数错/越权/
+        # 限流/校验失败）完全静默，查「为什么被拒」无据可查。现 4xx/5xx 都记一行
+        # （rid+method+path+状态码+耗时）。跳过 /api/auth/me 与 /api/events 的 401：
+        # 前者是未登录页加载的正常探测、后者是上报端点的匿名请求，均属预期噪声。
+        if status >= 400 and not (
+            status == 401 and (path.startswith("/api/auth/me") or path.startswith("/api/events"))
+        ):
+            logger.log(
+                logging.ERROR if status >= 500 else logging.WARNING,
+                "http %d %s %s (%.2fs)", status, request.method, path, elapsed,
+            )
+            # 同步落库错误管理页（fire-and-forget）：与日志互补——日志要上机翻，
+            # 这里可在页面上按来源/状态码/路径浏览检索。跳过 /api/events 自身，避免上报递归。
+            if not path.startswith("/api/events"):
+                capture_error(
+                    source="backend",
+                    level="error" if status >= 500 else "warn",
+                    method=request.method,
+                    path=path,
+                    status_code=status,
+                    rid=rid,
+                    message=getattr(request.state, "error_detail", None),
+                    ip=(request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+                    or (request.client.host if request.client else None),
+                )
         if elapsed >= get_slow_threshold():
             logger.warning(
                 "slow %0.2fs %s %s -> %d",
-                elapsed, request.method, request.url.path, status,
+                elapsed, request.method, path, status,
             )
 
 
@@ -309,4 +383,5 @@ app.include_router(analytics.router, prefix="/api")
 app.include_router(operations.router, prefix="/api")
 app.include_router(announcements.router, prefix="/api")
 app.include_router(roles.router, prefix="/api")
+app.include_router(errors.router, prefix="/api")
 app.include_router(oss.router, prefix="/api")

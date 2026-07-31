@@ -77,7 +77,6 @@ def _base_node_q(
     kb_id: str | None,
     allowed: list[str],
     node_type: str | None,
-    biz_category: str | None,
     dt_from: datetime | None,
     dt_to: datetime | None,
     q: str | None = None,
@@ -92,8 +91,6 @@ def _base_node_q(
     stmt = stmt.where(KGNode.kb_id == kb_id if kb_id else KGNode.kb_id.in_(allowed))
     if node_type:
         stmt = stmt.where(KGNode.type == node_type)
-    if biz_category:
-        stmt = stmt.where(KnowledgeBase.category == biz_category)
     if dt_from:
         stmt = stmt.where(KGNode.created_at >= dt_from)
     if dt_to:
@@ -112,14 +109,13 @@ def _edge_kb_scope(q: Select, kb_id: str | None, allowed: list[str]) -> Select:
 async def get_graph(
     kb_id: str | None = Query(default=None, description="按知识库过滤；不传返回全部"),
     node_type: str | None = Query(default=None, description="按实体类别过滤（KGNode.type）"),
-    biz_category: str | None = Query(default=None, description="按知识库业务分类过滤（knowledge_base.category）"),
     from_date: str | None = Query(default=None, alias="from", description="created_at >= 该日期（ISO，含）"),
     to_date: str | None = Query(default=None, alias="to", description="created_at <= 该日期（ISO，含）"),
     limit: int = Query(default=500, ge=1, le=3000, description="最多返回节点数"),
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """返回图谱节点/边 + 统计。node_type/biz_category/from/to 真正参与查询。
+    """返回图谱节点/边 + 统计。node_type/from/to 真正参与查询。
 
     nodes/edges 是「渲染采样」（节点按 limit 截断，边只保留两端都在采样内的）；
     stats 是同一筛选条件下的「全集聚合」，不受 limit 影响。
@@ -131,7 +127,7 @@ async def get_graph(
     dt_from = _parse_iso(from_date, "from")
     dt_to = _parse_iso(to_date, "to")
 
-    base = _base_node_q(kb_id, allowed, node_type, biz_category, dt_from, dt_to)
+    base = _base_node_q(kb_id, allowed, node_type, dt_from, dt_to)
     sub = base.subquery()
 
     # 渲染采样：最近 limit 个节点
@@ -204,7 +200,7 @@ async def list_graph_nodes(
     allowed = await get_accessible_kb_ids(db, _current)
     if kb_id and kb_id not in allowed:
         raise HTTPException(status_code=403, detail="无权访问该知识库的图谱")
-    base = _base_node_q(kb_id, allowed, node_type, None, None, None, q)
+    base = _base_node_q(kb_id, allowed, node_type, None, None, q)
     rows, total = await paginate(db, base.order_by(KGNode.created_at.desc(), KGNode.id), page=page, page_size=page_size)
     return {"items": [_node_out(r[0]) for r in rows], "total": total}
 

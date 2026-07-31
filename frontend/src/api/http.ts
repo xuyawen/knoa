@@ -27,8 +27,22 @@ export async function throwHttpError(resp: Response, fallback?: string): Promise
   } catch {
     /* 非 JSON 响应，忽略 */
   }
-  // 后端若回显了 "HTTP xxx" 这类无意义文案，用友好映射覆盖
+  // 后端若回显了 "HTTP xxx" 这类无意义文案，用友好映射覆盖（上报用原始 detail，保留诊断信息）
+  const rawDetail = detail
   if (/^HTTP \d+$/.test(detail)) detail = ''
+  // 业务错误上报（补 4xx 盲区）：此前仅 5xx/网络错误上报，4xx（参数错/越权/校验失败）
+  // 只转友好文案、不留痕。统一在此上报（带状态码+后端 detail+rid），与 trackedFetch
+  // 的网络层上报互补不重复。跳过 401：token 失效已由 triggerTokenExpired 专门处理，
+  // 登录失败属预期交互，都不算系统异常。
+  if (resp.status !== 401) {
+    const rid = resp.headers.get('X-Request-ID') || ''
+    report({
+      type: 'http.error',
+      message: `${resp.status} ${resp.url}${rawDetail ? ` :: ${rawDetail}` : ''}`,
+      level: resp.status >= 500 ? 'error' : 'warn',
+      info: rid ? `rid=${rid}` : undefined,
+    })
+  }
   const err = new Error(detail || defaultMsg) as Error & { status: number }
   err.status = resp.status
   throw err
@@ -166,10 +180,8 @@ async function trackedFetch(
       triggerTokenExpired()
       throw new TokenExpiredError()
     }
-    // 5xx 服务端错误：上报，便于 /api/metrics 看到前端视角的服务端异常
-    if (resp.status >= 500) {
-      report({ type: 'http.server_error', message: `${reqUrl(input)} -> ${resp.status}`, level: 'error' })
-    }
+    // 5xx/4xx 的语义错误统一由 throwHttpError 上报（带响应 detail + rid），
+    // 这里只负责网络层失败（下方 catch），避免同一次错误重复上报
     // 后端每次有效认证请求都会重签 24h 令牌（滑动令牌），并通过
     // Set-Cookie 回写 HttpOnly Cookie（前端 JS 读不到，无需在此处理）
     return resp

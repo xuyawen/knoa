@@ -29,6 +29,7 @@ const GraphStats = () => import('@/views/GraphStats.vue')
 const Permission = () => import('@/views/Permission.vue')
 const RoleManage = () => import('@/views/RoleManage.vue')
 const DepartmentView = () => import('@/views/DepartmentView.vue')
+const ErrorManage = () => import('@/views/ErrorManage.vue')
 const Profile = () => import('@/views/Profile.vue')
 const MemoryManage = () => import('@/views/MemoryManage.vue')
 const DocumentsMine = () => import('@/views/DocumentsMine.vue')
@@ -85,6 +86,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'permission', name: 'permission', component: Permission, meta: { title: '系统管理', icon: 'shield' } },
       { path: 'permission/roles', name: 'perm-roles', component: RoleManage, meta: { title: '系统管理', icon: 'shield' } },
       { path: 'permission/departments', name: 'perm-departments', component: DepartmentView, meta: { title: '系统管理', icon: 'team' } },
+      { path: 'permission/errors', name: 'perm-errors', component: ErrorManage, meta: { title: '系统管理', icon: 'alert' } },
       { path: 'profile', name: 'profile', component: Profile, meta: { title: '个人中心', icon: 'user' } },
       { path: 'memories', name: 'memories', component: MemoryManage, meta: { title: '个人中心', icon: 'brain-circuit' } },
       // 原「系统设置」页已并入「模型配置」(/chat/model)，旧路径重定向兼容书签

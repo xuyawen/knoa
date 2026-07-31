@@ -7,7 +7,8 @@ export interface KnowledgeBase {
   documentCount: number
   pendingCount: number
   description: string | null
-  category?: string | null
+  ownerDeptId?: string | null
+  ownerDeptName?: string | null
 }
 
 /** 知识库成员（库级权限）。 */
@@ -63,7 +64,7 @@ export interface KBUpdate {
   name?: string | null
   icon?: string | null
   description?: string | null
-  category?: string | null
+  ownerDeptId?: string | null
 }
 
 export interface KBReorder {
@@ -269,7 +270,6 @@ export interface GraphHotNode extends GraphNode {
 /** 图谱筛选参数（透传后端 GET /api/graph）。 */
 export interface GraphFilter {
   nodeType?: string
-  bizCategory?: string
   from?: string   // ISO 日期，created_at >=
   to?: string     // ISO 日期，created_at <=
 }
@@ -384,6 +384,7 @@ export interface UserOut {
   departmentId?: string | null      // 部门 id（真相源）
   department?: string | null        // 部门显示名（后端按 id 解析）
   employeeId?: string | null
+  permissions?: string[]            // 当前用户持有的权限 key 列表
 }
 
 export interface TokenOut {
@@ -439,23 +440,12 @@ export interface RolePermissions {
   permissions: string[]
 }
 
-/** 权限清单（与后端 app.core.rbac.PERMISSIONS 对应）。 */
+/** 权限定义（后端 GET /api/permissions 返回）。 */
 export interface PermissionDef {
   key: string
   label: string
   group: string
 }
-
-export const PERMISSIONS: PermissionDef[] = [
-  { key: 'kb_view', label: '知识库查看', group: '知识库' },
-  { key: 'doc_upload', label: '文档上传', group: '知识库' },
-  { key: 'doc_edit', label: '文档编辑', group: '知识库' },
-  { key: 'doc_delete', label: '文档删除', group: '知识库' },
-  { key: 'ai_qa', label: 'AI 问答', group: '问答' },
-  { key: 'graph_manage', label: '图谱管理', group: '知识图谱' },
-  { key: 'user_manage', label: '用户管理', group: '系统' },
-  { key: 'sys_settings', label: '系统设置', group: '系统' },
-]
 
 export type SSEEvent =
   | { event: 'thinking'; data: ThinkingStep }
@@ -541,6 +531,24 @@ export interface OperationLogItem {
 }
 
 export type OperationsResponse = Paginated<OperationLogItem>
+
+/** 错误事件（错误管理页；backend=后端 4xx/5xx，frontend=前端上报）。 */
+export interface ErrorEvent {
+  id: string
+  source: 'backend' | 'frontend' | string
+  level: 'info' | 'warn' | 'error' | string
+  method: string | null
+  path: string | null
+  statusCode: number | null
+  rid: string | null
+  etype: string | null
+  message: string | null
+  stack: string | null
+  ip: string | null
+  userAgent: string | null
+  url: string | null
+  createdAt: string
+}
 
 export interface Announcement {
   id: string

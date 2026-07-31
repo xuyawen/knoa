@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
@@ -17,7 +19,8 @@ class KnowledgeBaseOut(CamelModel):
     document_count: int = 0
     pending_count: int = 0
     description: str | None = None
-    category: str | None = None
+    owner_dept_id: UUID | None = None
+    owner_dept_name: str | None = None
 
 
 class HealthItemOut(CamelModel):
@@ -130,7 +133,8 @@ class KBCreateIn(CamelModel):
     name: str
     icon: str | None = None
     description: str | None = None
-    category: str | None = None
+    # 归属部门：仅超管可显式指定（跨部门建库）；非超管传任何值都会被强制改判为本部门。
+    owner_dept_id: UUID | None = None
 
 
 class KBUpdateIn(CamelModel):
@@ -138,7 +142,8 @@ class KBUpdateIn(CamelModel):
     name: str | None = None
     icon: str | None = None
     description: str | None = None
-    category: str | None = None
+    # 归属部门变更：仅超管生效（非超管传了也会被忽略）
+    owner_dept_id: UUID | None = None
 
 
 class KBReorderIn(CamelModel):

@@ -21,6 +21,7 @@ backend/scripts/_seed_prod_users.py
 
 # logs
 *.log
+.devlogs/
 
 # local memory (do not sync)
 .workbuddy/

@@ -28,6 +28,7 @@ import type {
   TrendResponse,
   KbDistribution,
   OperationsResponse,
+  ErrorEvent,
   Announcement,
   AnnouncementCreate,
   AnnouncementUpdate,
@@ -76,7 +77,7 @@ export async function createKnowledgeBase(payload: {
   name: string
   icon?: string | null
   description?: string | null
-  category?: string | null
+  ownerDeptId?: string | null
 }): Promise<{ id: string; name: string; icon: string }> {
   invalidateDictPrefix('kb:')
   return request('/api/knowledge-bases', { method: 'POST', json: payload })
@@ -327,6 +328,18 @@ export async function submitFeedback(messageId: string, rating: 'up' | 'down') {
   return request<unknown>('/api/feedback', { method: 'POST', json: { messageId, rating } })
 }
 
+/** 当前用户采纳（点赞）的回答数。 */
+export async function getAcceptedCount(): Promise<number> {
+  const r = await request<{ count: number }>('/api/feedback/accepted-count')
+  return r.count
+}
+
+/** 当前用户已审核入库的文档总数（跨所有知识库；个人中心「贡献文档」，仅计已审核）。 */
+export async function getMyDocCount(): Promise<number> {
+  const r = await request<{ count: number }>('/api/documents/my-count')
+  return r.count
+}
+
 /** 编辑知识库：只传需改字段（name / icon / description）。 */
 export async function updateKnowledgeBase(
   id: string,
@@ -362,7 +375,6 @@ export async function getGraph(kbId?: string | null, filter?: GraphFilter): Prom
   const params = new URLSearchParams()
   if (kbId) params.set('kb_id', kbId)
   if (filter?.nodeType) params.set('node_type', filter.nodeType)
-  if (filter?.bizCategory) params.set('biz_category', filter.bizCategory)
   if (filter?.from) params.set('from', filter.from)
   if (filter?.to) params.set('to', filter.to)
   const qs = params.toString()
@@ -640,6 +652,33 @@ export async function getDocStats(): Promise<DocStats> {
 /** 操作日志分页列表（仅 admin）。 */
 export async function getOperations(page = 1, size = 20): Promise<OperationsResponse> {
   return request(`/api/operations?page=${page}&size=${size}`)
+}
+
+/** 错误事件分页列表（仅 admin；错误管理页数据源）。 */
+export async function getErrors(
+  page = 1,
+  size = 20,
+  filters: {
+    source?: string | null
+    level?: string | null
+    status?: number | null
+    etype?: string | null
+    q?: string | null
+  } = {},
+): Promise<Paginated<ErrorEvent>> {
+  const qs = new URLSearchParams({ page: String(page), size: String(size) })
+  if (filters.source) qs.set('source', filters.source)
+  if (filters.level) qs.set('level', filters.level)
+  if (filters.status != null) qs.set('status', String(filters.status))
+  if (filters.etype) qs.set('etype', filters.etype)
+  if (filters.q) qs.set('q', filters.q)
+  return request(`/api/errors?${qs.toString()}`)
+}
+
+/** 清空错误事件（可按 source 只清后端 / 前端）。 */
+export async function clearErrors(source?: string | null): Promise<void> {
+  const qs = source ? `?source=${source}` : ''
+  return requestVoid(`/api/errors${qs}`, { method: 'DELETE' })
 }
 
 /** 公告列表（所有登录用户可见，分页）。 */

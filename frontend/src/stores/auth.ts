@@ -12,7 +12,7 @@ export interface CurrentUser {
   username: string
   name: string
   displayName: string | null
-  role: 'admin' | 'editor' | 'viewer'
+  role: string
   isActive: boolean
   createdAt: string | null
   preferredModel: string | null
@@ -21,6 +21,7 @@ export interface CurrentUser {
   departmentId: string | null
   department: string | null
   employeeId: string | null
+  permissions: string[]
 }
 
 export const useAuthStore = defineStore('auth', () => {
@@ -41,10 +42,11 @@ export const useAuthStore = defineStore('auth', () => {
   // 登录态由「后端能否凭 HttpOnly Cookie 解出当前用户」决定，
   // 不再依赖前端持有的明文 token（防 XSS 窃取）。
   const isLoggedIn = computed(() => !!user.value)
-  const isAdmin = computed(() => user.value?.role === 'admin')
-  const isEditor = computed(
-    () => user.value?.role === 'admin' || user.value?.role === 'editor',
-  )
+
+  /** 权限判断（替代硬编码 role === 'admin'，真正 RBAC 驱动）。 */
+  function hasPerm(key: string): boolean {
+    return (user.value?.permissions ?? []).includes(key)
+  }
 
   function persist() {
     if (user.value) localStorage.setItem(USER_KEY, JSON.stringify(user.value))
@@ -57,7 +59,7 @@ export const useAuthStore = defineStore('auth', () => {
       username: u.username,
       name: u.displayName || u.username,
       displayName: u.displayName,
-      role: (u.role as CurrentUser['role']) || 'viewer',
+      role: u.role || 'viewer',
       isActive: u.isActive,
       createdAt: u.createdAt,
       preferredModel: u.preferredModel ?? null,
@@ -66,6 +68,7 @@ export const useAuthStore = defineStore('auth', () => {
       departmentId: u.departmentId ?? null,
       department: u.department ?? null,
       employeeId: u.employeeId ?? null,
+      permissions: u.permissions ?? [],
     }
   }
 
@@ -93,5 +96,5 @@ export const useAuthStore = defineStore('auth', () => {
     persist()
   }
 
-  return { user, isLoggedIn, isAdmin, isEditor, login, fetchMe, logout }
+  return { user, isLoggedIn, hasPerm, login, fetchMe, logout }
 })

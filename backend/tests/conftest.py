@@ -47,7 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.database as db_mod  # noqa: E402
 from app.config import settings  # noqa: E402
-from app.database import _run_alembic_upgrade  # noqa: E402
+from app.database import _run_alembic_upgrade, _seed_roles  # noqa: E402
 from app.db import User  # noqa: E402
 from tests._fakes import FakeEmbedder, FakeLLM, FakeRedis  # noqa: E402
 
@@ -151,6 +151,8 @@ async def prepare_test_db():
     await _drop_and_create()
     # 用与生产一致的 Alembic 迁移建表（验证迁移本身可用）
     await _run_alembic_upgrade()
+    # 同步内置角色及权限（新增权限如 kb_edit 依赖此步幂等补入）
+    await _seed_roles()
     # lifespan 不触发，手动引导初始管理员（否则登录无用户）
     await _ensure_admin()
     # 清空连接池：_ensure_admin 在「session loop」开了一条 asyncpg

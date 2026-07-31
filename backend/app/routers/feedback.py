@@ -1,7 +1,7 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import _is_kb_super_admin, get_current_user
@@ -48,6 +48,26 @@ async def create_feedback(
 
     await db.commit()
     return {"ok": True, "rating": payload.rating}
+
+
+@router.get("/feedback/accepted-count")
+async def my_accepted_count(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """当前用户采纳（点赞）的回答数。
+
+    点赞即采纳（产品决策）：统计该用户所有会话中 rating='up' 的反馈数。
+    归属经 feedback → message → session.user_id 关联，只数自己的。
+    """
+    cnt = await db.scalar(
+        select(func.count())
+        .select_from(MessageFeedback)
+        .join(ChatMessage, ChatMessage.id == MessageFeedback.message_id)
+        .join(ChatSession, ChatSession.id == ChatMessage.session_id)
+        .where(MessageFeedback.rating == "up", ChatSession.user_id == str(user.id))
+    )
+    return {"count": cnt or 0}
 
 
 @router.delete("/feedback/{message_id}")

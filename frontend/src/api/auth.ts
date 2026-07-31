@@ -78,6 +78,11 @@ export async function getRoles(force = false): Promise<RoleOut[]> {
   return cachedDict('roles', () => request<RoleOut[]>('/api/roles'))
 }
 
+/** 获取系统全量权限定义（后端驱动，不再硬编码）。 */
+export async function getPermissions(): Promise<{ key: string; label: string; group: string }[]> {
+  return cachedDict('permissions', () => request<{ key: string; label: string; group: string }[]>('/api/permissions'))
+}
+
 /** 新建自定义角色。 */
 export async function createRole(payload: RoleCreate): Promise<RoleOut> {
   invalidateDict('roles')

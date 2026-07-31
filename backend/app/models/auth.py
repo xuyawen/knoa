@@ -24,6 +24,7 @@ class UserOut(CamelModel):
     department_id: str | None = None              # 部门外键（真相源）
     department: str | None = None                 # 部门显示名（后端按 department_id 解析，仅供展示）
     employee_id: str | None = None
+    permissions: list[str] = []                   # 当前用户持有的权限 key 列表（前端 UI 门控用）
 
 
 class TokenOut(CamelModel):
