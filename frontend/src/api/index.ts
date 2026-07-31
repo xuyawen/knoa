@@ -29,6 +29,7 @@ import type {
   KbDistribution,
   OperationsResponse,
   ErrorEvent,
+  LLMCall,
   Announcement,
   AnnouncementCreate,
   AnnouncementUpdate,
@@ -338,6 +339,21 @@ export async function getAcceptedCount(): Promise<number> {
 export async function getMyDocCount(): Promise<number> {
   const r = await request<{ count: number }>('/api/documents/my-count')
   return r.count
+}
+
+/** 当前用户最近操作的文档（跨库，按 updated_at 倒序；个人中心「我的近期贡献」）。 */
+export interface MyRecentDoc {
+  id: string
+  title: string
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+export async function getMyRecentDocs(limit = 5): Promise<MyRecentDoc[]> {
+  const rows = await request<{ id: string; title: string; status: string; created_at: string; updated_at: string }[]>(
+    `/api/documents/my-recent?limit=${limit}`,
+  )
+  return rows.map((r) => ({ id: r.id, title: r.title, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at }))
 }
 
 /** 编辑知识库：只传需改字段（name / icon / description）。 */
@@ -679,6 +695,34 @@ export async function getErrors(
 export async function clearErrors(source?: string | null): Promise<void> {
   const qs = source ? `?source=${source}` : ''
   return requestVoid(`/api/errors${qs}`, { method: 'DELETE' })
+}
+
+/** LLM 调用日志分页列表（仅 admin；调用日志页「模型调用」数据源）。 */
+export async function getLlmCalls(
+  page = 1,
+  size = 20,
+  filters: {
+    requestType?: string | null
+    status?: string | null
+    model?: string | null
+    caller?: string | null
+    rid?: string | null
+    q?: string | null
+  } = {},
+): Promise<Paginated<LLMCall>> {
+  const qs = new URLSearchParams({ page: String(page), size: String(size) })
+  if (filters.requestType) qs.set('request_type', filters.requestType)
+  if (filters.status) qs.set('status', filters.status)
+  if (filters.model) qs.set('model', filters.model)
+  if (filters.caller) qs.set('caller', filters.caller)
+  if (filters.rid) qs.set('rid', filters.rid)
+  if (filters.q) qs.set('q', filters.q)
+  return request(`/api/llm-calls?${qs.toString()}`)
+}
+
+/** 清空 LLM 调用记录。 */
+export async function clearLlmCalls(): Promise<void> {
+  return requestVoid(`/api/llm-calls`, { method: 'DELETE' })
 }
 
 /** 公告列表（所有登录用户可见，分页）。 */

@@ -142,12 +142,14 @@ class AgenticRAGAgent(SessionMemoryMixin):
         user_id: str | None = None,
         memory: "MemoryStore | None" = None,
         graph: "GraphStore | None" = None,
+        dept_id: str | None = None,
     ):
         self.retriever = retriever
         self.llm = llm
         self.redis = redis
         self.db = db
         self.user_id = user_id
+        self.dept_id = dept_id  # 提问人所属部门（热搜按部门分桶用）
         self.memory = memory
         self.graph = graph
         self._memories: list[str] = []  # 本轮召回的该用户长期记忆
@@ -423,10 +425,10 @@ class AgenticRAGAgent(SessionMemoryMixin):
             # 提前提交后，即使生成失败，会话与用户问题仍在，最多只丢回答。
             await self.db.commit()
 
-            # ponytail: 只统计真实业务提问，过滤打招呼/闲聊/天气等，避免污染"高频问题"
+            # ponytail: 只统计真实业务提问，过滤打招呼/闲聊/天气等，避免污染“高频问题”
             if not should_skip_retrieval(question):
                 try:
-                    await self.redis.incr_trending(question)
+                    await self.redis.incr_trending(question, self.dept_id)
                 except Exception:  # noqa: BLE001  (intentional catch-all: best-effort, don't fail request if trending counter update fails)
                     pass
 

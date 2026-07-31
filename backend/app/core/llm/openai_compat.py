@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -9,6 +10,7 @@ import logging
 from openai import AsyncOpenAI
 
 from app.core.llm.base import LLMConfig, ToolCallResult
+from app.models.llm_calls import capture_llm_call
 
 logger = logging.getLogger("knoa.llm")
 
@@ -49,39 +51,75 @@ class OpenAICompatProvider:
         include_reasoning：True 时同时透出 reasoning_content（仅用于内部结构化抽取，
         不可暴露给终端用户——推理过程又臭又长）。
         """
+        used_model = model or self.model
+        start = time.perf_counter()
+        preview_parts: list[str] = []
+        preview_len = 0
+        usage_in: int | None = None
+        usage_out: int | None = None
+        stream_error: str | None = None
+
+        def _acc(text: str) -> None:
+            """累积响应前 200 字作预览（content + reasoning 都算，便于定位抽图空输出）。"""
+            nonlocal preview_len
+            if preview_len < 200 and text:
+                preview_parts.append(text)
+                preview_len += len(text)
+
         try:
-            params: dict[str, Any] = {
-                "model": model or self.model,
-                "messages": messages,
-                "temperature": temperature or self.default_temperature,
-                "max_tokens": max_tokens or self.max_tokens,
-                "stream": True,
-            }
-            if top_p is not None:
-                params["top_p"] = top_p
-            params["messages"] = self._normalize_messages(messages)
-            stream = await self.client.chat.completions.create(**params)
-        except Exception as e:  # noqa: BLE001  (intentional catch-all: convert any API failure to ValueError)
-            self._diag_messages("stream_chat", messages)
-            raise ValueError(f"LLM API 请求失败: {e}") from e
+            try:
+                params: dict[str, Any] = {
+                    "model": used_model,
+                    "messages": messages,
+                    "temperature": temperature or self.default_temperature,
+                    "max_tokens": max_tokens or self.max_tokens,
+                    "stream": True,
+                    # 末包携带 usage 供调用日志记 token；provider 不支持则 token 留 null（graceful）
+                    "stream_options": {"include_usage": True},
+                }
+                if top_p is not None:
+                    params["top_p"] = top_p
+                params["messages"] = self._normalize_messages(messages)
+                stream = await self.client.chat.completions.create(**params)
+            except Exception as e:  # noqa: BLE001  (intentional catch-all: convert any API failure to ValueError)
+                self._diag_messages("stream_chat", messages)
+                stream_error = str(e)
+                raise ValueError(f"LLM API 请求失败: {e}") from e
 
-        async for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
+            async for chunk in stream:
+                # 末包（include_usage）choices 为空但带 usage：先收 token 再跳过
+                u = getattr(chunk, "usage", None)
+                if u is not None:
+                    usage_in = getattr(u, "prompt_tokens", usage_in)
+                    usage_out = getattr(u, "completion_tokens", usage_out)
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
 
-            # ── 标准字段 content (OpenAI / DeepSeek / DashScope 都有) ──
-            content = getattr(delta, "content", "") or ""
+                # ── 标准字段 content (OpenAI / DeepSeek / DashScope 都有) ──
+                content = getattr(delta, "content", "") or ""
 
-            # ponytail: reasoning_content（Agnes 推理模型）按约定丢弃，只透出 content；
-            # 否则会把模型思考过程整段泄漏给用户（回答又臭又长）。
-            # include_reasoning=True 时例外：内部结构化抽取需要从中提取 JSON。
-            if include_reasoning:
-                reasoning = getattr(delta, "reasoning_content", "") or ""
-                if reasoning:
-                    yield reasoning
-            if content:
-                yield content
+                # ponytail: reasoning_content（Agnes 推理模型）按约定丢弃，只透出 content；
+                # 否则会把模型思考过程整段泄漏给用户（回答又臭又长）。
+                # include_reasoning=True 时例外：内部结构化抽取需要从中提取 JSON。
+                if include_reasoning:
+                    reasoning = getattr(delta, "reasoning_content", "") or ""
+                    if reasoning:
+                        _acc(reasoning)
+                        yield reasoning
+                if content:
+                    _acc(content)
+                    yield content
+        except Exception as e:  # noqa: BLE001  (记录流式中途异常后原样抛出，不吞错)
+            if stream_error is None:
+                stream_error = str(e)
+            raise
+        finally:
+            self._record(
+                used_model, "stream_chat", start,
+                tokens_in=usage_in, tokens_out=usage_out,
+                error=stream_error, preview="".join(preview_parts),
+            )
 
     async def chat(
         self,
@@ -92,8 +130,9 @@ class OpenAICompatProvider:
         max_tokens: int | None = None,
     ) -> str:
         """非流式调用"""
+        used_model = model or self.model
         params: dict[str, Any] = {
-            "model": model or self.model,
+            "model": used_model,
             "messages": messages,
             "temperature": temperature or self.default_temperature,
             "max_tokens": max_tokens or self.max_tokens,
@@ -101,14 +140,24 @@ class OpenAICompatProvider:
         if top_p is not None:
             params["top_p"] = top_p
         params["messages"] = self._normalize_messages(messages)
+        start = time.perf_counter()
         try:
             response = await self.client.chat.completions.create(**params)
         except Exception as e:  # noqa: BLE001  (intentional catch-all: convert any API failure to ValueError)
             self._diag_messages("chat", messages)
+            self._record(used_model, "chat", start, error=str(e))
             raise ValueError(f"LLM API 请求失败: {e}") from e
         msg = response.choices[0].message
         # 只返回真正的回答 content，丢弃 reasoning_content（推理过程不对外暴露）
-        return (getattr(msg, "content", "") or "").strip()
+        content = (getattr(msg, "content", "") or "").strip()
+        usage = getattr(response, "usage", None)
+        self._record(
+            used_model, "chat", start,
+            tokens_in=getattr(usage, "prompt_tokens", None),
+            tokens_out=getattr(usage, "completion_tokens", None),
+            preview=content,
+        )
+        return content
 
     @traceable(name="llm_tool_call", tags=["llm", "tool"])
     async def tool_call(
@@ -142,6 +191,7 @@ class OpenAICompatProvider:
         else:
             augmented.insert(0, {"role": "system", "content": decision})
 
+        start = time.perf_counter()
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -151,6 +201,7 @@ class OpenAICompatProvider:
             )
         except Exception as e:  # noqa: BLE001  (intentional catch-all: convert any API failure to ValueError)
             self._diag_messages("tool_call", augmented)
+            self._record(self.model, "tool_call", start, error=str(e))
             raise ValueError(f"LLM API 请求失败: {e}") from e
         msg = response.choices[0].message
         content = (getattr(msg, "content", "") or "").strip()
@@ -168,7 +219,37 @@ class OpenAICompatProvider:
         parsed = self._extract_json(content)
         name = parsed.get("action") or parsed.get("name") or "direct_answer"
         args = {k: v for k, v in parsed.items() if k not in ("action", "name")}
+        usage = getattr(response, "usage", None)
+        self._record(
+            self.model, "tool_call", start,
+            tokens_in=getattr(usage, "prompt_tokens", None),
+            tokens_out=getattr(usage, "completion_tokens", None),
+            preview=content,
+        )
         return ToolCallResult(name=name, arguments=args, raw_text=raw_text)
+
+    @staticmethod
+    def _record(
+        model: str,
+        request_type: str,
+        start: float,
+        *,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
+        error: str | None = None,
+        preview: str | None = None,
+    ) -> None:
+        """落调用日志（best-effort）：status 由 error 是否传入决定，latency 自 start 起算。"""
+        capture_llm_call(
+            model=model,
+            request_type=request_type,
+            status="error" if error else "success",
+            latency_ms=int((time.perf_counter() - start) * 1000),
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            error=error,
+            preview=preview,
+        )
 
     @staticmethod
     def _normalize_messages(messages: list) -> list:

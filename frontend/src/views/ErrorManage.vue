@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 错误管理（系统管理子页）：浏览 / 检索 / 清空错误事件。
+// 调用日志（系统管理子页）：浏览 / 检索 / 清空系统事件。
 // 数据源 error_event 表，由后端 capture_error 异步写入两处：
 //   backend = 后端 HTTP 4xx/5xx（observability 中间件）；frontend = 前端上报（/api/events）。
 import { ref, computed, onMounted, watch } from 'vue'
@@ -8,13 +8,18 @@ import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
+import type { DataTableColumn } from '@/components/ui/DataTable.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
+import LlmCallList from '@/views/LlmCallList.vue'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
 import { getErrors, clearErrors } from '@/api'
 import type { Paginated, ErrorEvent } from '@/types/api'
 
 const toast = useToastStore()
+
+/* ---------- tab 切换（系统事件 / 模型调用） ---------- */
+const activeTab = ref<'errors' | 'calls'>('errors')
 
 /* ---------- 列表（服务端分页 + 过滤） ---------- */
 const data = ref<Paginated<ErrorEvent> | null>(null)
@@ -36,7 +41,7 @@ async function load(resetPage = false) {
     })
   } catch (e: unknown) {
     data.value = null
-    toast.error(`加载错误列表失败：${errMsg(e)}`)
+    toast.error(`加载事件列表失败：${errMsg(e)}`)
   } finally {
     loading.value = false
   }
@@ -47,15 +52,15 @@ onMounted(() => load())
 const rows = computed(() => data.value?.items ?? [])
 const total = computed(() => data.value?.total ?? 0)
 
-const columns = [
-  { key: 'createdAt', title: '时间' },
-  { key: 'source', title: '来源' },
-  { key: 'level', title: '级别' },
-  { key: 'statusCode', title: '状态码' },
-  { key: 'method', title: '方法' },
-  { key: 'path', title: '路径 / 类型', strong: true },
+const columns: DataTableColumn[] = [
+  { key: 'createdAt', title: '时间', width: '145px' },
+  { key: 'source', title: '来源', width: '80px', align: 'center' },
+  { key: 'level', title: '级别', width: '80px', align: 'center' },
+  { key: 'statusCode', title: '状态码', width: '70px', align: 'center' },
+  { key: 'method', title: '方法', width: '66px', align: 'center' },
+  { key: 'path', title: '路径 / 类型', width: '220px', strong: true },
   { key: 'message', title: '消息' },
-  { key: 'actions', title: '操作' },
+  { key: 'actions', title: '操作', width: '56px' },
 ]
 
 const sourceOptions = [
@@ -83,11 +88,13 @@ watch(searchQuery, () => {
 watch([sourceFilter, levelFilter, pageSize], () => load(true))
 
 /* ---------- 展示辅助 ---------- */
-function fmtTime(iso: string) {
+function fmtTime(iso: string, full = false) {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`
+  if (full) return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}:${p(d.getSeconds())}`
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`
 }
 function sourceLabel(s: string) {
   return s === 'backend' ? '后端' : s === 'frontend' ? '前端' : s
@@ -112,7 +119,7 @@ async function confirmClear() {
   clearing.value = true
   try {
     await clearErrors(sourceFilter.value === 'all' ? null : sourceFilter.value)
-    toast.success('已清空错误记录')
+    toast.success('已清空事件记录')
     showClear.value = false
     load(true)
   } catch (e: unknown) {
@@ -125,7 +132,17 @@ async function confirmClear() {
 
 <template>
   <div class="page errmg fade-up">
-    <section class="card errmg-body">
+    <section class="card errmg-card">
+      <div class="errmg-tabs">
+        <button class="errmg-tab" :class="{ active: activeTab === 'errors' }" @click="activeTab = 'errors'">
+          <Icon name="list" :size="14" /> 系统事件
+        </button>
+        <button class="errmg-tab" :class="{ active: activeTab === 'calls' }" @click="activeTab = 'calls'">
+          <Icon name="activity" :size="14" /> 模型调用
+        </button>
+      </div>
+      <template v-if="activeTab === 'errors'">
+      <div class="errmg-body">
       <div class="toolbar">
         <div class="search-box">
           <Icon name="search" :size="14" class="search-icon" />
@@ -172,7 +189,7 @@ async function confirmClear() {
             </div>
           </template>
         </template>
-        <template #empty>暂无错误记录（或当前筛选无匹配）</template>
+        <template #empty>暂无事件记录（或当前筛选无匹配）</template>
       </DataTable>
 
       <Pagination
@@ -183,12 +200,15 @@ async function confirmClear() {
         @update:page="load()"
         @update:page-size="load(true)"
       />
+      </div>
+      </template>
+      <LlmCallList v-else />
     </section>
 
     <!-- 详情弹窗 -->
-    <AppModal :show="!!detail" title="错误详情" wide @close="detail = null">
+    <AppModal :show="!!detail" title="事件详情" wide @close="detail = null">
       <div v-if="detail" class="detail">
-        <div class="d-row"><label>时间</label><span>{{ fmtTime(detail.createdAt) }}</span></div>
+        <div class="d-row"><label>时间</label><span>{{ fmtTime(detail.createdAt, true) }}</span></div>
         <div class="d-row"><label>来源</label><span>{{ sourceLabel(detail.source) }}</span></div>
         <div class="d-row"><label>级别</label><span>{{ levelLabel(detail.level) }}</span></div>
         <div class="d-row" v-if="detail.statusCode"><label>状态码</label><span>{{ detail.statusCode }}</span></div>
@@ -215,8 +235,8 @@ async function confirmClear() {
 
     <ConfirmDialog
       :show="showClear"
-      title="清空错误记录"
-      :message="sourceFilter === 'all' ? '确认清空全部错误记录？该操作不可恢复。' : `确认清空「${sourceLabel(sourceFilter)}」的错误记录？该操作不可恢复。`"
+      title="清空事件记录"
+      :message="sourceFilter === 'all' ? '确认清空全部事件记录？该操作不可恢复。' : `确认清空「${sourceLabel(sourceFilter)}」的事件记录？该操作不可恢复。`"
       confirm-text="清空"
       danger
       @close="showClear = false"
@@ -226,7 +246,27 @@ async function confirmClear() {
 </template>
 
 <style scoped>
+.errmg-card { overflow: hidden; }
 .errmg-body { padding: 20px; }
+.errmg-body :deep(.data-table) { table-layout: fixed; }
+
+/* ---- tab 切换（卡片内下划线风格） ---- */
+.errmg-tabs {
+  display: flex; gap: 0; padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+.errmg-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 13px 18px; border: none; background: none;
+  color: var(--text-tertiary); font-size: 13px; font-weight: 500;
+  cursor: pointer; position: relative; transition: color var(--dur-fast);
+}
+.errmg-tab:hover { color: var(--text-primary); }
+.errmg-tab.active { color: var(--brand); }
+.errmg-tab.active::after {
+  content: ''; position: absolute; bottom: -1px; left: 18px; right: 18px;
+  height: 2px; background: var(--brand); border-radius: 1px 1px 0 0;
+}
 
 /* ---- 工具栏 ---- */
 .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -256,14 +296,14 @@ async function confirmClear() {
 .path-cell { font-family: var(--font-mono, monospace); font-size: 12px; color: var(--text-primary); word-break: break-all; }
 .msg-cell { font-size: 12px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 
-.src-badge, .lv-badge { display: inline-flex; padding: 2px 10px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 500; }
+.src-badge, .lv-badge { display: inline-flex; padding: 2px 10px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 500; white-space: nowrap; }
 .src-badge.backend { background: var(--accent-violet-soft); color: var(--accent-violet); }
 .src-badge.frontend { background: var(--accent-blue-soft); color: var(--accent-blue); }
 .lv-badge.lv-error { background: var(--danger-soft); color: var(--danger); }
 .lv-badge.lv-warn { background: var(--warning-soft, var(--bg-subtle)); color: var(--warning, var(--text-secondary)); }
 .lv-badge.lv-info { background: var(--bg-subtle); color: var(--text-secondary); }
 
-.status-code { font-family: var(--font-mono, monospace); font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: var(--radius-sm); }
+.status-code { font-family: var(--font-mono, monospace); font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: var(--radius-sm); white-space: nowrap; }
 .status-code.s5 { background: var(--danger-soft); color: var(--danger); }
 .status-code.s4 { background: var(--warning-soft, var(--bg-subtle)); color: var(--warning, var(--text-secondary)); }
 

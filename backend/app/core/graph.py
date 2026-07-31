@@ -27,6 +27,7 @@ from app.config import settings
 from app.core.llm.base import LLMProvider
 from app.core.rag.embeddings import EmbeddingModel
 from app.db import DocChunk, Document, KGEdge, KGNode
+from app.models.llm_calls import caller_var
 
 logger = logging.getLogger(__name__)
 
@@ -191,17 +192,23 @@ class GraphStore:
             f"[chunk {c.get('index', i)}] {c.get('content', '')}"
             for i, c in enumerate(chunks)
         )[:6000]
+        # 调用方标签：让本次抽图的 LLM 调用在调用日志中标 caller=graph_extract，
+        # 便于按调用方排查「抽图静默无产出」类问题（finally reset 不污染后续调用）。
+        token = caller_var.set("graph_extract")
         try:
-            # 推理模型（Agnes）非流式 chat 的 content 常为空，且 reasoning 会吃掉
-            # max_tokens 预算导致 JSON 被截断；故用流式 + 提高 token 上限，
-            # 让完整 JSON 落在 content 流里（与非流式问答同一套流式通道）。
-            raw = "".join(
-                c
-                for c in await self._stream_completion(doc_title, text)
-            )
-        except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort fallback, skip graph build on any LLM failure)
-            logger.warning("graph extract LLM failed (skip graph for doc %s): %s", doc_title, e)
-            return
+            try:
+                # 推理模型（Agnes）非流式 chat 的 content 常为空，且 reasoning 会吃掉
+                # max_tokens 预算导致 JSON 被截断；故用流式 + 提高 token 上限，
+                # 让完整 JSON 落在 content 流里（与非流式问答同一套流式通道）。
+                raw = "".join(
+                    c
+                    for c in await self._stream_completion(doc_title, text)
+                )
+            except Exception as e:  # noqa: BLE001  (intentional catch-all: best-effort fallback, skip graph build on any LLM failure)
+                logger.warning("graph extract LLM failed (skip graph for doc %s): %s", doc_title, e)
+                return
+        finally:
+            caller_var.reset(token)
 
         graph = _coerce_graph(raw)
         entities = graph["entities"]

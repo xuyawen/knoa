@@ -132,6 +132,7 @@ async def ask(
                 retriever, llm, redis, gen_db,
                 user_id=str(user.id),
                 embedder=embedder,
+                dept_id=str(user.department_id) if user.department_id else None,
             )
 
             async for event in pipeline.stream_answer(

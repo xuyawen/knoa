@@ -108,10 +108,16 @@ class FakeLLM:
 class FakeRedis:
     """替代 RedisStore：所有方法 no-op。"""
 
-    async def incr_trending(self, question: str):
+    async def incr_trending(self, question: str, dept_id: str | None = None):
         return None
 
-    async def get_trending(self, limit: int = 10):
+    async def get_trending(self, limit: int = 10, dept_ids: frozenset[str] | None = None):
+        return []
+
+    async def get_trending_range(self, days: int = 7, limit: int = 10, dept_ids: frozenset[str] | None = None):
+        return []
+
+    async def get_day_counts(self, day):
         return []
 
     async def close(self):

@@ -136,7 +136,7 @@ const subMenus: Record<string, SubItem[]> = {
     { label: '用户管理', icon: 'users', to: '/permission', activeNames: ['permission'], adminOnly: true },
     { label: '角色管理', icon: 'shield-check', to: '/permission/roles', activeNames: ['perm-roles'], adminOnly: true },
     { label: '部门管理', icon: 'layers', to: '/permission/departments', activeNames: ['perm-departments'], adminOnly: true },
-    { label: '错误管理', icon: 'alert', to: '/permission/errors', activeNames: ['perm-errors'], adminOnly: true },
+    { label: '调用日志', icon: 'scroll-text', to: '/permission/errors', activeNames: ['perm-errors'], adminOnly: true },
   ],
   profile: [
     { label: '个人资料', icon: 'user', to: '/profile', activeNames: ['profile'] },
@@ -175,7 +175,13 @@ function goAccountSettings() {
 const showSettings = ref(false)
 
 const user = computed(() => auth.user)
-const userInitial = computed(() => user.value?.name?.[0] ?? '管')
+/* 头像徽章：管理员显示「管理」；有部门显示部门名；无部门回落显示名首字。 */
+const userBadge = computed(() => {
+  const u = user.value
+  if (!u) return '管'
+  if (u.role === 'admin') return '管理'
+  return u.department || u.name?.[0] || '管'
+})
 
 /* ---------- 子侧栏折叠（localStorage 持久化） ---------- */
 const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === '1')
@@ -277,7 +283,7 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
 
         <!-- 用户头像 + 下拉 -->
         <div class="user-trigger" @click.stop="toggleUserMenu">
-          <span class="avatar">{{ userInitial }}</span>
+          <span class="avatar" :class="{ 'avatar-sm': userBadge.length > 1 }">{{ userBadge }}</span>
           <span class="user-name">{{ user?.name || '管理员' }}</span>
           <Icon name="chevron-down" :size="12" class="user-chev" />
 
@@ -649,6 +655,7 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
   justify-content: center;
   flex-shrink: 0;
 }
+.avatar.avatar-sm { font-size: 11px; }
 .user-name {
   font-size: 13px;
   font-weight: 500;

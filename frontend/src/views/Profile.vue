@@ -3,7 +3,8 @@
 import { computed, ref, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
-import { getSessions, getKnowledgeBases, getAcceptedCount, getMyDocCount } from '@/api'
+import { getSessions, getKnowledgeBases, getAcceptedCount, getMyDocCount, getMyRecentDocs } from '@/api'
+import type { MyRecentDoc } from '@/api'
 import Icon from '@/components/ui/Icon.vue'
 import UserProfileSettingsModal from '@/components/user/UserProfileSettingsModal.vue'
 import type { ChatSession, Paginated, KnowledgeBasesResponse } from '@/types/api'
@@ -28,16 +29,18 @@ const acceptedCount = ref(0)
 const docCount = ref(0)
 onMounted(async () => {
   try {
-    const [sList, kbResp, accCount, dCount] = await Promise.all([
+    const [sList, kbResp, accCount, dCount, rDocs] = await Promise.all([
       getSessions(1, 3),
       getKnowledgeBases(1, 4),
       getAcceptedCount(),
       getMyDocCount(),
+      getMyRecentDocs(5),
     ])
     sessionsData.value = sList
     kbData.value = kbResp
     acceptedCount.value = accCount
     docCount.value = dCount
+    recentDocs.value = rDocs
   } catch {
     toast.error('加载个人数据失败')
   } finally {
@@ -68,11 +71,31 @@ const myKBs = computed(() =>
   })),
 )
 
-/* ---------- 近期贡献（mock，后端暂无贡献流 API） ---------- */
-const recentContribs = [
-  { title: '亚马逊美国站退货政策 2026 更新', action: '编辑', time: '3 小时前' },
-  { title: '北美站 Prime Day 备货清单', action: '新增', time: '昨天' },
-]
+/* ---------- 近期贡献（真实数据：我最近操作的文档） ---------- */
+const recentDocs = ref<MyRecentDoc[]>([])
+const recentContribs = computed(() =>
+  recentDocs.value.map((d) => {
+    const created = new Date(d.createdAt).getTime()
+    const updated = new Date(d.updatedAt).getTime()
+    const action = updated - created > 60_000 ? '编辑' : '新增'
+    return { title: d.title, action, time: relTime(d.updatedAt) }
+  }),
+)
+/** 相对时间：x 分钟前 / x 小时前 / 昨天 / x 天前，超 7 天显示日期。 */
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const min = Math.floor(diff / 60_000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min} 分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr} 小时前`
+  const day = Math.floor(hr / 24)
+  if (day === 1) return '昨天'
+  if (day < 7) return `${day} 天前`
+  const d = new Date(iso)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
 
 /* ---------- 编辑资料弹窗（复用 UserProfileSettingsModal）---------- */
 const showEdit = ref(false)

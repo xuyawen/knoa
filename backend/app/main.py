@@ -59,6 +59,7 @@ from app.routers import (
     graph,
     health,
     knowledge,
+    llm_calls,
     memory,
     metrics,
     operations,
@@ -73,9 +74,9 @@ from app.routers import (
 
 
 async def _rollup_trending():
-    """将昨日 Redis 热搜计数落盘到 Trending 表。
+    """将昨日 Redis 热搜计数落盘到 Trending 表（按部门分桶）。
 
-    幂等：若 DB 已存在昨日记录则跳过（重启不重复写入）。
+    幂等：按 (date, department_id) 粒度检查，已落盘的桶跳过（重启不重复写入）。
     best-effort：Redis 不可用 / 无数据时静默返回，不阻塞启动。
     """
     from datetime import datetime, timedelta, timezone
@@ -93,14 +94,21 @@ async def _rollup_trending():
     if not counts:
         return
     async with AsyncSessionLocal() as session:
-        exists = await session.scalar(
-            select(Trending.id).where(Trending.date == yesterday).limit(1)
+        # 幂等：已落盘的 (date, dept) 桶跳过
+        done_depts = set(
+            (await session.execute(
+                select(Trending.department_id).where(Trending.date == yesterday).distinct()
+            )).scalars().all()
         )
-        if exists:
-            return
-        for q, c in counts:
-            session.add(Trending(question=q, count=c, date=yesterday))
-        await session.commit()
+        added = False
+        for q, c, dept_id in counts:
+            dept_uuid = uuid.UUID(dept_id) if dept_id else None
+            if dept_uuid in done_depts:
+                continue
+            session.add(Trending(question=q, count=c, date=yesterday, department_id=dept_uuid))
+            added = True
+        if added:
+            await session.commit()
 
 
 @asynccontextmanager
@@ -384,4 +392,5 @@ app.include_router(operations.router, prefix="/api")
 app.include_router(announcements.router, prefix="/api")
 app.include_router(roles.router, prefix="/api")
 app.include_router(errors.router, prefix="/api")
+app.include_router(llm_calls.router, prefix="/api")
 app.include_router(oss.router, prefix="/api")

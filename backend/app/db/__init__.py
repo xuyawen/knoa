@@ -120,12 +120,20 @@ class ChatMessage(Base):
 
 
 class Trending(Base):
+    """热搜计数（按日落盘，Redis 30 天过期后的冷数据兜底）。
+
+    department_id：搜索归属部门（NULL = 无部门用户的全局桶）。
+    展示侧按用户可见部门子树聚合，避免跨部门热搜泄漏。
+    """
     __tablename__ = "trending"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     question: Mapped[str] = mapped_column(String(500))
     count: Mapped[int] = mapped_column(Integer, default=0)
     date: Mapped[date] = mapped_column(Date, index=True)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("department.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
 
 class MessageFeedback(Base):
@@ -409,4 +417,28 @@ class ErrorEvent(Base):
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
     url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class LLMCall(Base):
+    """LLM 调用日志（调用日志页「模型调用」tab 数据源）。
+
+    每次 LLM 请求（stream_chat/chat/tool_call）经 capture_llm_call fire-and-forget
+    异步写入：记模型/类型/调用方/耗时/token/状态/错误/响应截断预览，绝不阻塞主流程。
+    与 ErrorEvent 同源机制（独立后台任务 + 保留期清理）。request_type/status/rid/
+    created_at 加索引供页面过滤与按 rid 串联后端日志。
+    """
+    __tablename__ = "llm_call"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    model: Mapped[str] = mapped_column(String(100))                      # 实际使用的模型
+    request_type: Mapped[str] = mapped_column(String(32), index=True)    # stream_chat | chat | tool_call
+    caller: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 调用方标签（graph_extract …）
+    status: Mapped[str] = mapped_column(String(16), default="success", server_default="success", index=True)  # success | error
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preview: Mapped[str | None] = mapped_column(String(500), nullable=True)  # 响应内容前 200 字截断
+    rid: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)  # 请求 id，与后端日志串联
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

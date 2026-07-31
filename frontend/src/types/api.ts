@@ -550,6 +550,22 @@ export interface ErrorEvent {
   createdAt: string
 }
 
+/** LLM 调用日志（调用日志页「模型调用」tab；stream_chat/chat/tool_call）。 */
+export interface LLMCall {
+  id: string
+  model: string
+  requestType: string
+  caller: string | null
+  status: 'success' | 'error' | string
+  latencyMs: number | null
+  tokensIn: number | null
+  tokensOut: number | null
+  error: string | null
+  preview: string | null
+  rid: string | null
+  createdAt: string
+}
+
 export interface Announcement {
   id: string
   title: string

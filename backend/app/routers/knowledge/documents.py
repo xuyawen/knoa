@@ -130,9 +130,9 @@ async def search_docs(
             "items": [], "total": 0, "page": page, "page_size": size, "pages": 1,
         }
 
-    # 热门搜索榜计数（best-effort：失败不影响搜索主流程）
+    # 热门搜索榜计数（best-effort：失败不影响搜索主流程；按搜索者部门分桶）
     try:
-        await get_redis().incr_trending(q)
+        await get_redis().incr_trending(q, str(user.department_id) if user.department_id else None)
     except Exception:  # noqa: BLE001  (intentional catch-all: trending counter must not fail the search)
         pass
 
@@ -401,6 +401,36 @@ async def my_document_count(
         .where(Document.uploader_id == user.id, Document.status == "已审核")
     )
     return {"count": cnt or 0}
+
+
+@router.get("/documents/my-recent")
+async def my_recent_documents(
+    limit: int = Query(5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """当前用户最近操作的文档（跨所有知识库，按 updated_at 倒序）。
+
+    个人中心「我的近期贡献」列表用：取自己上传的文档最近几条，
+    返回标题/状态/创建/更新时间，前端据此判断「新增/编辑」与相对时间。
+    须注册在 /documents/{doc_id} 之前，否则 "my-recent" 会被动态路由抢匹配。
+    """
+    rows = (await db.scalars(
+        select(Document)
+        .where(Document.uploader_id == user.id)
+        .order_by(Document.updated_at.desc())
+        .limit(limit)
+    )).all()
+    return [
+        {
+            "id": str(d.id),
+            "title": d.title,
+            "status": d.status,
+            "created_at": d.created_at.isoformat(),
+            "updated_at": d.updated_at.isoformat(),
+        }
+        for d in rows
+    ]
 
 
 @router.get("/documents/{doc_id}", response_model=DocumentDetailOut)

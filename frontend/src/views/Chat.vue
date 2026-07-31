@@ -25,6 +25,7 @@ import {
   deleteFeedback,
   getDocument,
   getKnowledgeBases,
+  getTrending,
 } from '@/api'
 import type {
   ChatSession,
@@ -153,12 +154,24 @@ const firstQuestion = computed(() => {
   return u?.content || activeSession.value?.title || ''
 })
 
-const suggested = [
-  '亚马逊选品有哪些方法和工具？',
-  'FBA 入库发货的完整流程是什么？',
-  '如何优化广告 ACOS？',
-  '卖儿童玩具需要哪些合规认证？',
+/* 推荐问题：动态取热搜榜（后端已按用户可见部门过滤），无数据时回落通用示例。 */
+const FALLBACK_SUGGESTED = [
+  '知识库中有哪些内容？',
+  '帮我总结某份文档的核心要点',
+  '这个问题应该问哪个部门？',
+  '最近新增了哪些文档？',
 ]
+const suggested = ref<string[]>([])
+async function loadSuggested() {
+  try {
+    const items = await getTrending()
+    suggested.value = items.length
+      ? items.slice(0, 4).map((t) => t.question)
+      : FALLBACK_SUGGESTED
+  } catch {
+    suggested.value = FALLBACK_SUGGESTED
+  }
+}
 
 // 检索范围：默认搜全部可访问知识库；选定具体 KB 后仅在该库内检索，
 // 后端会优先走 ES 快路（kNN + BM25），相关性与速度都更好
@@ -729,6 +742,7 @@ const route = useRoute()
 onMounted(async () => {
   await loadSessions()
   void loadKbOptions()
+  void loadSuggested()
   // 支持从检索记录页等带 ?session=xxx 跳转进来打开对应对话
   const sid = route.query.session
   if (typeof sid === 'string' && sid) await selectSession(sid)
@@ -793,9 +807,9 @@ watch(messages, () => scrollToBottom(), { deep: false })
           <h2 class="empty-title">向企业知识库提问</h2>
           <p class="empty-sub">基于内部文档检索作答，可附图片进行多模态提问。回答均标注引用来源。</p>
           <div class="empty-suggest">
-            <button v-for="(s, i) in suggested" :key="i" class="empty-card" @click="pick(s)">
+            <button v-for="(s, i) in suggested" :key="i" class="empty-card" :title="s" @click="pick(s)">
               <Icon name="arrow-up-right" :size="15" class="empty-card-icon" />
-              <span>{{ s }}</span>
+              <span class="empty-card-text">{{ s }}</span>
             </button>
           </div>
         </div>
@@ -1110,7 +1124,7 @@ watch(messages, () => scrollToBottom(), { deep: false })
 .empty-sub { font-size: 14px; line-height: 1.7; color: var(--text-secondary); margin: 0 0 28px; }
 .empty-suggest {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
   width: 100%;
 }
@@ -1135,6 +1149,13 @@ watch(messages, () => scrollToBottom(), { deep: false })
   box-shadow: var(--shadow-float);
 }
 .empty-card-icon { color: var(--brand); flex-shrink: 0; }
+.empty-card-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 消息气泡 */
 .msg-row {
