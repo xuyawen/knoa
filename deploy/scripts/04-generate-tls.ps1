@@ -3,7 +3,8 @@
 # 04-generate-tls.ps1  (run as Admin)
 # Generates a self-signed TLS cert into deploy/nginx/certs/.
 # Browsers will warn, but transport is encrypted. For a real
-# cert use Let's Encrypt (see PRODUCTION.md section 二 / Step 6-B).
+# cert use Let's Encrypt. 注：当前生产为纯 HTTP（见 deploy/DEPLOY.md），
+# 本脚本仅用于将来启用 HTTPS 时生成证书。
 #
 # Usage:
 #   .\04-generate-tls.ps1                 # CN = 170.106.74.73
