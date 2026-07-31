@@ -43,6 +43,7 @@ class OpenAICompatProvider:
         model: str | None = None,
         top_p: float | None = None,
         include_reasoning: bool = False,
+        enable_thinking: bool | None = None,
     ) -> AsyncIterator[str]:
         """兼容多提供商流式输出，安全地提取 content + reasoning_content。
 
@@ -50,6 +51,9 @@ class OpenAICompatProvider:
         为空则回落实例默认模型（config.LLM_MODEL）。
         include_reasoning：True 时同时透出 reasoning_content（仅用于内部结构化抽取，
         不可暴露给终端用户——推理过程又臭又长）。
+        enable_thinking：显式控制推理模型的思考链（DeepSeek 等支持）。
+        False = 关闭思考链，token 预算全部留给正文输出（结构化抽取场景必传，
+        否则思考链会吃光 max_tokens 导致 JSON 截断）；None = 不干预（provider 默认行为）。
         """
         used_model = model or self.model
         start = time.perf_counter()
@@ -79,6 +83,10 @@ class OpenAICompatProvider:
                 }
                 if top_p is not None:
                     params["top_p"] = top_p
+                if enable_thinking is not None:
+                    # DeepSeek 等推理模型支持显式关闭思考链；不支持的 provider 会忽略或报错，
+                    # 仅在调用方显式传值时才下发（None = 不干预）
+                    params["enable_thinking"] = enable_thinking
                 params["messages"] = self._normalize_messages(messages)
                 stream = await self.client.chat.completions.create(**params)
             except Exception as e:  # noqa: BLE001  (intentional catch-all: convert any API failure to ValueError)

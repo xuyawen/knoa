@@ -214,6 +214,10 @@ class GraphStore:
         entities = graph["entities"]
         relations = graph["relations"]
         if not entities:
+            logger.warning(
+                "graph extract: LLM returned no entities (doc=%s, raw_len=%d, head=%r) — skip graph",
+                doc_title, len(raw), raw[:120],
+            )
             return
 
         # 去重：本 KB 已存在的实体 label 不再插（保留首次出现的 chunk）
@@ -345,11 +349,11 @@ class GraphStore:
     async def _stream_completion(self, doc_title: str, text: str) -> list[str]:
         """用流式通道拿结构化抽取结果。
 
-        推理模型（Agnes）非流式 chat 的 content 常为空，且 reasoning 会吃掉
-        max_tokens 预算把 JSON 截断；流式 + 抬高 token 上限能让完整 JSON 落在
-        content 流里（与问答共用同一流式通道）。
-        include_reasoning=True：推理模型把结构化输出塞进 reasoning_content，
-        必须同时收集才能拿到 JSON（_extract_json 容错从噪声中定位配平 JSON 块）。
+        enable_thinking=False：关闭推理模型的思考链——思考链会吃光 max_tokens
+        预算导致 JSON 被截断（生产实测：8000 token 全被思考吃完，0 实体产出）。
+        结构化抽取是模式匹配型任务，不需要深度推理，关闭后 token 全部留给 JSON 输出。
+        include_reasoning=True 保留作兜底：provider 不支持 enable_thinking 时
+        仍能收集 reasoning_content 中的 JSON（_extract_json 容错定位配平 JSON 块）。
         """
         chunks: list[str] = []
         async for piece in self.llm.stream_chat(
@@ -360,6 +364,7 @@ class GraphStore:
             temperature=0.0,
             max_tokens=8000,
             include_reasoning=True,
+            enable_thinking=False,
         ):
             chunks.append(piece)
         return chunks

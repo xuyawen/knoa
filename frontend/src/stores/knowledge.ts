@@ -37,7 +37,16 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     activeBase.value = id
   }
 
-  return { bases, health, trending, activeBase, loaded, load, reload, selectBase }
+  /** 登出 / 切换账号时清空缓存，避免新用户看到上一位用户的库列表。 */
+  function $reset() {
+    bases.value = []
+    health.value = []
+    trending.value = []
+    activeBase.value = null
+    loaded.value = false
+  }
+
+  return { bases, health, trending, activeBase, loaded, load, reload, selectBase, $reset }
 })
 
 if (import.meta.hot) {

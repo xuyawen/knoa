@@ -26,6 +26,7 @@ class LLMProvider(Protocol):
         max_tokens: int | None = None,
         top_p: float | None = None,
         include_reasoning: bool = False,
+        enable_thinking: bool | None = None,
     ) -> AsyncIterator[str]: ...
 
     async def chat(
