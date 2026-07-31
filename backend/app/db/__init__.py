@@ -398,7 +398,7 @@ class ErrorEvent(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source: Mapped[str] = mapped_column(String(16), index=True)   # backend | frontend
-    level: Mapped[str] = mapped_column(String(16), default="error")  # info | warn | error
+    level: Mapped[str] = mapped_column(String(16), default="error", server_default="error")  # info | warn | error
     method: Mapped[str | None] = mapped_column(String(10), nullable=True)
     path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
