@@ -1,6 +1,6 @@
 """系统事件 Pydantic 模型 + fire-and-forget 落库 helper。
 
-系统事件页的数据源：后端全量 API 请求（observability 中间件，2xx/3xx/4xx/5xx）
+系统事件页的数据源：后端 4xx/5xx 错误请求（observability 中间件）
 与前端上报（/api/events）都通过 capture_error 异步写入 error_event 表。
 写入走独立后台任务 + 独立 session，best-effort：任何失败只告警不抛、
 绝不阻塞主请求。
@@ -17,7 +17,7 @@ logger = logging.getLogger("knoa.errors")
 
 # 保留策略：超期 / 超量在每次写入时顺手清理，控制表膨胀（无需额外定时任务）
 RETENTION_DAYS = 14
-MAX_ROWS = 50000  # 全量请求日志量级较之前 4xx/5xx 放大 ~10 倍，相应放宽上限
+MAX_ROWS = 10000  # 仅记录 4xx/5xx，量级较全量请求缩小 ~10 倍
 
 # 写入限流（best-effort）：错误风暴时削峰，避免把数据库写挂；正常量级远低于此
 _MAX_WRITES_PER_SEC = 50

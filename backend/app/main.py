@@ -337,19 +337,18 @@ async def observability(request: Request, call_next):
         record(normalize_path(request.url.path), elapsed, status, status >= 500)
         request_id_var.reset(ctx)
         path = request.url.path
-        # 全量请求日志：所有 API 请求（2xx/3xx/4xx/5xx）都落一行到系统事件页。
+        # 仅记录 4xx/5xx 错误事件到系统事件页；2xx/3xx 由 Prometheus metrics 覆盖。
         # 跳过噪声：/api/events（上报端点自身，避免递归）、/api/health（Docker 健康探针）。
         _SKIP_LOG = (
             path.startswith("/api/events")
             or path.startswith("/api/health")
+            or status < 400
         )
         if not _SKIP_LOG:
             if status >= 500:
                 _level = "error"
-            elif status >= 400:
-                _level = "warn"
             else:
-                _level = "info"
+                _level = "warn"
             capture_error(
                 source="backend",
                 level=_level,
