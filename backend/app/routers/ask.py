@@ -133,6 +133,7 @@ async def ask(
                 user_id=str(user.id),
                 embedder=embedder,
                 dept_id=str(user.department_id) if user.department_id else None,
+                accessible_kb_ids=accessible_kb_ids,
             )
 
             async for event in pipeline.stream_answer(

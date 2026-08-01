@@ -37,6 +37,7 @@ class RAGPipeline:
         embedder: "EmbeddingModel | None" = None,
         max_steps: int = 3,
         dept_id: str | None = None,
+        accessible_kb_ids: "list[str] | None" = None,
     ):
         memory = None
         # 仅当开关开启 + 知道是谁 + 有向量器时才启用 Mem0；否则整个记忆链路静默跳过
@@ -52,7 +53,7 @@ class RAGPipeline:
 
         self._agent = AgenticRAGAgent(
             retriever, llm, redis, db, user_id=user_id, memory=memory, graph=graph,
-            dept_id=dept_id,
+            dept_id=dept_id, accessible_kb_ids=accessible_kb_ids,
         )
         self._agent.MAX_STEPS = max_steps
 

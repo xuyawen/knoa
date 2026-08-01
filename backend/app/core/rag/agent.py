@@ -144,6 +144,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
         memory: "MemoryStore | None" = None,
         graph: "GraphStore | None" = None,
         dept_id: str | None = None,
+        accessible_kb_ids: "list[str] | None" = None,
     ):
         self.retriever = retriever
         self.llm = llm
@@ -151,6 +152,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
         self.db = db
         self.user_id = user_id
         self.dept_id = dept_id  # 提问人所属部门（热搜按部门分桶用）
+        self._accessible_kb_ids = accessible_kb_ids  # 用户可见的 KB id 列表（SQL tool 过滤用）
         self.memory = memory
         self.graph = graph
         self._memories: list[str] = []  # 本轮召回的该用户长期记忆
@@ -960,9 +962,11 @@ class AgenticRAGAgent(SessionMemoryMixin):
             .order_by(order_expr)
             .limit(limit)
         )
-        # kb_id 为 None 时查全部知识库
+        # kb_id 为 None 时查用户可见的知识库
         if st.kb_id:
             stmt = stmt.where(Document.kb_id == st.kb_id)
+        elif self._accessible_kb_ids:
+            stmt = stmt.where(Document.kb_id.in_(self._accessible_kb_ids))
         rows = (await self.db.execute(stmt)).all()
 
         if rows:
@@ -1003,9 +1007,11 @@ class AgenticRAGAgent(SessionMemoryMixin):
             .order_by(Document.created_at.desc())
             .limit(1)
         )
-        # kb_id 为 None 时查全部知识库
+        # kb_id 为 None 时查用户可见的知识库
         if st.kb_id:
             stmt = stmt.where(Document.kb_id == st.kb_id)
+        elif self._accessible_kb_ids:
+            stmt = stmt.where(Document.kb_id.in_(self._accessible_kb_ids))
         row = (await self.db.execute(stmt)).first()
 
         if row:
@@ -1040,7 +1046,12 @@ class AgenticRAGAgent(SessionMemoryMixin):
         yield {"event": "ping", "data": {"ts": time.time()}}
 
         # 如果指定了 kb_id，只查当前 KB；否则查当前用户可见的全部
-        kb_filter = [Document.kb_id == st.kb_id] if st.kb_id else []
+        if st.kb_id:
+            kb_filter = [Document.kb_id == st.kb_id]
+        elif self._accessible_kb_ids:
+            kb_filter = [Document.kb_id.in_(self._accessible_kb_ids)]
+        else:
+            kb_filter = []
 
         # 1) 文档总数 + 审核数
         total_stmt = (
