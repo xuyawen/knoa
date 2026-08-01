@@ -6,6 +6,7 @@ import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import { useGraphData, downloadBlob, dateStamp } from '@/composables/useGraphData'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
 import { useBackdropClick } from '@/composables/useBackdropClick'
@@ -14,6 +15,7 @@ import '@/assets/dashboard.css'
 import type { GraphNode, GraphEdge } from '@/types/api'
 
 const knowledge = useKnowledgeStore()
+const auth = useAuthStore()
 const toast = useToastStore()
 
 const {
@@ -742,6 +744,7 @@ function confirmRebuild() {
       </div>
       <div class="toolbar-right">
         <button
+          v-if="auth.hasPerm('kb_super')"
           class="btn btn-primary btn-sm"
           :disabled="rebuilding"
           title="选择知识库，对其已审核文档重新抽取实体/关系"

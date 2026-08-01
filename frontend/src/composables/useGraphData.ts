@@ -3,6 +3,7 @@
 // 力导向布局与画布交互仅在「全局图谱」视图内，其余三视图只消费这里的数据。
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
 import { getGraph, getGraphNodes, getGraphEdges, getGraphHotNodes, getGraphRecent, exportGraph, getGraphNodeSource, deleteGraphNode, updateGraphNode, createGraphNode, createGraphEdge, deleteGraphEdge, mergeGraphNodes, previewMergeGraphNodes, getGraphGaps, clearGraphGaps, rebuildGraph, getRebuildStatus, getIngestProgress } from '@/api'
@@ -61,6 +62,32 @@ const rebuilding = ref(false)
 const rebuildProgress = ref<{ kbId: string; kbName: string; total: number; processed: number; status: string } | null>(null)
 let rebuildTimer: ReturnType<typeof setTimeout> | null = null
 let ingestTimer: ReturnType<typeof setTimeout> | null = null
+
+// 用户切换时重置模块级状态，避免切号后看到上一个用户的图谱缓存
+{
+  const auth = useAuthStore()
+  watch(() => auth.user?.id, () => {
+    graph.value = null
+    fetched = false
+    gFilterBiz.value = ''
+    gFilterType.value = ''
+    gFilterTime.value = ''
+    searchTerm.value = ''
+    selectedId.value = null
+    hoveredId.value = null
+    rebuilding.value = false
+    rebuildProgress.value = null
+    stopTimers()
+    hotNodes.value = []
+    recentNodes.value = []
+    gapSignals.value = []
+    allTypeOptions.value = [{ label: '全部', value: '' }]
+  })
+}
+function stopTimers() {
+  if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null }
+  if (ingestTimer) { clearTimeout(ingestTimer); ingestTimer = null }
+}
 
 /* ---- 导出工具：纯前端生成文件并触发下载（PNG / CSV 用） ---- */
 export function dateStamp(): string {
@@ -587,13 +614,15 @@ export function useGraphData() {
         }
         ingestTimer = setTimeout(() => pollIngest(kbId), 3000)
       } else {
-        // 无活跃任务：若之前有进度则显示完成后消失
+        // 无活跃任务：若之前有进度则显示完成，等后台 commit 落盘后再刷新画布
         if (rebuildProgress.value && rebuildProgress.value.kbId === kbId) {
           rebuildProgress.value = { ...rebuildProgress.value, processed: p.total, status: 'done' }
+          // 分两阶段：先停留 3s「完成」横幅，再 fetchGraph，再 3s 后消失
+          // 避免 DocumentTask 先 completed 但图谱 LLM 抽取的 commit 还没落盘
           ingestTimer = setTimeout(async () => {
-            rebuildProgress.value = null
             await fetchGraph().catch(() => {})
-          }, 4000)
+            ingestTimer = setTimeout(() => { rebuildProgress.value = null }, 3000)
+          }, 3000)
         } else {
           rebuildProgress.value = null
         }
