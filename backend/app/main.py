@@ -337,7 +337,7 @@ async def observability(request: Request, call_next):
         record(normalize_path(request.url.path), elapsed, status, status >= 500)
         request_id_var.reset(ctx)
         path = request.url.path
-        # 全量请求日志：所有 API 请求（2xx/3xx/4xx/5xx）都落一行，供系统事件页浏览检索。
+        # 全量请求日志：所有 API 请求（2xx/3xx/4xx/5xx）都落一行到系统事件页。
         # 跳过噪声：/api/events（上报端点自身，避免递归）、/api/health（Docker 健康探针）。
         _SKIP_LOG = (
             path.startswith("/api/events")
@@ -345,14 +345,11 @@ async def observability(request: Request, call_next):
         )
         if not _SKIP_LOG:
             if status >= 500:
-                _level, _log = "error", logging.ERROR
+                _level = "error"
             elif status >= 400:
-                _level, _log = "warn", logging.WARNING
+                _level = "warn"
             else:
-                _level, _log = "info", logging.INFO
-            logger.log(
-                _log, "http %d %s %s (%.2fs)", status, request.method, path, elapsed,
-            )
+                _level = "info"
             capture_error(
                 source="backend",
                 level=_level,
@@ -363,6 +360,7 @@ async def observability(request: Request, call_next):
                 message=getattr(request.state, "error_detail", None),
                 ip=(request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
                 or (request.client.host if request.client else None),
+                elapsed_ms=round(elapsed * 1000),
             )
         if elapsed >= get_slow_threshold():
             logger.warning(

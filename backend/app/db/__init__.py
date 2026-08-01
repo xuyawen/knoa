@@ -418,6 +418,7 @@ class ErrorEvent(Base):
     user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
     url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     request_body: Mapped[str | None] = mapped_column(Text, nullable=True)  # 请求体参数（POST/PUT/PATCH 时携带，截断存储）
+    elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 请求耗时（毫秒），后端中间件/前端 HTTP 上报
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 

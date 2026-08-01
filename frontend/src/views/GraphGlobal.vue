@@ -330,6 +330,15 @@ const nodeRender = computed(() =>
   })
 )
 
+// zoom 提交防抖（提前声明，供 fitView → cancelZoomCommit 在 immediate watch 中安全调用）
+let pendingZoom: number | null = null
+let zoomCommitTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelZoomCommit() {
+  if (zoomCommitTimer) { clearTimeout(zoomCommitTimer); zoomCommitTimer = null }
+  pendingZoom = null
+}
+
 /** 自动缩放平移，让所有节点尽可能铺满画布（只留最小安全边距） */
 function fitView() {
   cancelZoomCommit()
@@ -545,8 +554,6 @@ let viewTy = 0
 let viewK = 1
 let rafId = 0
 let pendingPointer: { x: number; y: number } | null = null
-let pendingZoom: number | null = null
-let zoomCommitTimer: ReturnType<typeof setTimeout> | null = null
 // 节点拖拽：按下时一次性收集被拖节点 DOM 与相连边的元素，之后每帧只更新它们
 let dragEl: SVGGElement | null = null
 let dragPos: { x: number; y: number } | null = null
@@ -561,10 +568,6 @@ watch([tx, ty, k], () => {
   writeViewTransform()
 }, { immediate: true })
 
-function cancelZoomCommit() {
-  if (zoomCommitTimer) { clearTimeout(zoomCommitTimer); zoomCommitTimer = null }
-  pendingZoom = null
-}
 onUnmounted(() => {
   if (rafId) cancelAnimationFrame(rafId)
   if (hoverEnterTimer) clearTimeout(hoverEnterTimer)

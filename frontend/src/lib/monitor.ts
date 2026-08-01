@@ -21,6 +21,10 @@ interface MonitorEvent {
   path?: string
   /** 请求体参数（POST/PUT/PATCH 时携带，截断到 500 字符） */
   requestBody?: string
+  /** X-Request-ID（后端响应头，用于跨前后端日志关联） */
+  rid?: string
+  /** 请求耗时（毫秒） */
+  elapsedMs?: number
 }
 
 function send(ev: MonitorEvent): void {
@@ -82,17 +86,7 @@ export function installMonitor(opts?: { endpoint?: string }): void {
     })
   })
 
-  // 首屏性能埋点：navigation timing，验证"首屏 < 1.5s"是不是真的
-  window.addEventListener('load', () => {
-    setTimeout(() => {
-      const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
-      if (!nav) return
-      send({
-        type: 'perf.navigation',
-        value: Math.round(nav.loadEventEnd - nav.startTime),
-        domInteractive: Math.round(nav.domInteractive - nav.startTime),
-        level: 'info',
-      })
-    }, 0)
-  })
+  // 首屏性能埋点：此前只上报 loadEventEnd/domInteractive 两个裸数字，
+  // 在系统事件页无任何可读性（方法/路径/状态码/消息全空），已移除。
+  // 若后续需要性能监控，可接入 Web Vitals（LCP/FID/CLS）并携带页面 URL。
 }

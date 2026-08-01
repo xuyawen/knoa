@@ -548,6 +548,7 @@ export interface ErrorEvent {
   userAgent: string | null
   url: string | null
   requestBody: string | null
+  elapsedMs: number | null
   createdAt: string
 }
 

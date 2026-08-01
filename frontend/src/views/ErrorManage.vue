@@ -58,7 +58,8 @@ const columns: DataTableColumn[] = [
   { key: 'source', title: '来源', width: '80px', align: 'center' },
   { key: 'level', title: '级别', width: '80px', align: 'center' },
   { key: 'statusCode', title: '状态码', width: '70px', align: 'center' },
-  { key: 'method', title: '方法', width: '66px', align: 'center' },
+  { key: 'elapsed', title: '耗时', width: '68px', align: 'center' },
+  { key: 'method', title: '方法', width: '60px', align: 'center' },
   { key: 'path', title: '路径 / 类型', width: '220px', strong: true },
   { key: 'message', title: '消息' },
   { key: 'actions', title: '操作', width: '56px' },
@@ -105,6 +106,11 @@ function levelLabel(l: string) {
 }
 function levelClass(l: string) {
   return l === 'error' ? 'lv-error' : l === 'warn' ? 'lv-warn' : 'lv-info'
+}
+function fmtElapsed(ms: number) {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`
 }
 
 /* ---------- 详情弹窗 ---------- */
@@ -177,6 +183,10 @@ async function confirmClear() {
             <span v-if="row.statusCode" class="status-code" :class="row.statusCode >= 500 ? 's5' : row.statusCode >= 400 ? 's4' : 's2'">{{ row.statusCode }}</span>
             <span v-else class="dim">—</span>
           </template>
+          <template v-else-if="col.key === 'elapsed'">
+            <span v-if="row.elapsedMs != null" class="elapsed" :class="row.elapsedMs >= 3000 ? 'slow' : row.elapsedMs >= 1000 ? 'mid' : ''">{{ fmtElapsed(row.elapsedMs) }}</span>
+            <span v-else class="dim">—</span>
+          </template>
           <template v-else-if="col.key === 'method'">{{ row.method || '—' }}</template>
           <template v-else-if="col.key === 'path'">
             <span class="path-cell">{{ row.path || row.etype || '—' }}</span>
@@ -213,6 +223,7 @@ async function confirmClear() {
         <div class="d-row"><label>来源</label><span>{{ sourceLabel(detail.source) }}</span></div>
         <div class="d-row"><label>级别</label><span>{{ levelLabel(detail.level) }}</span></div>
         <div class="d-row" v-if="detail.statusCode"><label>状态码</label><span>{{ detail.statusCode }}</span></div>
+        <div class="d-row" v-if="detail.elapsedMs != null"><label>耗时</label><span>{{ fmtElapsed(detail.elapsedMs) }}</span></div>
         <div class="d-row" v-if="detail.method"><label>方法</label><span>{{ detail.method }}</span></div>
         <div class="d-row" v-if="detail.path"><label>路径</label><span class="mono">{{ detail.path }}</span></div>
         <div class="d-row" v-if="detail.etype"><label>类型</label><span class="mono">{{ detail.etype }}</span></div>
@@ -309,6 +320,10 @@ async function confirmClear() {
 .status-code.s5 { background: var(--danger-soft); color: var(--danger); }
 .status-code.s4 { background: var(--warning-soft, var(--bg-subtle)); color: var(--warning, var(--text-secondary)); }
 .status-code.s2 { background: var(--accent-green-soft, var(--bg-subtle)); color: var(--accent-green, var(--text-secondary)); }
+
+.elapsed { font-variant-numeric: tabular-nums; font-size: 0.85em; color: var(--text-secondary); }
+.elapsed.mid { color: var(--warning, #e67e22); }
+.elapsed.slow { color: var(--danger, #e74c3c); font-weight: 600; }
 
 .row-actions { display: flex; align-items: center; gap: 4px; }
 

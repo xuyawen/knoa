@@ -20,8 +20,8 @@ const HTTP_MSG: Record<number, string> = {
 
 export async function throwHttpError(
   resp: Response,
-  /** 原始请求上下文：方法、请求体，用于错误上报（结构化字段） */
-  reqCtx?: { method?: string; body?: unknown },
+  /** @deprecated 错误上报已收敛到 trackedFetch，此参数保留兼容但不再使用 */
+  _reqCtx?: { method?: string; body?: unknown },
   fallback?: string,
 ): Promise<never> {
   const defaultMsg = HTTP_MSG[resp.status] || fallback || `请求失败(${resp.status})`
@@ -32,34 +32,8 @@ export async function throwHttpError(
   } catch {
     /* 非 JSON 响应，忽略 */
   }
-  // 后端若回显了 "HTTP xxx" 这类无意义文案，用友好映射覆盖（上报用原始 detail，保留诊断信息）
-  const rawDetail = detail
+  // 后端若回显了 "HTTP xxx" 这类无意义文案，用友好映射覆盖
   if (/^HTTP \d+$/.test(detail)) detail = ''
-  // 业务错误上报（补 4xx 盲区）：此前仅 5xx/网络错误上报，4xx（参数错/越权/校验失败）
-  // 只转友好文案、不留痕。统一在此上报（带状态码+后端 detail+rid），与 trackedFetch
-  // 的网络层上报互补不重复。跳过 401：token 失效已由 triggerTokenExpired 专门处理，
-  // 登录失败属预期交互，都不算系统异常。
-  if (resp.status !== 401) {
-    const rid = resp.headers.get('X-Request-ID') || ''
-    const method = reqCtx?.method || ''
-    const reqPath = extractPath(resp.url)
-    // 请求体截断（仅 POST/PUT/PATCH 有实际意义，限制 500 字符避免撑爆上报 payload）
-    let requestBody: string | undefined
-    if (reqCtx?.body !== undefined) {
-      const s = typeof reqCtx.body === 'string' ? reqCtx.body : JSON.stringify(reqCtx.body)
-      requestBody = s.length > 500 ? s.slice(0, 500) + '…' : s
-    }
-    report({
-      type: 'http.error',
-      message: `${resp.status} ${resp.url}${rawDetail ? ` :: ${rawDetail}` : ''}`,
-      level: resp.status >= 500 ? 'error' : 'warn',
-      info: rid ? `rid=${rid}` : undefined,
-      method,
-      statusCode: resp.status,
-      path: reqPath,
-      requestBody,
-    })
-  }
   const err = new Error(detail || defaultMsg) as Error & { status: number }
   err.status = resp.status
   throw err
@@ -200,15 +174,53 @@ async function trackedFetch(
   }
 
   inFlight.add(ctrl)
+  const t0 = performance.now()
   try {
     const resp = await _nativeFetch(input, mergedInit)
+    const elapsedMs = Math.round(performance.now() - t0)
+    const reqPath = extractPath(url)
+    const isApi = reqPath.startsWith('/api/') && !reqPath.startsWith('/api/events')
+
     // 登录接口本身会返回 401（账号密码错误），以及 /api/auth/me 在首次访问时
     // 也会返回 401（本来就没登录，不是 token 过期），都不拦截
     if (resp.status === 401 && !reqUrl(input).includes('/api/auth/login') && !reqUrl(input).includes('/api/auth/me')) {
+      if (isApi) {
+        report({ type: 'http.request', method: mergedInit.method || 'GET', statusCode: 401,
+          path: reqPath, level: 'warn', message: 'token expired', elapsedMs })
+      }
       triggerTokenExpired()
       throw new TokenExpiredError()
     }
-    // 5xx/4xx 的语义错误统一由 throwHttpError 上报（带响应 detail + rid），
+
+    // ── 前端 HTTP 请求上报（每次请求只报一条，覆盖 2xx/3xx/4xx/5xx） ──
+    // 跳过 /api/events（上报端点自身，防递归）。
+    // throwHttpError 已去掉 report 调用；网络层失败在 catch 中单独报 http.network。
+    if (isApi) {
+      const method = mergedInit.method || 'GET'
+      const sc = resp.status
+      const level = sc >= 500 ? 'error' : sc >= 400 ? 'warn' : 'info'
+      // 请求体截断（POST/PUT/PATCH 时携带，限制 500 字符避免撑爆上报 payload）
+      let body: string | undefined
+      if (mergedInit.body) {
+        const s = typeof mergedInit.body === 'string' ? mergedInit.body : String(mergedInit.body)
+        body = s.length > 500 ? s.slice(0, 500) + '…' : s
+      }
+      // 错误响应：clone 读取后端 detail + rid，用于跨前后端关联诊断
+      // （clone 独立消费 body stream，不影响原始 resp 给 doFetch/throwHttpError 使用）
+      let msg: string | undefined
+      let rid: string | undefined
+      if (!resp.ok) {
+        try {
+          rid = resp.headers.get('x-request-id') || undefined
+          const clone = resp.clone()
+          const detail = (await clone.json().catch(() => null)) as { detail?: unknown } | null
+          if (typeof detail?.detail === 'string') msg = detail.detail
+        } catch { /* best-effort */ }
+      }
+      report({ type: 'http.request', method, statusCode: sc, path: reqPath,
+        requestBody: body, level, message: msg, rid, elapsedMs })
+    }
+    // 5xx/4xx 的语义错误统一由 throwHttpError 抛出用户友好 Error，
     // 这里只负责网络层失败（下方 catch），避免同一次错误重复上报
     // 后端每次有效认证请求都会重签 24h 令牌（滑动令牌），并通过
     // Set-Cookie 回写 HttpOnly Cookie（前端 JS 读不到，无需在此处理）
@@ -216,7 +228,7 @@ async function trackedFetch(
   } catch (err) {
     if (err instanceof TokenExpiredError) throw err
     // 网络层失败（断网/超时/CORS）fetch 会抛到这
-    const method = init?.method || (typeof input === 'object' && 'method' in input ? (input as Request).method : '') || 'GET'
+    const method = mergedInit.method || 'GET'
     report({
       type: 'http.network',
       message: `${reqUrl(input)} -> ${String(err)}`,

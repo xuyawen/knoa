@@ -1,15 +1,10 @@
-"""前端可观测上报端点（零依赖）。
+"""前端可观测上报端点。
 
-前端 monitor.ts 通过 sendBeacon/fetch 把浏览器内的错误、未捕获 Promise
-拒绝、首屏性能埋点发到这里。后端只做两件事：结构化日志（进独立的
-knoa.frontend logger）+ 进程内 metrics 计数，方便 curl /api/metrics
-一眼看到"前端错了多少"。
-
-ponytail: 不引依赖、不落库、best-effort；公开写端点，学习项目够用
-（生产应加限流/鉴权，面试可讲）。
+前端 monitor.ts 通过 sendBeacon/fetch 把 HTTP 请求、错误、未捕获 Promise
+拒绝发到这里。后端做三件事：capture_error 落库（系统事件页浏览检索）+
+metrics 计数（/api/metrics 看前端错误量）+ 限流保护。
 """
 import json
-import logging
 import time
 from collections import defaultdict
 
@@ -18,7 +13,6 @@ from fastapi import APIRouter, Request
 from app.core.metrics import record
 from app.models.errors import capture_error
 
-logger = logging.getLogger("knoa.frontend")
 router = APIRouter()
 
 # 单条上报 payload 上限：事件只是极小的结构化 JSON，64KB 绰绰有余
@@ -99,7 +93,7 @@ async def receive_event(request: Request):
     msg = _sanitize(payload.get("message", ""))
     src = _sanitize(payload.get("url", ""), 512)
 
-    # 提取前端上报的结构化 HTTP 字段（http.error / http.network 事件携带）
+    # 提取前端上报的结构化 HTTP 字段（http.request / http.network 事件携带）
     method = _sanitize(payload.get("method", ""), 10).upper() or None
     req_path = _sanitize(payload.get("path", ""), 500) or None
     status_code_raw = payload.get("statusCode")
@@ -107,16 +101,14 @@ async def receive_event(request: Request):
     if isinstance(status_code_raw, (int, float)) and 100 <= status_code_raw <= 599:
         status_code = int(status_code_raw)
     request_body = _sanitize(payload.get("requestBody", ""), 2000) or None
+    # rid：前端从后端响应头 X-Request-ID 提取（错误响应时用于跨前后端关联）
+    # 优先用 payload 里的 rid（来自错误响应），降级到上报请求自身的 header
+    rid = (_sanitize(payload.get("rid", ""), 128) or None) or request.headers.get("x-request-id")
+    # elapsed_ms：前端从 performance.now() 差值换算，后端中间件直接传
+    elapsed_raw = payload.get("elapsedMs")
+    elapsed_ms: int | None = int(elapsed_raw) if isinstance(elapsed_raw, (int, float)) and elapsed_raw >= 0 else None
 
-    # 结构化日志：前端事件统一进 knoa.frontend logger（已单行化，防注入）
-    if level == "error":
-        logger.error("frontend %s: %s @ %s", etype, msg, src)
-    elif level == "warn":
-        logger.warning("frontend %s: %s @ %s", etype, msg, src)
-    else:
-        logger.info("frontend %s: %s @ %s", etype, msg, src)
-
-    # 同步落库错误管理页（fire-and-forget）：前端错误可在页面上浏览检索，不必上机翻日志
+    # 落库系统事件页（fire-and-forget）：前端事件可在页面上浏览检索，不必上机翻日志
     capture_error(
         source="frontend",
         level=level,
@@ -129,8 +121,9 @@ async def receive_event(request: Request):
         url=src or None,
         ip=_client_ip(request),
         user_agent=_sanitize(request.headers.get("user-agent", ""), 300) or None,
-        rid=request.headers.get("x-request-id"),
+        rid=rid,
         request_body=request_body,
+        elapsed_ms=elapsed_ms,
     )
 
     # 语义指标：与 HTTP 传输层(/api/events)分开计，方便单独看前端错误量
