@@ -264,6 +264,29 @@ def should_web_search(question: str) -> bool:
     return any(p.search(q) for p in _WEB_SEARCH_PATTERNS)
 
 
+# 需要走完整 tool_call 决策（_n_route）的元数据/统计类问题，
+# 不能走 simple 快路（_n_start_simple 强制走 retrieve）
+_METADATA_QUERY_PATTERNS: list[re.Pattern] = [
+    re.compile(r"(最近|近期|最新|本月|本周|今天|这周|上个月).*(新增|上传|添加|增加|发布|录入|更新).*(文档|文件|资料|内容)?", re.I),
+    re.compile(r"(新增|上传|添加|增加).*(了|过|些|多少)?.*(文档|文件|资料|内容)", re.I),
+    re.compile(r"(知识库|库).*(整体|总体|概览|情况|统计|健康|活跃度|多少人|多少|数量|有多少)", re.I),
+    re.compile(r"(多少|几个|几篇|多少篇|多少份).*(文档|文件|资料|内容)", re.I),
+    re.compile(r"(总结|归纳|概括|看看|查看|详细|详情|完整).*(这篇|这个|那份|某篇|某文档)", re.I),
+    re.compile(r"(活跃|贡献|上传最多|谁上传|谁贡献|谁添加)", re.I),
+    re.compile(r"(哪个库|哪些库|各库|各知识库).*(最|多|少|分布|情况)", re.I),
+]
+
+
+def should_use_tool_route(question: str) -> bool:
+    """判断是否应跳过 simple 快路，走完整 tool_call 决策（_n_route）。
+
+    元数据/统计/文档详情类问题需要 query_documents/kb_stats/document_detail 等 tool，
+    simple 快路强制走 retrieve 无法满足。
+    """
+    q = question.strip()
+    return any(p.search(q) for p in _METADATA_QUERY_PATTERNS)
+
+
 INTENT_PROMPT = (
     "你是企业知识助手「知海 Knoa」的意图分类器。\n"
     "只输出一行 JSON，不要任何解释、标点或代码块围栏：\n"

@@ -165,9 +165,16 @@ const suggested = ref<string[]>([])
 async function loadSuggested() {
   try {
     const items = await getTrending()
-    suggested.value = items.length
-      ? items.slice(0, 4).map((t) => t.question)
-      : FALLBACK_SUGGESTED
+    if (items.length >= 4) {
+      suggested.value = items.slice(0, 4).map((t) => t.question)
+    } else if (items.length > 0) {
+      // 热搜不足 4 条，用 fallback 补全（去重）
+      const hot = items.map((t) => t.question)
+      const extra = FALLBACK_SUGGESTED.filter((s) => !hot.includes(s))
+      suggested.value = [...hot, ...extra].slice(0, 4)
+    } else {
+      suggested.value = FALLBACK_SUGGESTED
+    }
   } catch {
     suggested.value = FALLBACK_SUGGESTED
   }

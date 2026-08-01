@@ -57,6 +57,7 @@ from app.core.rag.agent_prompts import (
     INTENT_PROMPT,
     TOOLS_SCHEMA,
     should_skip_retrieval,
+    should_use_tool_route,
     should_web_search,
 )
 from app.core.rag.agent_session import SessionMemoryMixin
@@ -567,8 +568,12 @@ class AgenticRAGAgent(SessionMemoryMixin):
             elif intent == "simple":
                 # simple 快路：跳过 route LLM 决策，直接用改写后的 query 检索
                 # （意图分类已零成本产出检索词，省一次完整 tool_call 往返）
-                self._arm_simple_route(st, rewritten_query)
-                st.next = "_n_start_simple"
+                # 但元数据/统计/文档详情类问题需要走 _n_route 让 LLM 选对应的 tool
+                if should_use_tool_route(question):
+                    st.next = "_n_route"
+                else:
+                    self._arm_simple_route(st, rewritten_query)
+                    st.next = "_n_start_simple"
             else:
                 st.next = "_n_route"               # complex 业务问题 → agent 决策循环
 
