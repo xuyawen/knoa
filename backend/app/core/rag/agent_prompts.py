@@ -122,6 +122,61 @@ TOOLS_SCHEMA: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "document_detail",
+            "description": (
+                "获取某篇文档的完整内容或摘要。"
+                "当用户说“把 XX 文档的完整内容给我看看”“总结一下这篇文档”“帮我看看这篇”"
+                "或提到某篇具体文档的详情时使用。支持按文档标题模糊匹配。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "要查看的文档标题（支持模糊匹配）",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["full", "summary"],
+                        "description": "返回完整内容(full)或摘要(summary)，默认 summary",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "为什么要查看这篇文档",
+                    },
+                },
+                "required": ["title", "reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "kb_stats",
+            "description": (
+                "查询知识库的统计概览（文档总数、新增趋势、审核率、活跃贡献者等）。"
+                "当用户问“知识库整体情况怎么样”“有多少人在用”“哪个库最活跃”"
+                "“本月新增了多少”等关于知识库使用统计的问题时使用。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "time_range": {
+                        "type": "integer",
+                        "description": "统计时间范围（天），默认 30 天",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "为什么要查询知识库统计",
+                    },
+                },
+                "required": ["reason"],
+            },
+        },
+    },
 ]
 
 # System prompt for agent routing
@@ -145,9 +200,18 @@ AGENT_SYSTEM_PROMPT = """你是「知海 Knoa」的智能问答路由器。你�
    适用场景：用户问“最近新增了哪些文档”“最近上传了什么”“有哪些新文档”“文档数量”等
    关于文档列表、时间、数量的元数据问题。注意：这类问题不是语义检索，是结构化查询。
 
+6. **调用 document_detail 工具** — 获取某篇文档的完整内容或摘要。
+   适用场景：用户提到具体文档名称想看详情、要求总结某篇文档、问某文档里写了什么。
+
+7. **调用 kb_stats 工具** — 查询知识库统计概览。
+   适用场景：用户问“知识库整体情况”“有多少人在用”“哪个库最活跃”“本月新增了多少”等
+   关于知识库使用统计、健康度、活跃度的问题。
+
 ## 判断原则
 - **核心原则：当用户询问知识库内的具体内容、文档信息、业务细节时，必须先调用 retrieve 检索，绝对不能直接回答。** 你不知道库里实际存了什么，直接回答一定是幻觉。
 - **元数据问题用 query_documents：** 用户问“最近新增”“上传了什么”“有多少文档”时，用 query_documents 而不是 retrieve。语义检索无法按时间排序，结构化查询才能给出准确的文档列表。
+- **单篇详情用 document_detail：** 用户提到具体文档名称想看内容、要求总结某篇文档时，用 document_detail 而不是 retrieve。
+- **统计概览用 kb_stats：** 用户问知识库整体情况、使用统计、活跃度时，用 kb_stats。
 - 问题越具体/专业，越应该走检索路径
 - 如果问题包含多个子问题或需要对比分析，优先做一次全面检索
 - 只有在确实缺少关键信息时才触发补充检索（控制成本）
@@ -159,7 +223,7 @@ AGENT_SYSTEM_PROMPT = """你是「知海 Knoa」的智能问答路由器。你�
 
 ## 输出格式
 根据判断选择一个动作执行。如果是直接回答，就在 content 里写回复内容；
-如果需要检索或联网，就调用对应的工具（retrieve / supplement_search / web_search / query_documents）并填好参数。"""
+如果需要检索或联网，就调用对应的工具（retrieve / supplement_search / web_search / query_documents / document_detail / kb_stats）并填好参数。"""
 
 
 # ---------------------------------------------------------------------------

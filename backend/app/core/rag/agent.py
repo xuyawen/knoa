@@ -690,13 +690,20 @@ class AgenticRAGAgent(SessionMemoryMixin):
                     raw_text=result.raw_text,
                 )
             # 否则已是正确动作，跳过归一化
-        elif name not in ("retrieve", "supplement_search", "direct_answer", "query_documents"):
+        elif name not in (
+            "retrieve", "supplement_search", "direct_answer",
+            "query_documents", "document_detail", "kb_stats",
+        ):
             if "query" in result.arguments:
                 name = "retrieve"
             elif "refined_query" in result.arguments:
                 name = "supplement_search"
             elif "sort_by" in result.arguments or "limit" in result.arguments:
                 name = "query_documents"
+            elif "title" in result.arguments:
+                name = "document_detail"
+            elif "time_range" in result.arguments:
+                name = "kb_stats"
             elif "content" in result.arguments:
                 name = "direct_answer"
             else:
@@ -786,12 +793,17 @@ class AgenticRAGAgent(SessionMemoryMixin):
             st.next = "_n_web_search"
         elif name == "query_documents":
             st.next = "_n_query_documents"
+        elif name == "document_detail":
+            st.next = "_n_document_detail"
+        elif name == "kb_stats":
+            st.next = "_n_kb_stats"
         else:
             st.next = "_n_generate"
 
         # 步数上限：达到 MAX_STEPS 仍选了检索类动作 → 强制生成，保证终止
         if st.step >= self.MAX_STEPS and st.next in (
-            "_n_retrieve", "_n_supplement", "_n_web_search", "_n_query_documents",
+            "_n_retrieve", "_n_supplement", "_n_web_search",
+            "_n_query_documents", "_n_document_detail", "_n_kb_stats",
         ):
             yield {
                 "event": "thinking",
@@ -963,6 +975,129 @@ class AgenticRAGAgent(SessionMemoryMixin):
             st.messages.append({"role": "assistant", "content": "[已调用 query_documents，当前知识库无符合条件的文档]"})
             st.messages.append({"role": "user", "content": "文档列表查询无结果。请告知用户当前知识库暂无文档。"})
         # 查完直接生成
+        st.next = "_n_generate"
+
+    async def _n_document_detail(self, st: "_AgentState") -> AsyncIterator[dict]:
+        """按标题模糊匹配获取文档完整内容或摘要。"""
+        from app.db import Document
+
+        args = st.route_result.arguments
+        title = args.get("title", "")
+        mode = args.get("mode", "summary")
+
+        # 按标题模糊匹配（ILIKE），取当前 KB 的已审核文档
+        stmt = (
+            select(Document.id, Document.title, Document.content_md,
+                   Document.created_at, Document.updated_at, Document.uploader_name)
+            .where(Document.kb_id == st.kb_id)
+            .where(Document.status == "已审核")
+            .where(Document.title.ilike(f"%{title}%"))
+            .order_by(Document.created_at.desc())
+            .limit(1)
+        )
+        row = (await self.db.execute(stmt)).first()
+
+        if row:
+            created = row.created_at.strftime("%Y-%m-%d") if row.created_at else "未知"
+            updated = row.updated_at.strftime("%Y-%m-%d") if row.updated_at else ""
+            uploader = row.uploader_name or "未知"
+            meta = f"文档: {row.title}\n上传: {created}"
+            if updated and updated != created:
+                meta += f" | 更新: {updated}"
+            meta += f" | 上传人: {uploader}"
+
+            content = row.content_md or "（文档内容为空）"
+            if mode == "summary" and len(content) > 3000:
+                # summary 模式截断前 3000 字符，避免 LLM 上下文爆炸
+                content = content[:3000] + "\n...(内容过长已截断，如需完整内容请前往文档详情页查看)"
+
+            st.messages.append({"role": "assistant", "content": f"[已调用 document_detail，找到文档「{row.title}」]"})
+            st.messages.append({"role": "user", "content": f"{meta}\n\n文档内容：\n{content}\n\n请基于以上文档内容回答用户的问题。"})
+        else:
+            st.messages.append({"role": "assistant", "content": f"[已调用 document_detail，未找到标题包含「{title}」的文档]"})
+            st.messages.append({"role": "user", "content": f"未找到标题包含「{title}」的文档。请告诉用户当前知识库中没有这篇文档，可以换用 retrieve 搜索相关内容。"})
+        st.next = "_n_generate"
+
+    async def _n_kb_stats(self, st: "_AgentState") -> AsyncIterator[dict]:
+        """查询知识库统计概览：文档数、新增趋势、审核率、活跃贡献者。"""
+        from datetime import timedelta
+        from app.db import Document, KnowledgeBase
+
+        args = st.route_result.arguments
+        days = min(args.get("time_range", 30), 365)  # 硬上限 1 年
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+        # 如果指定了 kb_id，只查当前 KB；否则查当前用户可见的全部
+        kb_filter = [Document.kb_id == st.kb_id] if st.kb_id else []
+
+        # 1) 文档总数 + 审核数
+        total_stmt = (
+            select(
+                func.count(Document.id).label("total"),
+                func.count(Document.id).filter(Document.status == "已审核").label("approved"),
+                func.count(Document.id).filter(Document.status == "待复核").label("pending"),
+                func.count(Document.id).filter(Document.created_at >= since).label("recent"),
+            )
+            .where(*kb_filter)
+        )
+        total_row = (await self.db.execute(total_stmt)).first()
+
+        # 2) 活跃贡献者 TOP5
+        contributor_stmt = (
+            select(
+                Document.uploader_name,
+                func.count(Document.id).label("cnt"),
+            )
+            .where(*kb_filter)
+            .where(Document.uploader_name.isnot(None))
+            .group_by(Document.uploader_name)
+            .order_by(func.count(Document.id).desc())
+            .limit(5)
+        )
+        contributors = (await self.db.execute(contributor_stmt)).all()
+
+        # 3) 各知识库文档数
+        kb_breakdown_stmt = (
+            select(
+                KnowledgeBase.name,
+                func.count(Document.id).label("cnt"),
+                func.count(Document.id).filter(Document.created_at >= since).label("recent"),
+            )
+            .join(KnowledgeBase, Document.kb_id == KnowledgeBase.id)
+            .where(*kb_filter)
+            .group_by(KnowledgeBase.name)
+            .order_by(func.count(Document.id).desc())
+        )
+        kb_breakdown = (await self.db.execute(kb_breakdown_stmt)).all()
+
+        # 拼装报告
+        total = total_row.total or 0
+        approved = total_row.approved or 0
+        pending = total_row.pending or 0
+        recent = total_row.recent or 0
+        review_rate = f"{approved / total * 100:.0f}%" if total > 0 else "N/A"
+
+        lines = [
+            f"📊 知识库统计概览（近 {days} 天）：",
+            f"- 文档总数: {total}（已审核: {approved}，待复核: {pending}）",
+            f"- 审核率: {review_rate}",
+            f"- 近期新增: {recent} 篇",
+        ]
+
+        if contributors:
+            lines.append(f"- 活跃贡献者 TOP5:")
+            for c in contributors:
+                lines.append(f"  · {c.uploader_name}: {c.cnt} 篇")
+
+        if kb_breakdown:
+            lines.append(f"- 各知识库分布:")
+            for kb in kb_breakdown:
+                recent_tag = f"（近期 +{kb.recent}）" if kb.recent else ""
+                lines.append(f"  · {kb.name}: {kb.cnt} 篇{recent_tag}")
+
+        report = "\n".join(lines)
+        st.messages.append({"role": "assistant", "content": "[已调用 kb_stats，已生成统计报告]"})
+        st.messages.append({"role": "user", "content": f"知识库统计结果：\n{report}\n\n请基于以上统计数据回答用户的问题。"})
         st.next = "_n_generate"
 
     async def _n_generate(self, st: "_AgentState") -> AsyncIterator[dict]:
