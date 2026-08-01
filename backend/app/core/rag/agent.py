@@ -1136,15 +1136,35 @@ class AgenticRAGAgent(SessionMemoryMixin):
                 ),
             })
         else:
-            # 检索已执行但无结果 → 明确禁止编造
-            final_messages.append({
-                "role": "user",
-                "content": (
-                    "注意：已在知识库中检索，但未找到与问题相关的文档。\n"
-                    "请直接告知用户「当前知识库中没有找到相关内容」，不要编造或猜测具体信息。"
-                    "如果用户的问题属于常识范畴可以简短回答，否则建议缩小范围重新提问。"
-                ) + self._concise_suffix(),
-            })
+            # 检查是否有 SQL tool 结果（query_documents / document_detail / kb_stats）
+            # 这类工具把结果注入 st.messages 而非 st.all_sources
+            _has_sql_results = any(
+                isinstance(m, dict) and m.get("role") == "assistant" and
+                any(tag in (m.get("content") or "") for tag in
+                    ("[已调用 query_documents", "[已调用 document_detail", "[已调用 kb_stats"))
+                for m in st.messages[-4:]
+            )
+            if _has_sql_results:
+                # SQL tool 已有结果在上下文里，只需让 LLM 基于上下文回答
+                final_messages.append({
+                    "role": "user",
+                    "content": (
+                        "请基于以上对话上下文中的查询结果回答用户问题。"
+                        "\n【排版】保持版面清爽：短答案用连贯语句，不必列点；"
+                        "仅在要点较多时用单层列表，避免多级嵌套与堆砌标题；"
+                        "加粗只留给关键术语，不要大段加粗；不要使用 emoji。"
+                    ) + self._concise_suffix(),
+                })
+            else:
+                # 检索已执行但无结果 → 明确禁止编造
+                final_messages.append({
+                    "role": "user",
+                    "content": (
+                        "注意：已在知识库中检索，但未找到与问题相关的文档。\n"
+                        "请直接告知用户「当前知识库中没有找到相关内容」，不要编造或猜测具体信息。"
+                        "如果用户的问题属于常识范畴可以简短回答，否则建议缩小范围重新提问。"
+                    ) + self._concise_suffix(),
+                })
         full_answer = ""
         gen_args: dict = {"model": self._model_override}
         if self._gen_temperature is not None:
@@ -1273,6 +1293,16 @@ class AgenticRAGAgent(SessionMemoryMixin):
             q = result.arguments.get("query", "")[:60]
             reason = result.arguments.get("reason", "")[:40]
             return f"联网搜索：「{q}...」（{reason}）"
+        if result.name == "query_documents":
+            sort_by = result.arguments.get("sort_by", "created_at")
+            limit = result.arguments.get("limit", 10)
+            return f"查询文档列表（按 {sort_by}，最多 {limit} 篇）"
+        if result.name == "document_detail":
+            title = result.arguments.get("title", "")[:40]
+            return f"查看文档详情：「{title}」"
+        if result.name == "kb_stats":
+            days = result.arguments.get("time_range", 30)
+            return f"查询知识库统计概览（近 {days} 天）"
         return f"执行 {result.name}"
 
     def _format_sources(self, retrieved: list[dict]) -> list[dict]:
