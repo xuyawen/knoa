@@ -690,11 +690,13 @@ class AgenticRAGAgent(SessionMemoryMixin):
                     raw_text=result.raw_text,
                 )
             # 否则已是正确动作，跳过归一化
-        elif name not in ("retrieve", "supplement_search", "direct_answer"):
+        elif name not in ("retrieve", "supplement_search", "direct_answer", "query_documents"):
             if "query" in result.arguments:
                 name = "retrieve"
             elif "refined_query" in result.arguments:
                 name = "supplement_search"
+            elif "sort_by" in result.arguments or "limit" in result.arguments:
+                name = "query_documents"
             elif "content" in result.arguments:
                 name = "direct_answer"
             else:
@@ -782,11 +784,15 @@ class AgenticRAGAgent(SessionMemoryMixin):
             st.next = "_n_supplement"
         elif name == "web_search":
             st.next = "_n_web_search"
+        elif name == "query_documents":
+            st.next = "_n_query_documents"
         else:
             st.next = "_n_generate"
 
         # 步数上限：达到 MAX_STEPS 仍选了检索类动作 → 强制生成，保证终止
-        if st.step >= self.MAX_STEPS and st.next in ("_n_retrieve", "_n_supplement", "_n_web_search"):
+        if st.step >= self.MAX_STEPS and st.next in (
+            "_n_retrieve", "_n_supplement", "_n_web_search", "_n_query_documents",
+        ):
             yield {
                 "event": "thinking",
                 "data": {"step": st.step, "action": "generate",
@@ -907,6 +913,57 @@ class AgenticRAGAgent(SessionMemoryMixin):
             st.messages.append({"role": "user", "content": "联网搜索无结果。请基于已有信息尽量回答。"})
         # 启发式直搜路径（web_loop=False）搜完即生成；agent 循环内则回到 route 再决策
         st.next = "_n_route" if st.web_loop else "_n_generate"
+
+    async def _n_query_documents(self, st: "_AgentState") -> AsyncIterator[dict]:
+        """查询文档元数据（标题、时间、状态），按时间排序。用于「最近新增」类问题。"""
+        from app.db import Document, KnowledgeBase
+
+        args = st.route_result.arguments
+        sort_by = args.get("sort_by", "created_at")
+        order = args.get("order", "desc")
+        limit = min(args.get("limit", 10), 30)  # 硬上限 30
+
+        # 构建查询：仅查当前 KB 的已审核文档
+        sort_col = getattr(Document, sort_by, Document.created_at)
+        order_expr = sort_col.desc() if order == "desc" else sort_col.asc()
+
+        stmt = (
+            select(
+                Document.id,
+                Document.title,
+                Document.created_at,
+                Document.updated_at,
+                Document.uploader_name,
+                Document.status,
+                KnowledgeBase.name.label("kb_name"),
+            )
+            .join(KnowledgeBase, Document.kb_id == KnowledgeBase.id)
+            .where(Document.kb_id == st.kb_id)
+            .where(Document.status == "已审核")
+            .order_by(order_expr)
+            .limit(limit)
+        )
+        rows = (await self.db.execute(stmt)).all()
+
+        if rows:
+            # 拼成 LLM 可理解的列表格式
+            lines = []
+            for r in rows:
+                created = r.created_at.strftime("%Y-%m-%d") if r.created_at else "未知"
+                updated = r.updated_at.strftime("%Y-%m-%d") if r.updated_at else ""
+                uploader = r.uploader_name or "未知"
+                date_part = f"上传: {created}"
+                if updated and updated != created:
+                    date_part += f" | 更新: {updated}"
+                lines.append(f"- {r.title} [{r.kb_name}] ({date_part}, 上传人: {uploader})")
+            summary = f"查询到 {len(rows)} 篇文档（按 {sort_by} {order}）：\n" + "\n".join(lines)
+            st.messages.append({"role": "assistant", "content": f"[已调用 query_documents，查询到 {len(rows)} 篇文档]"})
+            st.messages.append({"role": "user", "content": f"文档列表查询结果：\n{summary}\n\n请基于以上列表回答用户的问题。"})
+        else:
+            st.messages.append({"role": "assistant", "content": "[已调用 query_documents，当前知识库无符合条件的文档]"})
+            st.messages.append({"role": "user", "content": "文档列表查询无结果。请告知用户当前知识库暂无文档。"})
+        # 查完直接生成
+        st.next = "_n_generate"
 
     async def _n_generate(self, st: "_AgentState") -> AsyncIterator[dict]:
         """终态节点：基于全部来源流式生成最终回答。
