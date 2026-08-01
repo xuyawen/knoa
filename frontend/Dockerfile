@@ -10,6 +10,10 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+
+# 演示账号自动填充：生产构建若没有 .env，则使用示例文件生成（Vite 只认 .env）
+RUN if [ ! -f .env ]; then cp .env.example .env; fi
+
 RUN npm run build
 
 # ---------- 运行阶段 ----------

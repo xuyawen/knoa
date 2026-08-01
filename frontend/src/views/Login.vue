@@ -2,10 +2,11 @@
 // 登录页 — 按 18_2.svg / login-page-spec.md 1:1 还原。
 // 左面板：浅灰底 + Logo + 品牌文案 + 装饰插画（立方体/平台/环绕图标）
 // 右面板：白色底 + 居中登录卡片（账号/密码/记住我/SSO）
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
+import { demoCredentials } from '@/config/demo'
 import Icon from '@/components/ui/Icon.vue'
 
 const auth = useAuthStore()
@@ -13,9 +14,18 @@ const router = useRouter()
 const toast = useToastStore()
 
 const form = ref({ username: '', password: '' })
+const demoHint = demoCredentials ? '演示账号已自动填入，点击登录即可' : ''
 // 待开发（上线后）：记住我 / 忘记密码 / 企业微信·钉钉 SSO 登录
 // const form = ref({ username: '', password: '', remember: true })
 const loading = ref(false)
+
+// 投放到生产：挂载时把演示账号填进输入框（不自动提交，需手动点登录）
+onMounted(() => {
+  if (demoCredentials) {
+    form.value.username = demoCredentials.account
+    form.value.password = demoCredentials.password
+  }
+})
 
 async function handleLogin() {
   if (!form.value.username || !form.value.password) return
@@ -118,6 +128,8 @@ async function handleLogin() {
           <button type="submit" class="btn-login" :disabled="loading">
             {{ loading ? '登录中...' : '登 录' }}
           </button>
+
+          <p v-if="demoHint" class="demo-hint">{{ demoHint }}</p>
         </form>
 
         <!-- 待开发（上线后）：企业微信 / 钉钉 SSO 登录
@@ -518,6 +530,14 @@ async function handleLogin() {
 .btn-login:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+.demo-hint {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--brand);
+  text-align: center;
 }
 
 /* 待开发（上线后）：企业微信 / 钉钉 SSO 样式
