@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 文档管理 — 按 640(3).png 截图 1:1 还原，接真实文档生命周期。
 // scope 由路由决定（mine/public/department/archive）。
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, markRaw } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import DepartmentSelect from '@/components/ui/DepartmentSelect.vue'
@@ -85,9 +85,9 @@ const scopeOptions = [
   { label: '部门可见', value: 'department' },
   { label: '公开可见', value: 'public' },
 ]
-// scope 补全：上传时指定文档权限范围；默认 public（与后端默认值一致）。
+// scope 补全：上传时指定文档权限范围；默认 department（有权限时），否则 public。
 // department：部门可见，可手动指定归属部门（不选则后端默认取上传者部门）。
-const uploadScope = ref<string>('public')
+const uploadScope = ref<string>('department')
 const uploadDeptId = ref<string>('')
 // 非管理员无部门时只能选公开/本人；有部门时可选部门可见（锁定本人部门）
 const uploadScopeOptions = computed(() => {
@@ -114,7 +114,7 @@ const hasActiveUpload = computed(() => uploadTasks.value.some((t) => t.status ==
 const allDone = computed(() => uploadTasks.value.length > 0 && !hasActiveUpload.value)
 
 // 权限范围根据当前视图自动锁定：
-// 我的文档(mine)：自由选择（默认 public）
+// 我的文档(mine)：自由选择（默认 department，无部门权限则 public）
 // 公共文档(public)：强制公开可见
 // 部门文档(department)：强制部门可见
 // 归档(archive)：不显示上传按钮
@@ -128,6 +128,10 @@ function openUploadModal() {
   // 根据当前视图预设权限范围
   if (uploadScopeLocked.value) {
     uploadScope.value = uploadScopeLocked.value
+  } else {
+    // 无锁定时默认「部门可见」，无部门权限则回退「公开可见」
+    const hasDeptOpt = uploadScopeOptions.value.some(o => o.value === 'department')
+    uploadScope.value = hasDeptOpt ? 'department' : 'public'
   }
   uploadOpen.value = true
 }
@@ -161,6 +165,7 @@ interface UploadTask {
   progress: number
   status: 'queued' | 'uploading' | 'processing' | 'done' | 'error'
   message?: string
+  file?: File   // 保留原始 File 对象以支持失败重试
 }
 const uploadTasks = ref<UploadTask[]>([])
 
@@ -408,7 +413,7 @@ async function onUploadFiles(e: Event) {
   // 先为所有选中文件在列表里占位（queued，进度 0），用户立刻看到选了哪些；
   // 再由并发池逐个填充真实进度。
   const jobs = files.map((f) => {
-    const entry = reactive<UploadTask>({ id: '', filename: f.name, progress: 0, status: 'queued' })
+    const entry = reactive<UploadTask>({ id: '', filename: f.name, progress: 0, status: 'queued', file: markRaw(f) })
     uploadTasks.value.push(entry)
     return { file: f, entry }
   })
@@ -417,6 +422,25 @@ async function onUploadFiles(e: Event) {
   await runWithConcurrency(jobs, 3, (job) => uploadOneFile(job.file, job.entry))
   input.value = ''
 }
+
+// 重试单个失败文件
+function retryOne(entry: UploadTask) {
+  if (!entry.file || entry.status !== 'error') return
+  entry.status = 'queued'
+  entry.progress = 0
+  entry.message = undefined
+  uploadOneFile(entry.file, entry)
+}
+
+// 重试所有失败文件
+function retryAllFailed() {
+  const failed = uploadTasks.value.filter(t => t.status === 'error' && t.file)
+  if (!failed.length) return
+  failed.forEach(t => { t.status = 'queued'; t.progress = 0; t.message = undefined })
+  runWithConcurrency(failed, 3, (t) => uploadOneFile(t.file!, t))
+}
+
+const hasFailed = computed(() => uploadTasks.value.some(t => t.status === 'error' && t.file))
 
 // 单个文件的上传流水线（并发执行，entry 由调用方预创建占位）
 async function uploadOneFile(f: File, entry: UploadTask) {
@@ -786,7 +810,13 @@ async function confirmBatchDelete() {
                     <div class="up-bar">
                       <div class="up-fill" :class="t.status" :style="{ width: t.progress + '%' }"></div>
                     </div>
-                    <span class="up-pct">{{ t.status === 'error' ? '失败' : t.progress + '%' }}</span>
+                    <span v-if="t.status !== 'error'" class="up-pct">{{ t.progress + '%' }}</span>
+                    <button
+                      v-else
+                      class="up-retry-btn"
+                      title="重试"
+                      @click="retryOne(t)"
+                    >重试</button>
                     <span v-if="t.message && t.status === 'error'" class="up-err-msg">{{ t.message }}</span>
                   </div>
                 </div>
@@ -794,6 +824,7 @@ async function confirmBatchDelete() {
 
               <!-- 全部完成提示 -->
               <div v-if="allDone && !hasActiveUpload" class="um-footer">
+                <button v-if="hasFailed" class="btn btn-outline btn-sm" @click="retryAllFailed">重试失败项</button>
                 <button class="btn btn-primary btn-sm" @click="uploadOpen = false">完成</button>
               </div>
             </div>
@@ -1153,6 +1184,7 @@ async function confirmBatchDelete() {
   display: flex;
   justify-content: flex-end;
   flex-shrink: 0;
+  gap: 8px;
 }
 .up-title {
   font-size: 13px;
@@ -1240,6 +1272,19 @@ async function confirmBatchDelete() {
 .up-fill.done { background: var(--success); }
 .up-fill.error { background: var(--danger); }
 .up-pct { flex: 0 0 44px; text-align: right; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.up-retry-btn {
+  flex: 0 0 44px;
+  font-size: 12px;
+  color: var(--brand);
+  background: none;
+  border: 1px solid var(--brand);
+  border-radius: 4px;
+  padding: 1px 8px;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: background 0.15s, color 0.15s;
+}
+.up-retry-btn:hover { background: var(--brand); color: #fff; }
 .up-err-msg {
   flex-basis: 100%;
   font-size: 11.5px;

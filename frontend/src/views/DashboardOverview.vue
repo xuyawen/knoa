@@ -104,8 +104,8 @@ const activityColumns = [
   { key: 'file', title: '相关文档' },
 ]
 const ACT_ICONS: Record<string, string> = {
-  login: 'user-circle', upload: 'upload', approve: 'check', reject: 'close',
-  delete: 'trash', ask: 'sparkles', download: 'download',
+  login: 'user-circle', upload: 'upload', approve: 'check', batch_approve: 'check',
+  reject: 'close', delete: 'trash', ask: 'sparkles', download: 'download',
 }
 
 /* ---- 文档预览 ---- */
@@ -137,7 +137,7 @@ function fmtTime(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 function defaultContent(action: string): string {
-  return ({ login: '登录系统', upload: '上传了文档', approve: '审核通过文档', reject: '审核驳回文档', delete: '删除了文档', ask: '发起了一次 AI 问答', download: '下载了文档' } as Record<string, string>)[action] ?? '执行了操作'
+  return ({ login: '登录系统', upload: '上传了文档', approve: '审核通过文档', batch_approve: '批量审核文档', reject: '审核驳回文档', delete: '删除了文档', ask: '发起了一次 AI 问答', download: '下载了文档' } as Record<string, string>)[action] ?? '执行了操作'
 }
 
 onMounted(() => {

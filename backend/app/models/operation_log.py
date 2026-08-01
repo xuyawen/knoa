@@ -13,6 +13,7 @@ ACTION_LABELS = {
     "login": "登录",
     "upload": "上传文档",
     "approve": "审核通过",
+    "batch_approve": "批量审核",
     "reject": "审核驳回",
     "delete": "删除文档",
     "ask": "AI 问答",
