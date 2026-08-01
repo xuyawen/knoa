@@ -3,7 +3,6 @@
 // 力导向布局与画布交互仅在「全局图谱」视图内，其余三视图只消费这里的数据。
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
-import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
 import { getGraph, getGraphNodes, getGraphEdges, getGraphHotNodes, getGraphRecent, exportGraph, getGraphNodeSource, deleteGraphNode, updateGraphNode, createGraphNode, createGraphEdge, deleteGraphEdge, mergeGraphNodes, previewMergeGraphNodes, getGraphGaps, clearGraphGaps, rebuildGraph, getRebuildStatus, getIngestProgress } from '@/api'
@@ -51,9 +50,6 @@ const gapSignals = ref<KGGapSignal[]>([])
 // 子图聚焦模式
 const focusNodeId = ref<string | null>(null)
 
-// 是否已完成首次加载（模块级：仅第一个挂载的视图触发拉取）
-let fetched = false
-
 // 图谱重建状态（模块级共享：若放在 useGraphData() 内，视图重新挂载会产生
 // 多个独立轮询链，重建完成时每个实例各弹一次成功提示）
 const rebuilding = ref(false)
@@ -62,32 +58,6 @@ const rebuilding = ref(false)
 const rebuildProgress = ref<{ kbId: string; kbName: string; total: number; processed: number; status: string } | null>(null)
 let rebuildTimer: ReturnType<typeof setTimeout> | null = null
 let ingestTimer: ReturnType<typeof setTimeout> | null = null
-
-// 用户切换时重置模块级状态，避免切号后看到上一个用户的图谱缓存
-{
-  const auth = useAuthStore()
-  watch(() => auth.user?.id, () => {
-    graph.value = null
-    fetched = false
-    gFilterBiz.value = ''
-    gFilterType.value = ''
-    gFilterTime.value = ''
-    searchTerm.value = ''
-    selectedId.value = null
-    hoveredId.value = null
-    rebuilding.value = false
-    rebuildProgress.value = null
-    stopTimers()
-    hotNodes.value = []
-    recentNodes.value = []
-    gapSignals.value = []
-    allTypeOptions.value = [{ label: '全部', value: '' }]
-  })
-}
-function stopTimers() {
-  if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null }
-  if (ingestTimer) { clearTimeout(ingestTimer); ingestTimer = null }
-}
 
 /* ---- 导出工具：纯前端生成文件并触发下载（PNG / CSV 用） ---- */
 export function dateStamp(): string {
@@ -117,6 +87,25 @@ function downloadText(text: string, filename: string): void {
 export function useGraphData() {
   const knowledge = useKnowledgeStore()
   const toast = useToastStore()
+
+  // 知识库清空（登出/切号 $reset）时同步清除图谱缓存，避免新用户看到旧数据
+  watch(() => knowledge.bases.length, (len) => {
+    if (len > 0) return
+    graph.value = null
+    gFilterBiz.value = ''
+    gFilterType.value = ''
+    gFilterTime.value = ''
+    selectedId.value = null
+    hoveredId.value = null
+    rebuilding.value = false
+    rebuildProgress.value = null
+    if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null }
+    if (ingestTimer) { clearTimeout(ingestTimer); ingestTimer = null }
+    hotNodes.value = []
+    recentNodes.value = []
+    gapSignals.value = []
+    allTypeOptions.value = [{ label: '全部', value: '' }]
+  })
 
   const bizCatOpts = computed<{ label: string; value: string }[]>(() => {
     return knowledge.bases.map((b) => ({ label: b.name, value: b.id }))
@@ -373,7 +362,6 @@ export function useGraphData() {
         ]
       }
       await loadHotRecent()
-      fetched = true
     } catch (e: unknown) {
       errorMsg.value = errMsg(e)
       toast.error(`加载图谱失败：${errorMsg.value}`)
@@ -689,19 +677,18 @@ export function useGraphData() {
   }
 
   onMounted(async () => {
-    if (!knowledge.loaded) await knowledge.load().catch(() => {})
-    // 默认选中第一个知识库（数据量大，全量视图不可读）
-    if (!gFilterBiz.value && knowledge.bases.length) {
+    // 每次进入图谱页重新拉取知识库列表，确保数据属于当前用户
+    await knowledge.reload().catch(() => {})
+    // 默认选中第一个知识库
+    if (knowledge.bases.length) {
       gFilterBiz.value = knowledge.bases[0].id
-      // watch 会触发 fetchGraph，无需手动拉取
-    } else if (!fetched && !loading.value) {
-      await fetchGraph()
     }
+    // 拉取图谱数据（设置 gFilterBiz 时 watch 也会触发，二者参数一致，幂等无副作用）
+    await fetchGraph()
     // 进入任意图谱子页时，若后台仍有重建任务（如刷新/从其他页面切回），恢复进度横幅 + 轮询
     const kb = gFilterBiz.value || selectedKb.value || knowledge.bases[0]?.id
     if (kb) {
       void resumeRebuildIfRunning(kb)
-      // 审批后摄入进度轮询（与重建横幅复用同一组件）
       startIngestPoll(kb)
     }
   })
