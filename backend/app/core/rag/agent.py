@@ -939,6 +939,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
         sort_by = args.get("sort_by", "created_at")
         order = args.get("order", "desc")
         limit = min(args.get("limit", 10), 30)  # 硬上限 30
+        yield {"event": "ping", "data": {"ts": time.time()}}
 
         # 构建查询：仅查当前 KB 的已审核文档
         sort_col = getattr(Document, sort_by, Document.created_at)
@@ -955,11 +956,13 @@ class AgenticRAGAgent(SessionMemoryMixin):
                 KnowledgeBase.name.label("kb_name"),
             )
             .join(KnowledgeBase, Document.kb_id == KnowledgeBase.id)
-            .where(Document.kb_id == st.kb_id)
             .where(Document.status == "已审核")
             .order_by(order_expr)
             .limit(limit)
         )
+        # kb_id 为 None 时查全部知识库
+        if st.kb_id:
+            stmt = stmt.where(Document.kb_id == st.kb_id)
         rows = (await self.db.execute(stmt)).all()
 
         if rows:
@@ -989,17 +992,20 @@ class AgenticRAGAgent(SessionMemoryMixin):
         args = st.route_result.arguments
         title = args.get("title", "")
         mode = args.get("mode", "summary")
+        yield {"event": "ping", "data": {"ts": time.time()}}
 
-        # 按标题模糊匹配（ILIKE），取当前 KB 的已审核文档
+        # 按标题模糊匹配（ILIKE），取已审核文档
         stmt = (
             select(Document.id, Document.title, Document.content_md,
                    Document.created_at, Document.updated_at, Document.uploader_name)
-            .where(Document.kb_id == st.kb_id)
             .where(Document.status == "已审核")
             .where(Document.title.ilike(f"%{title}%"))
             .order_by(Document.created_at.desc())
             .limit(1)
         )
+        # kb_id 为 None 时查全部知识库
+        if st.kb_id:
+            stmt = stmt.where(Document.kb_id == st.kb_id)
         row = (await self.db.execute(stmt)).first()
 
         if row:
@@ -1031,6 +1037,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
         args = st.route_result.arguments
         days = min(args.get("time_range", 30), 365)  # 硬上限 1 年
         since = datetime.now(timezone.utc) - timedelta(days=days)
+        yield {"event": "ping", "data": {"ts": time.time()}}
 
         # 如果指定了 kb_id，只查当前 KB；否则查当前用户可见的全部
         kb_filter = [Document.kb_id == st.kb_id] if st.kb_id else []
