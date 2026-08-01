@@ -109,10 +109,6 @@ TOOLS_SCHEMA: list[dict] = [
                         "enum": ["desc", "asc"],
                         "description": "排序方向，默认 desc（最新在前）",
                     },
-                    "limit": {
-                        "type": "integer",
-                        "description": "返回条数，默认 10，最大 30",
-                    },
                     "reason": {
                         "type": "string",
                         "description": "为什么要查询文档元数据",

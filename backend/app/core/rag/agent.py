@@ -940,13 +940,22 @@ class AgenticRAGAgent(SessionMemoryMixin):
         args = st.route_result.arguments
         sort_by = args.get("sort_by", "created_at")
         order = args.get("order", "desc")
-        limit = min(args.get("limit", 10), 30)  # 硬上限 30
         yield {"event": "ping", "data": {"ts": time.time()}}
 
-        # 构建查询：仅查当前 KB 的已审核文档
+        # 公共过滤条件
+        base_filters = [Document.status == "已审核"]
+        if st.kb_id:
+            base_filters.append(Document.kb_id == st.kb_id)
+        elif self._accessible_kb_ids:
+            base_filters.append(Document.kb_id.in_(self._accessible_kb_ids))
+
+        # 1) 先查总数
+        count_stmt = select(func.count(Document.id)).where(*base_filters)
+        total = (await self.db.execute(count_stmt)).scalar() or 0
+
+        # 2) 取全量（上限 100 防极端情况）
         sort_col = getattr(Document, sort_by, Document.created_at)
         order_expr = sort_col.desc() if order == "desc" else sort_col.asc()
-
         stmt = (
             select(
                 Document.id,
@@ -958,15 +967,10 @@ class AgenticRAGAgent(SessionMemoryMixin):
                 KnowledgeBase.name.label("kb_name"),
             )
             .join(KnowledgeBase, Document.kb_id == KnowledgeBase.id)
-            .where(Document.status == "已审核")
+            .where(*base_filters)
             .order_by(order_expr)
-            .limit(limit)
+            .limit(100)
         )
-        # kb_id 为 None 时查用户可见的知识库
-        if st.kb_id:
-            stmt = stmt.where(Document.kb_id == st.kb_id)
-        elif self._accessible_kb_ids:
-            stmt = stmt.where(Document.kb_id.in_(self._accessible_kb_ids))
         rows = (await self.db.execute(stmt)).all()
 
         if rows:
@@ -980,8 +984,8 @@ class AgenticRAGAgent(SessionMemoryMixin):
                 if updated and updated != created:
                     date_part += f" | 更新: {updated}"
                 lines.append(f"- {r.title} [{r.kb_name}] ({date_part}, 上传人: {uploader})")
-            summary = f"查询到 {len(rows)} 篇文档（按 {sort_by} {order}）：\n" + "\n".join(lines)
-            st.messages.append({"role": "assistant", "content": f"[已调用 query_documents，查询到 {len(rows)} 篇文档]"})
+            summary = f"共 {total} 篇文档（按 {sort_by} {order}）：\n" + "\n".join(lines)
+            st.messages.append({"role": "assistant", "content": f"[已调用 query_documents，共 {total} 篇文档]"})
             st.messages.append({"role": "user", "content": f"文档列表查询结果：\n{summary}\n\n请基于以上列表回答用户的问题。"})
         else:
             st.messages.append({"role": "assistant", "content": "[已调用 query_documents，当前知识库无符合条件的文档]"})
@@ -1318,8 +1322,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
             return f"联网搜索：「{q}...」（{reason}）"
         if result.name == "query_documents":
             sort_by = result.arguments.get("sort_by", "created_at")
-            limit = result.arguments.get("limit", 10)
-            return f"查询文档列表（按 {sort_by}，最多 {limit} 篇）"
+            return f"查询文档列表（按 {sort_by} 排序）"
         if result.name == "document_detail":
             title = result.arguments.get("title", "")[:40]
             return f"查看文档详情：「{title}」"
