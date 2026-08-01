@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 调用日志（系统管理子页）：浏览 / 检索 / 清空系统事件。
 // 数据源 error_event 表，由后端 capture_error 异步写入两处：
-//   backend = 后端 HTTP 4xx/5xx（observability 中间件）；frontend = 前端上报（/api/events）。
+//   backend = 后端全量 API 请求（observability 中间件，2xx–5xx）；
+//   frontend = 前端上报（/api/events）。
 import { ref, computed, onMounted, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
@@ -173,7 +174,7 @@ async function confirmClear() {
             <span class="lv-badge" :class="levelClass(row.level)">{{ levelLabel(row.level) }}</span>
           </template>
           <template v-else-if="col.key === 'statusCode'">
-            <span v-if="row.statusCode" class="status-code" :class="row.statusCode >= 500 ? 's5' : 's4'">{{ row.statusCode }}</span>
+            <span v-if="row.statusCode" class="status-code" :class="row.statusCode >= 500 ? 's5' : row.statusCode >= 400 ? 's4' : 's2'">{{ row.statusCode }}</span>
             <span v-else class="dim">—</span>
           </template>
           <template v-else-if="col.key === 'method'">{{ row.method || '—' }}</template>
@@ -307,6 +308,7 @@ async function confirmClear() {
 .status-code { font-family: var(--font-mono, monospace); font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: var(--radius-sm); white-space: nowrap; }
 .status-code.s5 { background: var(--danger-soft); color: var(--danger); }
 .status-code.s4 { background: var(--warning-soft, var(--bg-subtle)); color: var(--warning, var(--text-secondary)); }
+.status-code.s2 { background: var(--accent-green-soft, var(--bg-subtle)); color: var(--accent-green, var(--text-secondary)); }
 
 .row-actions { display: flex; align-items: center; gap: 4px; }
 

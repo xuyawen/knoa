@@ -337,31 +337,33 @@ async def observability(request: Request, call_next):
         record(normalize_path(request.url.path), elapsed, status, status >= 500)
         request_id_var.reset(ctx)
         path = request.url.path
-        # 业务错误落日志：此前只有未捕获异常(5xx)有 traceback，4xx（参数错/越权/
-        # 限流/校验失败）完全静默，查「为什么被拒」无据可查。现 4xx/5xx 都记一行
-        # （rid+method+path+状态码+耗时）。跳过 /api/auth/me 与 /api/events 的 401：
-        # 前者是未登录页加载的正常探测、后者是上报端点的匿名请求，均属预期噪声。
-        if status >= 400 and not (
-            status == 401 and (path.startswith("/api/auth/me") or path.startswith("/api/events"))
-        ):
+        # 全量请求日志：所有 API 请求（2xx/3xx/4xx/5xx）都落一行，供系统事件页浏览检索。
+        # 跳过噪声：/api/events（上报端点自身，避免递归）、/api/health（Docker 健康探针）。
+        _SKIP_LOG = (
+            path.startswith("/api/events")
+            or path.startswith("/api/health")
+        )
+        if not _SKIP_LOG:
+            if status >= 500:
+                _level, _log = "error", logging.ERROR
+            elif status >= 400:
+                _level, _log = "warn", logging.WARNING
+            else:
+                _level, _log = "info", logging.INFO
             logger.log(
-                logging.ERROR if status >= 500 else logging.WARNING,
-                "http %d %s %s (%.2fs)", status, request.method, path, elapsed,
+                _log, "http %d %s %s (%.2fs)", status, request.method, path, elapsed,
             )
-            # 同步落库错误管理页（fire-and-forget）：与日志互补——日志要上机翻，
-            # 这里可在页面上按来源/状态码/路径浏览检索。跳过 /api/events 自身，避免上报递归。
-            if not path.startswith("/api/events"):
-                capture_error(
-                    source="backend",
-                    level="error" if status >= 500 else "warn",
-                    method=request.method,
-                    path=path,
-                    status_code=status,
-                    rid=rid,
-                    message=getattr(request.state, "error_detail", None),
-                    ip=(request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-                    or (request.client.host if request.client else None),
-                )
+            capture_error(
+                source="backend",
+                level=_level,
+                method=request.method,
+                path=path,
+                status_code=status,
+                rid=rid,
+                message=getattr(request.state, "error_detail", None),
+                ip=(request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+                or (request.client.host if request.client else None),
+            )
         if elapsed >= get_slow_threshold():
             logger.warning(
                 "slow %0.2fs %s %s -> %d",
