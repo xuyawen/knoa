@@ -5,7 +5,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
-import { getGraph, getGraphNodes, getGraphEdges, getGraphHotNodes, getGraphRecent, exportGraph, getGraphNodeSource, deleteGraphNode, updateGraphNode, createGraphNode, createGraphEdge, deleteGraphEdge, mergeGraphNodes, previewMergeGraphNodes, getGraphGaps, clearGraphGaps, rebuildGraph, getRebuildStatus } from '@/api'
+import { getGraph, getGraphNodes, getGraphEdges, getGraphHotNodes, getGraphRecent, exportGraph, getGraphNodeSource, deleteGraphNode, updateGraphNode, createGraphNode, createGraphEdge, deleteGraphEdge, mergeGraphNodes, previewMergeGraphNodes, getGraphGaps, clearGraphGaps, rebuildGraph, getRebuildStatus, getIngestProgress } from '@/api'
 import type { GraphData, GraphNode, GraphEdgeListItem, GraphFilter, GraphHotNode, GraphNodeSource, GraphMergePreview, GraphMergeResult, KGGapSignal } from '@/types/api'
 
 /* ---- 模块级共享状态：四个视图拿到同一套 refs ---- */
@@ -57,8 +57,10 @@ let fetched = false
 // 多个独立轮询链，重建完成时每个实例各弹一次成功提示）
 const rebuilding = ref(false)
 // 重建进度（供工具栏下方横幅展示）；null 表示无进行中/刚完成的重建
+// 复用同一横幅展示：手动重建 / 审批后摄入 两种进度
 const rebuildProgress = ref<{ kbId: string; kbName: string; total: number; processed: number; status: string } | null>(null)
 let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+let ingestTimer: ReturnType<typeof setTimeout> | null = null
 
 /* ---- 导出工具：纯前端生成文件并触发下载（PNG / CSV 用） ---- */
 export function dateStamp(): string {
@@ -567,6 +569,47 @@ export function useGraphData() {
     } catch { /* 非致命 */ }
   }
 
+  /* ---- 摄入进度（审批后图谱构建）复用 rebuildProgress 横幅 ---- */
+  function stopIngestPoll() {
+    if (ingestTimer) { clearTimeout(ingestTimer); ingestTimer = null }
+  }
+
+  async function pollIngest(kbId: string) {
+    try {
+      const p = await getIngestProgress(kbId)
+      if (p.active > 0) {
+        rebuildProgress.value = {
+          kbId,
+          kbName: kbName(kbId),
+          total: p.total,
+          processed: p.completed,
+          status: 'running',
+        }
+        ingestTimer = setTimeout(() => pollIngest(kbId), 3000)
+      } else {
+        // 无活跃任务：若之前有进度则显示完成后消失
+        if (rebuildProgress.value && rebuildProgress.value.kbId === kbId) {
+          rebuildProgress.value = { ...rebuildProgress.value, processed: p.total, status: 'done' }
+          ingestTimer = setTimeout(async () => {
+            rebuildProgress.value = null
+            await fetchGraph().catch(() => {})
+          }, 4000)
+        } else {
+          rebuildProgress.value = null
+        }
+      }
+    } catch {
+      // 网络抖动继续轮询
+      ingestTimer = setTimeout(() => pollIngest(kbId), 5000)
+    }
+  }
+
+  function startIngestPoll(kbId: string | null) {
+    if (!kbId) return
+    stopIngestPoll()
+    void pollIngest(kbId)
+  }
+
   /* ---- 知识缺口 ---- */
   async function loadGaps(allKbs = false) {
     try {
@@ -627,12 +670,18 @@ export function useGraphData() {
     }
     // 进入任意图谱子页时，若后台仍有重建任务（如刷新/从其他页面切回），恢复进度横幅 + 轮询
     const kb = gFilterBiz.value || selectedKb.value || knowledge.bases[0]?.id
-    if (kb) void resumeRebuildIfRunning(kb)
+    if (kb) {
+      void resumeRebuildIfRunning(kb)
+      // 审批后摄入进度轮询（与重建横幅复用同一组件）
+      startIngestPoll(kb)
+    }
   })
 
   // 三个筛选下拉变化 → 重新拉图（后端真实过滤，节点集合随之变化）
   watch([gFilterType, gFilterBiz, gFilterTime], () => {
     void fetchGraph()
+    // 切换知识库时重启摄入进度轮询
+    startIngestPoll(gFilterBiz.value || selectedKb.value)
   })
 
   return {
@@ -657,7 +706,7 @@ export function useGraphData() {
     // 动作
     fetchGraph, loadHotRecent, exportRemote, exportCSV, resetAll,
     loadSource, removeNode, editNode, addNode, addEdge, removeEdge, mergeNodes, previewMerge,
-    rebuild, rebuilding, rebuildProgress, resumeRebuildIfRunning,
+    rebuild, rebuilding, rebuildProgress, resumeRebuildIfRunning, startIngestPoll,
     loadGaps, dismissGap, enterFocus, exitFocus,
   }
 }

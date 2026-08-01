@@ -527,6 +527,13 @@ export async function getRebuildStatus(
   return request(`/api/graph/rebuild/status?kb_id=${encodeURIComponent(kbId)}`)
 }
 
+/** 查询某 KB 文档摄入任务进度（审批后图谱构建进度）。 */
+export async function getIngestProgress(
+  kbId: string,
+): Promise<{ kbId: string; total: number; completed: number; active: number; failed: number }> {
+  return request(`/api/graph/ingest-progress?kb_id=${encodeURIComponent(kbId)}`)
+}
+
 /**
  * SSE 流式问答。POST /api/ask -> text/event-stream
  * 因为是 POST, 不能用 EventSource, 用 fetch + ReadableStream 手动解析

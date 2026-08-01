@@ -27,7 +27,7 @@ from app.core.security import get_current_user, get_accessible_kb_ids, get_kb_pe
 from app.core.graph import GraphStore, _invalidate_graph
 from app.core.pagination import paginate
 from app.database import AsyncSessionLocal
-from app.db import DocChunk, Document, KGEdge, KGGapSignal, KGNode, KnowledgeBase, User
+from app.db import DocChunk, Document, DocumentTask, KGEdge, KGGapSignal, KGNode, KnowledgeBase, User
 from app.deps import get_db, get_embedder, get_llm
 
 logger = logging.getLogger(__name__)
@@ -989,4 +989,37 @@ async def rebuild_status(
         "status": prog["status"],
         "total": prog["total"],
         "processed": prog["processed"],
+    }
+
+
+@router.get("/graph/ingest-progress")
+async def ingest_progress(
+    kb_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """查询某 KB 文档摄入任务进度（审批后图谱构建进度，前端轮询用）。
+
+    统计该知识库下所有 DocumentTask 的状态分布，返回 total/completed/active/failed。
+    active = queued + processing（仍在后台处理中）。
+    """
+    allowed = await get_accessible_kb_ids(db, user)
+    if kb_id not in allowed:
+        raise HTTPException(status_code=403, detail="无权访问该知识库")
+    rows = (
+        await db.execute(
+            select(
+                func.count().label("total"),
+                func.count().filter(DocumentTask.status == "completed").label("completed"),
+                func.count().filter(DocumentTask.status.in_(["queued", "processing"])).label("active"),
+                func.count().filter(DocumentTask.status == "failed").label("failed"),
+            ).where(DocumentTask.kb_id == kb_id)
+        )
+    ).one()
+    return {
+        "kbId": kb_id,
+        "total": rows.total,
+        "completed": rows.completed,
+        "active": rows.active,
+        "failed": rows.failed,
     }
