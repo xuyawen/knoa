@@ -135,6 +135,7 @@ class ESRetriever:
                     "kb_id": info["kb_id"],
                     "title": info["doc_title"],
                     "doc_id": info.get("doc_id"),
+                    "doc_updated_at": None,  # ES 索引未存该字段，主检索器已补全
                     "snippet": info["content"][:150].replace("\n", " ") + "...",
                     "confidence": round(confidence, 2),
                 }

@@ -1105,7 +1105,8 @@ class AgenticRAGAgent(SessionMemoryMixin):
         parts = []
         for r in retrieved:
             body = (content_by_id or {}).get(r["id"]) or r.get("content") or r.get("snippet", "")
-            parts.append(f"\n[{r['id']}] {r['title']} ({r['kb']})\n{body}")
+            date_tag = f" [更新: {r['doc_updated_at']}]" if r.get("doc_updated_at") else ""
+            parts.append(f"\n[{r['id']}] {r['title']} ({r['kb']}){date_tag}\n{body}")
         return "\n".join(parts)
 
     @staticmethod

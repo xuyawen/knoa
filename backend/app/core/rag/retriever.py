@@ -181,7 +181,8 @@ class HybridRetriever:
                     "document_id": str(chunk["document_id"]),
                     "kb_id": chunk["kb_id"],
                     "kb_name": kb_names.get(chunk["kb_id"], chunk["kb_id"]),
-                    "doc_title": doc_titles.get(str(chunk["document_id"]), "未知文档"),
+                    "doc_title": doc_titles.get(str(chunk["document_id"]), ("\u672a\u77e5\u6587\u6863", None))[0],
+                    "doc_updated_at": doc_titles.get(str(chunk["document_id"]), ("\u672a\u77e5\u6587\u6863", None))[1],
                     "distance": distance,
                 }
 
@@ -230,6 +231,7 @@ class HybridRetriever:
                 "kb_id": info["kb_id"],
                 "title": info["doc_title"],
                 "doc_id": info["document_id"],
+                "doc_updated_at": info.get("doc_updated_at"),
                 "snippet": info["content"][:150].replace("\n", " ") + "...",
                 "confidence": round(confidence, 2),
             })
@@ -239,10 +241,16 @@ class HybridRetriever:
         result = await self.db.execute(select(KnowledgeBase.id, KnowledgeBase.name))
         return {row.id: row.name for row in result}
 
-    async def _batch_get_doc_titles(self, doc_ids: list[str]) -> dict[str, str]:
+    async def _batch_get_doc_titles(self, doc_ids: list[str]) -> dict[str, tuple[str, str | None]]:
         if not doc_ids:
             return {}
         result = await self.db.execute(
-            select(Document.id, Document.title).where(Document.id.in_(doc_ids))
+            select(Document.id, Document.title, Document.updated_at).where(Document.id.in_(doc_ids))
         )
-        return {str(row.id): row.title for row in result}
+        return {
+            str(row.id): (
+                row.title,
+                row.updated_at.strftime("%Y-%m-%d") if row.updated_at else None,
+            )
+            for row in result
+        }
