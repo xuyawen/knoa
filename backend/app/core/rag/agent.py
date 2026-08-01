@@ -1125,12 +1125,12 @@ class AgenticRAGAgent(SessionMemoryMixin):
         ]
 
         if contributors:
-            lines.append(f"- 活跃贡献者 TOP5:")
+            lines.append("- 活跃贡献者 TOP5:")
             for c in contributors:
                 lines.append(f"  · {c.uploader_name}: {c.cnt} 篇")
 
         if kb_breakdown:
-            lines.append(f"- 各知识库分布:")
+            lines.append("- 各知识库分布:")
             for kb in kb_breakdown:
                 recent_tag = f"（近期 +{kb.recent}）" if kb.recent else ""
                 lines.append(f"  · {kb.name}: {kb.cnt} 篇{recent_tag}")
