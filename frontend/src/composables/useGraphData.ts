@@ -677,13 +677,16 @@ export function useGraphData() {
   }
 
   onMounted(async () => {
-    // 每次进入图谱页重新拉取知识库列表，确保数据属于当前用户
+    // 同步清除旧状态（在 await 之前执行，避免异步间隙渲染旧数据）
+    graph.value = null
+    gFilterBiz.value = ''
+    // 重新拉取知识库列表，确保数据属于当前用户
     await knowledge.reload().catch(() => {})
-    // 默认选中第一个知识库
+    // 默认选中第一个知识库（从 '' 赋值必触发 watch → fetchGraph）
     if (knowledge.bases.length) {
       gFilterBiz.value = knowledge.bases[0].id
     }
-    // 拉取图谱数据（设置 gFilterBiz 时 watch 也会触发，二者参数一致，幂等无副作用）
+    // 兜底拉取（防止 watch 与 reload 的竞态）
     await fetchGraph()
     // 进入任意图谱子页时，若后台仍有重建任务（如刷新/从其他页面切回），恢复进度横幅 + 轮询
     const kb = gFilterBiz.value || selectedKb.value || knowledge.bases[0]?.id
