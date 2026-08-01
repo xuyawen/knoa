@@ -995,7 +995,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
 
     async def _n_document_detail(self, st: "_AgentState") -> AsyncIterator[dict]:
         """按标题模糊匹配获取文档完整内容或摘要。"""
-        from app.db import Document
+        from app.db import Document, KnowledgeBase
 
         args = st.route_result.arguments
         title = args.get("title", "")
@@ -1005,7 +1005,9 @@ class AgenticRAGAgent(SessionMemoryMixin):
         # 按标题模糊匹配（ILIKE），取已审核文档
         stmt = (
             select(Document.id, Document.title, Document.content_md,
-                   Document.created_at, Document.updated_at, Document.uploader_name)
+                   Document.created_at, Document.updated_at, Document.uploader_name,
+                   Document.kb_id, KnowledgeBase.name.label("kb_name"))
+            .join(KnowledgeBase, Document.kb_id == KnowledgeBase.id)
             .where(Document.status == "已审核")
             .where(Document.title.ilike(f"%{title}%"))
             .order_by(Document.created_at.desc())
@@ -1031,6 +1033,17 @@ class AgenticRAGAgent(SessionMemoryMixin):
             if mode == "summary" and len(content) > 3000:
                 # summary 模式截断前 3000 字符，避免 LLM 上下文爆炸
                 content = content[:3000] + "\n...(内容过长已截断，如需完整内容请前往文档详情页查看)"
+
+            # 来源卡片：让前端能溯源到具体文档
+            snippet = (row.content_md or "")[:150]
+            source = SourceItemOut(
+                id=row.id, chunk_id=f"doc-{row.id}",
+                kb=row.kb_name, kb_id=str(row.kb_id),
+                title=row.title, doc_id=str(row.id),
+                snippet=snippet, confidence=1.0,
+            ).model_dump(by_alias=True)
+            st.all_sources.append(source)
+            yield {"event": "sources", "data": list(st.all_sources)}
 
             st.messages.append({"role": "assistant", "content": f"[已调用 document_detail，找到文档「{row.title}」]"})
             st.messages.append({"role": "user", "content": f"{meta}\n\n文档内容：\n{content}\n\n请基于以上文档内容回答用户的问题。"})
