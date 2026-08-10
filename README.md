@@ -35,7 +35,7 @@
 ## 核心特性
 
 - **溯源问答（Grounded QA）**：每条回答内联引用角标 `[1][2]`，命中片段与出处文档可追溯、可审计。
-- **混合检索**：BM25 关键词检索（jieba 中文分词）与向量稠密检索（numpy 余弦）经 RRF 融合，再由交叉编码器重排，兼顾语义与字面匹配。
+- **混合检索**：BM25 关键词检索（jieba 中文分词）与向量稠密检索（numpy 余弦）经 RRF 融合，再由 ReRanker 重排（cross-encoder 优先，不可用时降级为语义+BM25 加权），兼顾语义与字面匹配。
 - **Agentic RAG**：LangGraph 风格的纯标准库状态机，LLM 自主决定「检索 / 补充检索 / 联网搜索 / 直接回答」，内置防死循环与步数上限保证终止。
 - **知识图谱推理**：入库时 LLM 抽取实体与关系，检索支持 1 跳关联召回与多跳 BFS 推理链，处理「A 与 B 的关系 / 影响」类复杂问题。
 - **长期记忆**：Mem0 风格的按用户长期记忆，自动抽取偏好 / 事实 / 反馈，后续问答注入系统提示实现个性化。
@@ -54,7 +54,7 @@ flowchart TD
     Client([API Client]) -->|HTTPS /api| Edge[Edge Nginx<br/>TLS Termination + Rate Limit]
     Edge --> API[FastAPI Service]
     API --> MW[Auth & RBAC Middleware<br/>JWT Cookie · Sliding Session · Revocation]
-    API --> R[API Routers · 21 domains]
+    API --> R[API Routers · 20+ domains]
     R --> RAG[RAG Pipeline]
     RAG --> Agent[Agentic RAG Agent<br/>Intent · Retrieve · Web · Generate]
     RAG --> Retriever[Hybrid Retriever<br/>BM25 + Vector + RRF + Rerank]
@@ -88,7 +88,7 @@ flowchart TD
 | ORM | SQLAlchemy 2.0 `asyncio` + Alembic 迁移 |
 | 检索 | `rank-bm25`（BM25）、`jieba`（中文分词）、numpy（余弦）、可选 Elasticsearch（kNN + ik 中文分词） |
 | 大模型 | OpenAI 兼容接口（`openai` SDK 封装），默认 DeepSeek 对话 / 阿里云百炼 text-embedding-v4 嵌入 |
-| 文档解析 | 标准库 `zipfile` + `xml`（docx）、`pypdf`（pdf，可选） |
+| 文档解析 | 标准库 `zipfile` + `xml`（docx）、`pymupdf`（pdf，优先，中文版式强）/ `pypdf`（回退） |
 | 可观测 | 进程内指标、`logging` 结构化、`langsmith`（可选追踪） |
 | 部署 | Docker（`python:3.12-slim` + uv）、Docker Compose、nginx 边缘 TLS |
 | 测试 | pytest + pytest-asyncio，PostgreSQL 服务容器 |
@@ -104,9 +104,9 @@ RAG 管线由以下组件构成（`app/core/rag/`）：
 - **`chunker.py`**：`MarkdownChunker` 按标题层级切分，滑动窗口 + 噪声过滤（短文本地板），整篇有内容时保底至少 1 块。
 - **`embeddings.py`**：`EmbeddingModel` 封装 OpenAI 兼容 embeddings 接口，批量嵌入并显式锁定输出维度（`dimensions` 参数），默认 1024 维。
 - **`retriever.py`**：`HybridRetriever` 融合 BM25（jieba 分词）与向量余弦检索，经 RRF（`RRF_K=60`）融合，过滤维度不匹配的片段，再交 `Reranker` 重排。
-- **`reranker.py`**：`Reranker` 默认交叉编码器语义重排，加载失败自动降级为「语义 + BM25 + 重叠度」加权打分。
+- **`reranker.py`**：`Reranker` 默认 `auto`（优先 cross-encoder 语义重排，加载失败自动降级为「语义 + BM25 + 重叠度」加权打分）。
 - **`es_retriever.py`**：`ESRetriever` 提供 dense_vector kNN 余弦 + `ik_smart` BM25 + RRF；Elasticsearch 不可用时返回空，自动回退 `HybridRetriever`。
-- **`ingestor.py`**：`DocumentIngester` 幂等摄入（先清旧 chunk / ES / 图再重切重嵌），确定性 `_id` 便于增量更新。
+- **`ingestor.py`**：`DocumentIngester` 幂等摄入（整文档重建：先清旧 chunk / ES / 图再重切重嵌），确定性 `_id` 便于重传幂等。
 
 ### Agentic RAG 决策闭环
 
@@ -291,7 +291,7 @@ ORM 模型集中于 `app/db/__init__.py`（Base 在 `app/database.py`）。核�
 
 ```
 backend/
-├── Dockerfile / entrypoint.sh / docker-compose.yml   # 容器化与编排
+├── Dockerfile / entrypoint.sh                        # 容器构建（编排 docker-compose*.yml 位于仓库根目录）
 ├── pyproject.toml                                    # 依赖锁定（uv.lock）
 ├── alembic.ini / migrations/                         # Alembic 迁移
 ├── app/
@@ -300,7 +300,7 @@ backend/
 │   ├── database.py        # async 引擎 / session / Base / init_db
 │   ├── db/__init__.py     # ORM 模型（集中定义）
 │   ├── models/            # Pydantic 请求 / 响应模型
-│   ├── routers/           # 21 个 API 路由域
+│   ├── routers/           # 20+ 个 API 路由域
 │   ├── core/
 │   │   ├── llm/           # 大模型接入（openai_compat）
 │   │   ├── rag/           # 检索增强管线（chunker/embeddings/retriever/reranker/agent/pipeline/graph/memory/web_search/parsers/...）
