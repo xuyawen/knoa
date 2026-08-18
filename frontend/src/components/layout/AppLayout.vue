@@ -10,11 +10,15 @@ import type { Announcement } from '@/types/api'
 import Icon from '@/components/ui/Icon.vue'
 import UserProfileSettingsModal from '@/components/user/UserProfileSettingsModal.vue'
 import { useBackdropClick } from '@/composables/useBackdropClick'
+import { showBeian } from '@/utils/branding'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
 const router = useRouter()
 const route = useRoute()
+
+// 备案公示仅域名访问展示（IP 直连隐藏）
+const beianVisible = showBeian()
 
 /* ---------- 通知中心（P8）---------- */
 const announcements = ref<Announcement[]>([])
@@ -343,8 +347,8 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
       <!-- 主内容区 -->
       <main class="main-content">
         <router-view />
-        <!-- 备案号公示：工信部要求网站首页底部标明并链接至备案管理系统 -->
-        <footer class="site-footer">
+        <!-- 备案号公示：仅域名访问展示（IP 直连隐藏） -->
+        <footer v-if="beianVisible" class="site-footer">
           <span class="beian-name">惠聚创智能知识库</span>
           <span class="beian-divider">·</span>
           <a class="beian-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">粤ICP备2026118189号</a>

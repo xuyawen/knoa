@@ -8,10 +8,14 @@ import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { demoCredentials } from '@/config/demo'
 import Icon from '@/components/ui/Icon.vue'
+import { showBeian } from '@/utils/branding'
 
 const auth = useAuthStore()
 const router = useRouter()
 const toast = useToastStore()
+
+// 备案公示仅域名访问展示（IP 直连隐藏）
+const beianVisible = showBeian()
 
 const form = ref({ username: '', password: '' })
 const demoHint = demoCredentials ? '演示账号已自动填入，点击登录即可' : ''
@@ -148,7 +152,7 @@ async function handleLogin() {
       </div>
 
       <p class="footer-note">企业智能知识库系统 · 内部系统 仅供授权人员使用</p>
-      <div class="beian-bar">
+      <div v-if="beianVisible" class="beian-bar">
         <span class="beian-name">惠聚创智能知识库</span>
         <span class="beian-divider">·</span>
         <a class="beian-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">粤ICP备2026118189号</a>
