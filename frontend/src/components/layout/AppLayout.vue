@@ -826,8 +826,7 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin-top: 28px;
-  padding: 14px 16px 4px;
+  margin-top: 20px;
   font-size: 11.5px;
   color: var(--text-tertiary);
 }
