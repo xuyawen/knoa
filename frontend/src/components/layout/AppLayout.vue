@@ -345,6 +345,12 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
         <router-view />
       </main>
     </div>
+
+    <!-- 备案号公示：工信部要求网站首页底部标明并链接至备案管理系统 -->
+    <footer class="site-footer">
+      <span class="beian-name">惠聚创智能知识库</span>
+      <a class="beian-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">粤ICP备2026118189号</a>
+    </footer>
   </div>
 </template>
 
@@ -812,6 +818,32 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
   overflow-y: auto;
   padding: 20px;
   position: relative;
+}
+
+/* 备案号公示条：贴底、不压缩主体 */
+.site-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  font-size: 12px;
+  color: var(--text-placeholder);
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+}
+.beian-name {
+  color: var(--text-placeholder);
+}
+.beian-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+.beian-link:hover {
+  color: var(--brand);
+  text-decoration: underline;
 }
 /* 收起时：左边缘安静把手（像侧栏延伸，非浮块） */
 .side-handle {

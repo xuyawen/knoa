@@ -148,6 +148,10 @@ async function handleLogin() {
       </div>
 
       <p class="footer-note">企业智能知识库系统 · 内部系统 仅供授权人员使用</p>
+      <div class="beian-bar">
+        <span class="beian-name">惠聚创智能知识库</span>
+        <a class="beian-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">粤ICP备2026118189号</a>
+      </div>
     </div>
   </div>
 </template>
@@ -593,6 +597,29 @@ async function handleLogin() {
   color: var(--text-placeholder);
   text-align: center;
   margin: 0;
+}
+
+/* 备案号公示条 */
+.beian-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-placeholder);
+  text-align: center;
+}
+.beian-name {
+  color: var(--text-placeholder);
+}
+.beian-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+.beian-link:hover {
+  color: var(--brand);
+  text-decoration: underline;
 }
 
 @media (max-width: 1100px) {
