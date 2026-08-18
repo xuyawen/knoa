@@ -343,15 +343,14 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
       <!-- 主内容区 -->
       <main class="main-content">
         <router-view />
+        <!-- 备案号公示：工信部要求网站首页底部标明并链接至备案管理系统 -->
+        <footer class="site-footer">
+          <span class="beian-name">惠聚创智能知识库</span>
+          <span class="beian-divider">·</span>
+          <a class="beian-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">粤ICP备2026118189号</a>
+        </footer>
       </main>
     </div>
-
-    <!-- 备案号公示：工信部要求网站首页底部标明并链接至备案管理系统 -->
-    <footer class="site-footer">
-      <span class="beian-name">惠聚创智能知识库</span>
-      <span class="beian-divider">·</span>
-      <a class="beian-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">粤ICP备2026118189号</a>
-    </footer>
   </div>
 </template>
 
@@ -821,19 +820,16 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
   position: relative;
 }
 
-/* 备案号公示条：贴底、视觉轻量化，不抢主体内容 */
+/* 备案号公示：置于 main-content 底部，随内容滚动、视觉轻量 */
 .site-footer {
-  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 16px;
+  margin-top: 28px;
+  padding: 14px 16px 4px;
   font-size: 11.5px;
   color: var(--text-tertiary);
-  background: var(--bg-page);
-  border-top: 1px solid var(--border);
 }
 .beian-name {
   color: var(--text-tertiary);

@@ -374,7 +374,6 @@ async function handleLogin() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
   background: var(--bg-surface);
   min-width: 420px;
   min-height: 760px;
@@ -593,11 +592,11 @@ async function handleLogin() {
 */
 
 .footer-note {
+  margin-bottom: 6px;
   font-size: 12px;
   font-weight: 400;
   color: var(--text-placeholder);
   text-align: center;
-  margin: 0;
 }
 
 /* 备案号公示条 */
@@ -606,7 +605,6 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin-top: 6px;
   font-size: 11.5px;
   color: var(--text-tertiary);
   text-align: center;
