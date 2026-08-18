@@ -8,6 +8,16 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
     <title>惠聚创智能知识库</title>
+    <script>
+      // 同步内联脚本：在首帧绘制前按访问方式定 title，避免从备案主体名闪到 Knoa。
+      // IP 直连（含 localhost）用 Knoa 品牌名；域名访问保持上方静态备案主体名。
+      (function () {
+        var h = location.hostname;
+        var isIp = h === 'localhost' || h === '127.0.0.1' || h === '::1' ||
+          /^(?:\d{1,3}\.){3}\d{1,3}$/.test(h) || h.indexOf(':') !== -1;
+        if (isIp) document.title = 'Knoa企业智能知识库系统';
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
