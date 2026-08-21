@@ -69,11 +69,11 @@
   --shadow-pop: 0 12px 32px rgba(10, 22, 40, 0.16);
 
   /* ---- 圆角 ---- */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 5px;
+  --radius-lg: 5px;
+  --radius-xl: 8px;
   --radius-pill: 999px;
 
   /* ---- 字体 ---- */

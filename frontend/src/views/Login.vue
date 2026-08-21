@@ -190,7 +190,7 @@ async function handleLogin() {
 .logo-box {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--brand);
   color: var(--text-on-brand);
   display: flex;
@@ -387,7 +387,7 @@ async function handleLogin() {
 .login-card {
   width: 420px;
   padding: 40px;
-  border-radius: 16px;
+  border-radius: var(--radius-md);
   background: var(--bg-surface);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-pop);
@@ -442,7 +442,7 @@ async function handleLogin() {
   color: var(--text-primary);
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   outline: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   box-sizing: border-box;
@@ -519,7 +519,7 @@ async function handleLogin() {
 .btn-login {
   width: 100%;
   height: 48px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: none;
   background: var(--brand);
   color: var(--text-on-brand);
@@ -579,7 +579,7 @@ async function handleLogin() {
 .sso-btn {
   flex: 1;
   height: 44px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid #e5e7eb;
   background: #fff;
   color: #0a1628;

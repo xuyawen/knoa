@@ -378,7 +378,7 @@ function sourceLabel(source: string): string {
 .source-tag {
   font-size: 11px;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   white-space: nowrap;
 }
 .tag-direct { background: rgba(59,130,246,.1); color: var(--brand); }
