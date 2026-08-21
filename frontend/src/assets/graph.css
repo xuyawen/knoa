@@ -68,6 +68,12 @@
 .canvas-state {
   margin: auto; text-align: center; color: var(--text-tertiary); max-width: 360px; padding: 24px;
 }
+/* 首帧落定遮罩：铺满画布区盖住视口挂载与布局归位过程，settled 后移除 */
+.canvas-settle-mask {
+  position: absolute; inset: 0; z-index: 5; margin: 0; max-width: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--bg-surface);
+}
 .empty-avatar {
   width: 56px; height: 56px; border-radius: 50%; background: var(--brand-soft); color: var(--brand);
   display: flex; align-items: center; justify-content: center; margin: 0 auto 14px;
@@ -166,7 +172,7 @@
 .stats-panel .sc-icon {
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 .stats-panel .sc-icon svg {
   width: 15px;
@@ -234,7 +240,7 @@
 .recent-list { display: flex; flex-direction: column; gap: 6px; }
 .recent-item { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius-sm); transition: background var(--dur-fast); cursor: pointer; }
 .recent-item:hover { background: var(--bg-hover); }
-.recent-icon { width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.recent-icon { width: 26px; height: 26px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .recent-name { font-size: 12px; color: var(--text-primary); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .recent-time { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
 
@@ -292,12 +298,12 @@
 .export-menu {
   position: fixed; z-index: 901; min-width: 172px; padding: 6px;
   display: flex; flex-direction: column; gap: 2px;
-  background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
 }
 .export-item {
   display: flex; align-items: center; gap: 9px; padding: 8px 10px;
-  border: none; background: none; border-radius: 7px; cursor: pointer;
+  border: none; background: none; border-radius: var(--radius-sm); cursor: pointer;
   font-size: 12.5px; color: var(--text-primary); text-align: left; white-space: nowrap;
 }
 .export-item:hover { background: var(--bg-hover); }

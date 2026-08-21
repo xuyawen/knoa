@@ -3,7 +3,9 @@
 // 数据/筛选/派生统计来自 useGraphData；力导向布局与画布拖拽/缩放仅在本视图。
 import { ref, shallowRef, triggerRef, computed, watch, nextTick, onUnmounted } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
 import { useGraphData, downloadBlob, dateStamp } from '@/composables/useGraphData'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useAuthStore } from '@/stores/auth'
@@ -116,6 +118,10 @@ const canvasW = ref(1100)
 const canvasH = ref(680)
 // shallowRef：坐标是高频变更热点，绕过深代理；交互结束时手动 triggerRef 一次性触发渲染
 const lNodes = shallowRef<LNode[]>([])
+// 首屏落定标记：布局按真实尺寸算完并画完首帧前，遮罩盖住画布（见模板 canvas-settle-mask）
+const settled = ref(false)
+// 画布真实尺寸是否已实测（svg 挂载后由 svgRef watcher 置位）
+let sizeKnown = false
 const svgRef = ref<SVGSVGElement | null>(null)
 const contentRef = ref<HTMLDivElement | null>(null)
 const zoomLabelRef = ref<HTMLElement | null>(null)
@@ -369,14 +375,31 @@ function fitView() {
 }
 
 // 数据变化（首次加载 / 筛选切换）后重算布局；immediate 保证从其他图谱 tab 切回时
-// （共享状态已有数据、watch 不会再触发）也能立即布局，避免画布空白
+// （共享状态已有数据、watch 不会再触发）也能立即布局，避免画布空白。
+// 尺寸未实测前（sizeKnown=false）不布局：svg 挂载量得真实尺寸后由 svgRef watcher 补布局，
+// 避免先用默认 1100×680 布局、拿到真实尺寸后整图跳变（首屏“从下到上闪一下”的根因）
 watch(graph, async (g) => {
-  if (!g) return
+  if (!g || !g.nodes.length) return
+  settled.value = false
+  if (!sizeKnown) return
   lNodes.value = computeLayout(g.nodes, g.edges)
   fitView()
   void loadGaps()
-  await nextTick()
+  await settleAfterPaint()
 }, { immediate: true })
+
+/** 揭帘：等布局提交后的首帧真正画完（双 rAF），再移除遮罩，遮住布局落位过程。
+ * 后台标签页 rAF 会被节流甚至暂停，兜底超时保证遮罩必定移除 */
+async function settleAfterPaint() {
+  await nextTick()
+  await new Promise<void>((resolve) => {
+    let done = false
+    const finish = () => { if (!done) { done = true; resolve() } }
+    requestAnimationFrame(() => requestAnimationFrame(finish))
+    setTimeout(finish, 300)
+  })
+  settled.value = true
+}
 
 // viewBox 动态跟随 svg 元素实际尺寸：canvas-area 高度由右侧面板撑开，
 // 固定 viewBox（1100×680）在纵横比不符的容器里会被 meet 缩放成中间一条、上下留大片空边。
@@ -386,7 +409,24 @@ let resizeTimer: ReturnType<typeof setTimeout> | null = null
 watch(svgRef, (el) => {
   resizeRO?.disconnect()
   resizeRO = null
-  if (!el) return
+  if (!el) { sizeKnown = false; return }
+  // 挂载即同步实测真实尺寸（getBoundingClientRect 强制一次布局），随后再算首帧布局，
+  // 避免先用默认 1100×680 出图、ResizeObserver 事后纠偏导致整图跳变
+  const r0 = el.getBoundingClientRect()
+  if (Math.round(r0.width) >= 100 && Math.round(r0.height) >= 100) {
+    canvasW.value = Math.round(r0.width)
+    canvasH.value = Math.round(r0.height)
+  }
+  sizeKnown = true
+  // 尚未落定就补布局 + 揭帘：覆盖 graph watcher 因尺寸未定而搁置、
+  // 以及 lNodes 残留旧布局但 settled 被复位（视口卸载重挂）两种情况
+  const g = graph.value
+  if (g && g.nodes.length && !settled.value) {
+    lNodes.value = computeLayout(g.nodes, g.edges)
+    fitView()
+    void loadGaps()
+    void settleAfterPaint()
+  }
   resizeRO = new ResizeObserver((entries) => {
     const r = entries[0]?.contentRect
     if (!r) return
@@ -738,11 +778,9 @@ function confirmRebuild() {
         <CustomSelect v-model="gFilterType" :options="nodeTypeOpts" placeholder="节点类型" width="105px" />
         <CustomSelect v-model="gFilterTime" :options="timeRangeOpts" placeholder="创建时间" width="115px" />
         <button class="btn btn-ghost btn-sm g-reset" @click="resetAll">重置</button>
-        <button class="btn btn-primary btn-sm" :disabled="loading" @click="fetchGraph">
-          <Icon name="search" :size="13" /> 搜索
-        </button>
       </div>
       <div class="toolbar-right">
+        <RefreshButton :loading="loading" @click="() => fetchGraph()" />
         <button
           v-if="auth.hasPerm('kb_super')"
           class="btn btn-primary btn-sm"
@@ -750,7 +788,7 @@ function confirmRebuild() {
           title="选择知识库，对其已审核文档重新抽取实体/关系"
           @click="openRebuild"
         >
-          <Icon name="refresh" :size="13" /> {{ rebuilding ? '重建中…' : '重建图谱' }}
+          <Icon name="sparkles" :size="13" /> {{ rebuilding ? '重建中…' : '重建图谱' }}
         </button>
         <button class="btn btn-primary btn-sm" title="导出图谱" @click="toggleExportMenu">
           <Icon name="download" :size="13" /> 导出图谱 <Icon name="chevron-down" :size="12" />
@@ -889,6 +927,15 @@ function confirmRebuild() {
           </g>
         </svg>
         </div>
+        </div>
+
+        <!-- 首帧落定遮罩：布局按实测尺寸算完、首帧画完后才揭帘（settled），
+             遮住视口挂载/布局归位过程，消除首屏“从下到上闪一下”。
+             仅在确有数据待落定时显示：空图谱/加载失败走各自的空态与错误路径，
+             否则 settled 永不置真、遮罩会盖死画布 -->
+        <div v-if="!settled && !loading && graph && graph.nodes.length" class="canvas-state canvas-settle-mask">
+          <div class="dot-row"><span class="dot" /><span class="dot" /><span class="dot" /></div>
+          <p>正在构建知识图谱…</p>
         </div>
 
         <div v-if="graph && graph.nodes.length" class="canvas-footer">
@@ -1059,10 +1106,7 @@ function confirmRebuild() {
               <span class="tb-count">{{ t.count }}</span>
             </div>
           </div>
-          <div v-else class="graph-empty-state">
-            <Icon name="archive" :size="22" />
-            <span>暂无实体类型数据</span>
-          </div>
+          <EmptyState v-else />
         </div>
 
         <div class="section-block">
@@ -1075,10 +1119,7 @@ function confirmRebuild() {
               <span class="hot-count">度数 <strong>{{ item.degree }}</strong></span>
             </div>
           </div>
-          <div v-else class="graph-empty-state">
-            <Icon name="archive" :size="22" />
-            <span>暂无热门知识点</span>
-          </div>
+          <EmptyState v-else />
         </div>
 
         <div class="section-block">
@@ -1092,10 +1133,7 @@ function confirmRebuild() {
               <span class="recent-time">{{ (n.createdAt || '').slice(5, 10) }}</span>
             </div>
           </div>
-          <div v-else class="graph-empty-state">
-            <Icon name="archive" :size="22" />
-            <span>暂无新增实体</span>
-          </div>
+          <EmptyState v-else />
         </div>
       </aside>
     </div>
