@@ -314,6 +314,11 @@ export async function renameSession(id: string, title: string): Promise<{ ok: bo
   return request(`/api/sessions/${id}`, { method: 'PATCH', json: { title } })
 }
 
+/** 切换会话置顶（置顶会话列表排最前）。 */
+export async function pinSession(id: string): Promise<{ ok: boolean; pinned: boolean }> {
+  return request(`/api/sessions/${id}/pin`, { method: 'POST' })
+}
+
 /** 删除单条消息（「重新生成」先移除旧回答再重问）。 */
 export async function deleteMessage(messageId: string): Promise<void> {
   await requestVoid(`/api/messages/${messageId}`, { method: 'DELETE' })

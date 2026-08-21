@@ -172,6 +172,7 @@ export interface ChatSession {
   updatedAt: string
   msgCount: number
   summary?: string | null
+  pinned?: boolean
 }
 
 export interface SessionMessage {

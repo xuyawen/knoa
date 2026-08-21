@@ -132,7 +132,7 @@ async def list_sessions(
     stmt = (
         select(ChatSession)
         .where(ChatSession.user_id == user_id)
-        .order_by(ChatSession.updated_at.desc())
+        .order_by(ChatSession.pinned.desc(), ChatSession.updated_at.desc())
     )
     rows, total = await paginate(db, stmt, page=page, page_size=size)
     sessions = [r[0] for r in rows]
@@ -174,6 +174,7 @@ async def list_sessions(
                 updated_at=s.updated_at.isoformat() if s.updated_at else "",
                 msg_count=count_by_id.get(s.id, 0),
                 summary=s.summary,
+                pinned=bool(s.pinned),
             )
         )
     pages = max(1, (total + size - 1) // size) if total else 1
@@ -203,6 +204,7 @@ async def create_session(
         updated_at=session.updated_at.isoformat() if session.updated_at else "",
         msg_count=0,
         summary=session.summary,
+        pinned=bool(session.pinned),
     )
 
 
@@ -334,6 +336,26 @@ async def rename_session(
     session.title = title[:60]
     await db.commit()
     return {"ok": True, "title": session.title}
+
+
+@router.post("/sessions/{session_id}/pin")
+async def pin_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """切换会话置顶（侧边栏三点菜单）；置顶会话在列表中排最前。"""
+    session = await db.scalar(
+        select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.user_id == str(user.id),
+        )
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    session.pinned = not session.pinned
+    await db.commit()
+    return {"ok": True, "pinned": session.pinned}
 
 
 @router.delete("/messages/{message_id}")

@@ -1,6 +1,8 @@
 <script setup lang="ts">
-// 智能问答 — 左栏会话列表（懒加载滚动 + 删除/重命名入口），从 Chat.vue 拆出。
-import { ref, nextTick } from 'vue'
+// 智能问答 — 左栏会话列表（懒加载滚动 + 三点菜单：重命名/置顶/删除），从 Chat.vue 拆出。
+// 交互参考主流对话产品：会话项默认纯净文本行，hover/选中时右侧浮现圆形三点按钮，
+// 点击展开浮动菜单；删除项红色警示。
+import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import type { ChatSession } from '@/types/api'
 
@@ -16,6 +18,7 @@ const emit = defineEmits<{
   (e: 'select', id: string): void
   (e: 'remove', id: string): void
   (e: 'rename', id: string, title: string): void
+  (e: 'pin', id: string): void
   (e: 'load-more'): void
 }>()
 
@@ -47,6 +50,60 @@ function commitRename(id: string) {
   const t = editText.value.trim()
   if (t) emit('rename', id, t)
 }
+
+// ---------- 三点浮动菜单 ----------
+const menuFor = ref<string | null>(null)
+const menuPos = ref({ top: 0, left: 0 })
+const MENU_W = 148
+const MENU_H = 138
+
+/** 以三点按钮为锚点展开菜单；贴近视口底/左时翻转 */
+function openMenu(s: ChatSession, e: MouseEvent) {
+  if (menuFor.value === s.id) {
+    menuFor.value = null
+    return
+  }
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  let top = r.bottom + 6
+  const left = Math.max(8, r.right - MENU_W)
+  if (top + MENU_H > window.innerHeight - 8) top = r.top - MENU_H - 6
+  menuPos.value = { top, left }
+  menuFor.value = s.id
+}
+
+function onDocClick(e: MouseEvent) {
+  if (!menuFor.value) return
+  const t = e.target as HTMLElement
+  if (t.closest('.conv-menu') || t.closest('.conv-more')) return
+  menuFor.value = null
+}
+function onDocKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') menuFor.value = null
+}
+onMounted(() => {
+  document.addEventListener('mousedown', onDocClick)
+  window.addEventListener('keydown', onDocKey)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onDocClick)
+  window.removeEventListener('keydown', onDocKey)
+})
+
+function actRename() {
+  const s = props.sessions.find((x) => x.id === menuFor.value)
+  menuFor.value = null
+  if (s) void startRename(s)
+}
+function actPin() {
+  const id = menuFor.value
+  menuFor.value = null
+  if (id) emit('pin', id)
+}
+function actRemove() {
+  const id = menuFor.value
+  menuFor.value = null
+  if (id) emit('remove', id)
+}
 </script>
 
 <template>
@@ -68,7 +125,6 @@ function commitRename(id: string) {
         :class="{ active: s.id === activeId }"
         @click="emit('select', s.id)"
       >
-        <span class="conv-dot" />
         <span class="conv-body">
           <input
             v-if="editingId === s.id"
@@ -80,19 +136,24 @@ function commitRename(id: string) {
             @keydown.esc="editingId = null"
             @blur="commitRename(s.id)"
           />
-          <span v-else class="conv-q">{{ s.title || '（新会话）' }}</span>
+          <span v-else class="conv-q">
+            <Icon v-if="s.pinned" name="pin" :size="11" class="conv-pin" />
+            {{ s.title || '（新会话）' }}
+          </span>
           <span class="conv-meta">
             <span class="conv-time">{{ s.updatedAt ? s.updatedAt.slice(5, 10) : '' }}</span>
             <span class="conv-sep">·</span>
             <span>{{ s.msgCount }} 条</span>
           </span>
         </span>
-        <span class="conv-edit" title="重命名会话" @click.stop="startRename(s)">
-          <Icon name="edit" :size="13" />
-        </span>
-        <span class="conv-del" title="删除会话" @click.stop="emit('remove', s.id)">
-          <Icon name="trash" :size="14" />
-        </span>
+        <button
+          class="conv-more"
+          :class="{ show: menuFor === s.id }"
+          title="更多操作"
+          @click.stop="openMenu(s, $event)"
+        >
+          <Icon name="more" :size="15" />
+        </button>
       </div>
       <p v-if="!sessions.length && !loadingMore" class="conv-empty">还没有对话，点击右上角开始。</p>
       <div v-if="loadingMore" class="conv-loading-more">
@@ -100,6 +161,24 @@ function commitRename(id: string) {
       </div>
       <p v-if="allLoaded && total >= 20" class="conv-all-done">已全部加载</p>
     </div>
+
+    <!-- 三点浮动菜单：Teleport 到 body 避免被侧栏 overflow 裁剪 -->
+    <Teleport to="body">
+      <div v-if="menuFor" class="conv-menu" :style="{ top: menuPos.top + 'px', left: menuPos.left + 'px' }">
+        <button class="conv-menu-item" @click="actRename">
+          <Icon name="edit" :size="14" />
+          <span>重命名</span>
+        </button>
+        <button class="conv-menu-item" @click="actPin">
+          <Icon :name="sessions.find((x) => x.id === menuFor)?.pinned ? 'pin-off' : 'pin'" :size="14" />
+          <span>{{ sessions.find((x) => x.id === menuFor)?.pinned ? '取消置顶' : '置顶' }}</span>
+        </button>
+        <button class="conv-menu-item danger" @click="actRemove">
+          <Icon name="trash" :size="14" />
+          <span>删除</span>
+        </button>
+      </div>
+    </Teleport>
   </aside>
 </template>
 
@@ -109,30 +188,33 @@ function commitRename(id: string) {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
+  /* 独立圆角卡片，与右侧对话区并列（兄弟关系），不再嵌入对话区容器 */
   background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 .sidebar-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 18px 14px;
+  padding: 12px 14px 6px;
 }
 .sidebar-title {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: -0.01em;
-}
-.sidebar-count {
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-tertiary);
+}
+.sidebar-count {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--text-tertiary);
   background: var(--bg-subtle);
-  padding: 1px 8px;
+  padding: 0 6px;
   border-radius: var(--radius-pill);
 }
 .conv-list {
@@ -147,9 +229,9 @@ function commitRename(id: string) {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   width: 100%;
-  padding: 11px 12px;
+  padding: 10px 10px 10px 12px;
   border-radius: var(--radius-md);
   text-align: left;
   color: var(--text-secondary);
@@ -160,15 +242,6 @@ function commitRename(id: string) {
   background: var(--brand-soft);
   color: var(--text-primary);
 }
-.conv-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-tertiary);
-  flex-shrink: 0;
-  transition: background var(--dur-fast);
-}
-.conv-item.active .conv-dot { background: var(--brand); }
 .conv-body {
   flex: 1;
   min-width: 0;
@@ -177,6 +250,9 @@ function commitRename(id: string) {
   gap: 3px;
 }
 .conv-q {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 13px;
   font-weight: 600;
   color: inherit;
@@ -185,6 +261,7 @@ function commitRename(id: string) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.conv-pin { flex: none; color: var(--brand); }
 .conv-item.active .conv-q { color: var(--brand); }
 .conv-meta {
   display: flex;
@@ -194,32 +271,50 @@ function commitRename(id: string) {
   color: var(--text-tertiary);
 }
 .conv-sep { opacity: 0.6; }
-.conv-del {
+/* 三点按钮：默认隐藏，hover/选中/菜单展开时浮现（参考主流对话产品） */
+.conv-more {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
+  border-radius: 50%;
+  color: var(--text-secondary);
   opacity: 0;
   transition: all var(--dur-fast) var(--ease-out);
 }
-.conv-item:hover .conv-del { opacity: 1; }
-.conv-item:hover .conv-edit { opacity: 1; }
-.conv-del:hover { background: var(--danger-soft); color: var(--danger); }
-.conv-edit {
+.conv-item:hover .conv-more,
+.conv-item.active .conv-more,
+.conv-more.show { opacity: 1; }
+.conv-more:hover { background: var(--border); color: var(--text-primary); }
+/* 浮动菜单 */
+.conv-menu {
+  position: fixed;
+  z-index: 300;
+  width: 148px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-float);
+}
+.conv-menu-item {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
+  gap: 10px;
+  padding: 9px 10px;
   border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
-  opacity: 0;
-  transition: all var(--dur-fast) var(--ease-out);
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: background var(--dur-fast) var(--ease-out);
 }
-.conv-edit:hover { background: var(--brand-soft); color: var(--brand); }
+.conv-menu-item:hover { background: var(--bg-hover); }
+.conv-menu-item.danger { color: var(--danger); }
+.conv-menu-item.danger:hover { background: var(--danger-soft); }
 .conv-rename-input {
   width: 100%;
   padding: 3px 8px;

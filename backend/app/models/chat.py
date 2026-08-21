@@ -70,6 +70,7 @@ class SessionOut(CamelModel):
     updated_at: str
     msg_count: int
     summary: str | None = None
+    pinned: bool = False
 
 
 class SessionMessageOut(CamelModel):

@@ -99,6 +99,8 @@ class ChatSession(Base):
     # summarized_count 记录已被纳入摘要的历史消息条数（边界），避免重复摘要。
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     summarized_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # 置顶：侧边栏三点菜单切换，列表排序 pinned 优先
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     messages: Mapped[list["ChatMessage"]] = relationship(back_populates="session", order_by="ChatMessage.created_at")
 
 
