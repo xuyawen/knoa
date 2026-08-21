@@ -95,6 +95,7 @@ onBeforeUnmount(() => {
 <template>
   <div ref="root" class="c-select" :class="{ open, disabled }" :style="{ width }">
     <button type="button" class="c-select-trigger" :disabled="disabled" @click="toggle">
+      <slot name="prefix" />
       <span class="c-select-label">{{ currentLabel }}</span>
       <Icon name="chevron-down" :size="12" class="c-select-arrow" />
     </button>

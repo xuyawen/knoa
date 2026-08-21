@@ -72,18 +72,47 @@ async function doFetch(url: string, opts?: RequestOptions): Promise<Response> {
   return resp
 }
 
+// ── 同请求在途去重（防重复提交的网络层兜底） ──
+// 按钮连点/重复触发会在极短时间内发出多个完全相同的请求（method+URL+请求体一致）。
+// 首个请求在途期间，后续同请求直接复用同一 Promise；完成后 key 即移除，
+// 不影响串行重发。SSE 流式、FormData 上传不走本封装，不受影响；
+// 带 signal 的请求（调用方要主动取消）不参与合并，避免互相干扰。
+const inflightReqs = new Map<string, Promise<unknown>>()
+
+function dedupeKey(url: string, opts?: RequestOptions): string {
+  const method = (opts?.method || 'GET').toUpperCase()
+  return `${method} ${url} ${opts?.json !== undefined ? JSON.stringify(opts.json) : ''}`
+}
+
+function withDedupe<T>(url: string, opts: RequestOptions | undefined, exec: () => Promise<T>): Promise<T> {
+  if (opts?.signal) return exec()
+  const key = dedupeKey(url, opts)
+  const pending = inflightReqs.get(key)
+  if (pending) return pending as Promise<T>
+  const p = exec().finally(() => inflightReqs.delete(key))
+  inflightReqs.set(key, p)
+  return p
+}
+
 /** 发请求并解析 JSON 响应；非 2xx 抛用户友好 Error。 */
 export async function request<T>(url: string, opts?: RequestOptions): Promise<T> {
-  const resp = await doFetch(url, opts)
-  return resp.json() as Promise<T>
+  return withDedupe(url, opts, async () => {
+    const resp = await doFetch(url, opts)
+    return resp.json() as Promise<T>
+  })
 }
 
 /** 发请求但不解析响应体（DELETE / 204 等无返回内容的接口）。 */
 export async function requestVoid(url: string, opts?: RequestOptions): Promise<void> {
-  await doFetch(url, opts)
+  await withDedupe(url, opts, async () => {
+    await doFetch(url, opts)
+  })
 }
 
-/** 发请求返回原始 Response（下载 blob 等需要自行处理响应体的场景）。 */
+/**
+ * 发请求返回原始 Response（下载 blob 等需要自行处理响应体的场景）。
+ * 不参与去重：Response body 只能消费一次，共享会导致第二个调用方读取失败。
+ */
 export async function requestRaw(url: string, opts?: RequestOptions): Promise<Response> {
   return doFetch(url, opts)
 }

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // 通用数据表格：统一表格视觉（token 驱动，暗色安全）。
-// 列声明式（columns）+ 行数据（rows）；自定义单元格用 #cell 插槽；#empty 自定义空态。
+// 列声明式（columns）+ 行数据（rows）；自定义单元格用 #cell 插槽；空态统一 EmptyState 图标。
 // 可选 selectable（勾选列，勾选事件交给外层处理）；可选 clickable（行点击）。
+import EmptyState from '@/components/ui/EmptyState.vue'
+
 export interface DataTableColumn {
   key: string
   title: string
@@ -21,7 +23,6 @@ const props = withDefaults(
     selectable?: boolean
     selectedKeys?: (string | number)[]
     loading?: boolean
-    emptyText?: string
     clickable?: boolean
   }>(),
   {
@@ -29,7 +30,6 @@ const props = withDefaults(
     selectable: false,
     selectedKeys: () => [],
     loading: false,
-    emptyText: '暂无数据',
     clickable: false,
   },
 )
@@ -115,9 +115,9 @@ const cellColspan = () => props.columns.length + (props.selectable ? 1 : 0)
             </slot>
           </td>
         </tr>
-        <tr v-if="!loading && rows.length === 0">
+        <tr v-if="!loading && rows.length === 0" class="empty-row">
           <td :colspan="cellColspan()" class="empty-cell">
-            <slot name="empty">{{ emptyText }}</slot>
+            <EmptyState />
           </td>
         </tr>
       </tbody>
@@ -145,8 +145,8 @@ const cellColspan = () => props.columns.length + (props.selectable ? 1 : 0)
   color: var(--text-primary);
   vertical-align: middle;
 }
-.data-table tbody tr:last-child td { border-bottom: none; }
 .data-table tbody tr:hover { background: var(--bg-hover); }
+.data-table tbody tr.empty-row:hover { background: none; }
 .data-table tbody tr.is-selected { background: var(--brand-soft); }
 .data-table.clickable tbody tr { cursor: pointer; }
 

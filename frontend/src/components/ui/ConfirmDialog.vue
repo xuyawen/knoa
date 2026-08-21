@@ -11,6 +11,8 @@ withDefaults(
     confirmText?: string
     cancelText?: string
     danger?: boolean
+    /** 请求在途：禁用确认/取消按钮，防止重复提交 */
+    loading?: boolean
   }>(),
   {
     title: '确认操作',
@@ -18,6 +20,7 @@ withDefaults(
     confirmText: '确定',
     cancelText: '取消',
     danger: false,
+    loading: false,
   },
 )
 
@@ -28,13 +31,14 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'confirm'): void }>()
   <AppModal :show="show" :title="title" @close="emit('close')">
     <p class="confirm-msg">{{ message }}</p>
     <template #foot>
-      <button class="btn btn-ghost" @click="emit('close')">{{ cancelText }}</button>
+      <button class="btn btn-ghost" :disabled="loading" @click="emit('close')">{{ cancelText }}</button>
       <button
         class="btn"
         :class="danger ? 'btn-danger' : 'btn-primary'"
+        :disabled="loading"
         @click="emit('confirm')"
       >
-        {{ confirmText }}
+        {{ loading ? '处理中…' : confirmText }}
       </button>
     </template>
   </AppModal>
