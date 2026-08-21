@@ -2,6 +2,7 @@
 // 知识图谱 — 图谱统计视图（实体/关系/知识库概览 + 类型分布 + 热门/最近 + 知识缺口）。
 import { onMounted } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { useGraphData } from '@/composables/useGraphData'
 import '@/assets/graph.css'
 import '@/assets/dashboard.css'
@@ -62,10 +63,7 @@ onMounted(() => { void loadGaps(true) })
             <span class="tb-count">{{ t.count }}</span>
           </div>
         </div>
-        <div v-else class="graph-empty-state">
-          <Icon name="archive" :size="22" />
-          <span>暂无实体类型数据</span>
-        </div>
+        <EmptyState v-else />
       </div>
 
       <div class="grid-2">
@@ -79,10 +77,7 @@ onMounted(() => { void loadGaps(true) })
               <span class="hot-count">度数 <strong>{{ item.degree }}</strong></span>
             </div>
           </div>
-          <div v-else class="graph-empty-state">
-            <Icon name="archive" :size="22" />
-            <span>暂无热门知识点</span>
-          </div>
+          <EmptyState v-else />
         </div>
         <div class="card stat-block">
           <div class="section-title">最近新增的实体</div>
@@ -95,10 +90,7 @@ onMounted(() => { void loadGaps(true) })
               <span class="recent-time">{{ (n.createdAt || '').slice(5, 10) }}</span>
             </div>
           </div>
-          <div v-else class="graph-empty-state">
-            <Icon name="archive" :size="22" />
-            <span>暂无新增实体</span>
-          </div>
+          <EmptyState v-else />
         </div>
       </div>
 
@@ -115,10 +107,7 @@ onMounted(() => { void loadGaps(true) })
             </button>
           </div>
         </div>
-        <div v-else class="graph-empty-state">
-          <Icon name="archive" :size="22" />
-          <span>暂无知识缺口信号</span>
-        </div>
+        <EmptyState v-else />
       </div>
     </div>
   </div>
@@ -128,7 +117,7 @@ onMounted(() => { void loadGaps(true) })
 .gap-list { display: flex; flex-direction: column; gap: 8px; }
 .gap-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; border-radius: 8px;
+  padding: 8px 12px; border-radius: var(--radius-md);
   background: var(--bg-secondary, #f8fafc);
 }
 .gap-kb {

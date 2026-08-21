@@ -4,7 +4,10 @@ import { onMounted, ref } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
 import { useGraphData } from '@/composables/useGraphData'
+import { useAsyncAction } from '@/composables/useAsyncAction'
 import '@/assets/graph.css'
 
 const { relTerm, pagedEdges, relPage, relPageSize, edgeTotal, edgeListLoading, fetchEdgeList, removeEdge, rebuildProgress } = useGraphData()
@@ -13,12 +16,14 @@ onMounted(() => { void fetchEdgeList() })
 
 // 删除确认：先记下待删边，弹窗确认后才真删（危险操作二次确认，防误触）
 const pendingDelete = ref<{ id: string; desc: string } | null>(null)
+const { busy: deletingEdge, run: runDelete } = useAsyncAction()
 function askDelete(e: { id: string; sourceLabel: string; relation: string; targetLabel: string }) {
   pendingDelete.value = { id: e.id, desc: `${e.sourceLabel} —${e.relation}→ ${e.targetLabel}` }
 }
 async function confirmDelete() {
-  if (!pendingDelete.value) return
-  await removeEdge(pendingDelete.value.id)
+  const p = pendingDelete.value
+  if (!p) return
+  await runDelete(() => removeEdge(p.id))
   pendingDelete.value = null
 }
 </script>
@@ -41,9 +46,12 @@ async function confirmDelete() {
       <div class="panel-head">
         <span class="panel-title">关系检索（{{ edgeTotal }}）</span>
       </div>
-      <div class="g-search" style="margin-bottom: 14px">
-        <input v-model="relTerm" type="text" placeholder="搜索关系名称 / 实体…" class="g-input" />
-        <Icon name="search" :size="15" class="g-search-icon" />
+      <div style="display:flex;align-items:center;margin-bottom:14px">
+        <div class="g-search">
+          <input v-model="relTerm" type="text" placeholder="搜索关系名称 / 实体…" class="g-input" />
+          <Icon name="search" :size="15" class="g-search-icon" />
+        </div>
+        <RefreshButton :loading="edgeListLoading" style="margin-left:auto" @click="() => fetchEdgeList()" />
       </div>
       <div class="rel-list">
         <div v-for="e in pagedEdges" :key="e.id" class="rel-item">
@@ -54,7 +62,7 @@ async function confirmDelete() {
             <Icon name="trash" :size="13" />
           </button>
         </div>
-        <div v-if="!edgeTotal && !edgeListLoading" class="empty-hint">暂无匹配的关系</div>
+        <EmptyState v-if="!edgeTotal && !edgeListLoading" />
       </div>
       <Pagination
         v-if="edgeTotal > 0"
@@ -70,6 +78,7 @@ async function confirmDelete() {
       :message="`确定删除关系「${pendingDelete?.desc}」吗？此操作不可恢复。`"
       confirm-text="删除"
       danger
+      :loading="deletingEdge"
       @close="pendingDelete = null"
       @confirm="confirmDelete"
     />

@@ -8,6 +8,8 @@ import DepartmentSelect from '@/components/ui/DepartmentSelect.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
+import { useDebouncedWatch } from '@/composables/useDebouncedWatch'
 import DepartmentTreeSelect from '@/components/ui/DepartmentTreeSelect.vue'
 import DocPreviewModal from '@/components/documents/DocPreviewModal.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
@@ -288,10 +290,9 @@ function trackTimeout(fn: () => void, ms: number) {
 }
 
 // 组件卸载时移除全局点击监听，避免 popover 打开时切走页面残留监听导致内存泄漏 / 报错；
-// 同时中止搜索防抖与上传轮询的全部定时器。
+// 同时中止上传轮询的全部定时器（搜索防抖由 useDebouncedWatch 自清理）。
 onBeforeUnmount(() => {
   alive = false
-  if (searchTimer) clearTimeout(searchTimer)
   for (const id of pendingTimers) clearTimeout(id)
   pendingTimers.clear()
 })
@@ -305,13 +306,11 @@ async function loadDepartments() {
   }
 }
 
-// 搜索防抖后重新拉取（服务端 q 过滤）
-let searchTimer: ReturnType<typeof setTimeout> | undefined
+// 输入即搜索（统一 300ms 防抖，见 useDebouncedWatch）；键入时先回第一页
 watch(searchQuery, () => {
   currentPage.value = 1
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => { void loadDocs() }, 300)
 })
+useDebouncedWatch(searchQuery, () => { void loadDocs() })
 
 /* ---------- 分页（服务端已分页，仅算总页数）---------- */
 const totalPages = computed(() =>
@@ -664,7 +663,7 @@ async function confirmBatchDelete() {
           placeholder="选择知识库"
           width="200px"
         />
-        <!-- 搜索（自适应拉宽） -->
+        <!-- 搜索（固定宽度，与其他列表页对齐） -->
         <div class="search-box">
           <Icon name="search" :size="14" class="search-icon" />
           <input v-model="searchQuery" type="text" placeholder="搜索文档名称、内容、上传人等" class="search-input" />
@@ -676,9 +675,7 @@ async function confirmBatchDelete() {
         <!-- 右侧操作组 -->
         <div class="toolbar-actions">
           <!-- 刷新 -->
-          <button class="icon-btn" title="刷新" :disabled="loading" @click="loadDocs(true)">
-            <Icon name="refresh" :size="15" :class="{ spin: loading }" />
-          </button>
+          <RefreshButton :loading="loading" @click="loadDocs(true)" />
 
           <!-- 批量上传（归档视图不显示） -->
           <button
@@ -714,10 +711,8 @@ async function confirmBatchDelete() {
         <!-- P5：部门筛选（弹出部门树，复用 DepartmentTreeSelect） -->
         <DepartmentTreeSelect v-model="filterDept" :nodes="departments" placeholder="部门" top-label="全部部门" />
 
-        <!-- 重置筛选（任一筛选器激活时显示） -->
-        <button v-if="hasActiveFilter" class="btn btn-ghost btn-sm" @click="resetFilters">
-          <Icon name="close" :size="12" /> 重置筛选
-        </button>
+        <!-- 重置筛选（任一筛选器激活时显示；文案与其他列表页统一为「重置」） -->
+        <button v-if="hasActiveFilter" class="btn btn-ghost btn-sm" @click="resetFilters">重置</button>
 
         <!-- 选中时显示批量操作（右对齐） -->
         <div v-if="selectedIds.length" class="batch-actions-right">
@@ -881,9 +876,6 @@ async function confirmBatchDelete() {
               <button class="action-btn danger" title="删除" @click="onDelete(row)"><Icon name="trash" :size="15" /></button>
             </div>
           </template>
-        </template>
-        <template #empty>
-          {{ selectedKb ? '该知识库暂无文档，点击「上传文档」添加' : '请选择左侧知识库' }}
         </template>
       </DataTable>
       <Pagination
@@ -1051,11 +1043,11 @@ async function confirmBatchDelete() {
   font-size: 12.5px;
   margin-right: 2px;
 }
-/* 搜索框（自适应拉宽） */
+/* 搜索框（固定宽度，与其他列表页对齐） */
 .search-box {
   position: relative;
-  flex: 1;
-  min-width: 220px;
+  width: 340px;
+  max-width: 100%;
 }
 .search-icon {
   position: absolute;
@@ -1310,7 +1302,7 @@ async function confirmBatchDelete() {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   flex-shrink: 0;
 }
 .file-name {

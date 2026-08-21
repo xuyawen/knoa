@@ -10,8 +10,11 @@ import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
 import type { DataTableColumn } from '@/components/ui/DataTable.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
+import { useAsyncAction } from '@/composables/useAsyncAction'
+import { useDebouncedWatch } from '@/composables/useDebouncedWatch'
 import { getLlmCalls, clearLlmCalls } from '@/api'
 import type { Paginated, LLMCall } from '@/types/api'
 
@@ -74,14 +77,12 @@ const statusOptions = [
 
 function clearSearch() {
   searchQuery.value = ''
+  cancelSearchDebounce() // 撤销防抖 watcher 的待发请求，避免清空后重复加载
   load(true)
 }
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-watch(searchQuery, () => {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => load(true), 250)
-})
+// 输入即搜索（统一 300ms 防抖，见 useDebouncedWatch）
+const { cancel: cancelSearchDebounce } = useDebouncedWatch(searchQuery, () => load(true))
 watch([typeFilter, statusFilter, pageSize], () => load(true))
 
 /* ---------- 展示辅助 ---------- */
@@ -116,19 +117,14 @@ function openDetail(row: LLMCall) {
 
 /* ---------- 清空 ---------- */
 const showClear = ref(false)
-const clearing = ref(false)
+const { busy: clearing, run: runClear } = useAsyncAction({ errorPrefix: '清空失败' })
 async function confirmClear() {
-  clearing.value = true
-  try {
+  await runClear(async () => {
     await clearLlmCalls()
     toast.success('已清空调用日志')
     showClear.value = false
     load(true)
-  } catch (e: unknown) {
-    toast.error(`清空失败：${errMsg(e)}`)
-  } finally {
-    clearing.value = false
-  }
+  })
 }
 </script>
 
@@ -142,10 +138,8 @@ async function confirmClear() {
       </div>
       <CustomSelect v-model="typeFilter" :options="typeOptions" width="130px" />
       <CustomSelect v-model="statusFilter" :options="statusOptions" width="120px" />
-      <button class="icon-btn" title="刷新" :disabled="loading" @click="() => load()">
-        <Icon name="refresh" :size="15" :class="{ spin: loading }" />
-      </button>
-      <div style="margin-left:auto">
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        <RefreshButton :loading="loading" @click="() => load()" />
         <button class="btn btn-ghost btn-sm danger-text" :disabled="total === 0" @click="showClear = true">
           <Icon name="trash" :size="13" /> 清空
         </button>
@@ -185,7 +179,6 @@ async function confirmClear() {
           </div>
         </template>
       </template>
-      <template #empty>暂无调用记录（或当前筛选无匹配）</template>
     </DataTable>
 
     <Pagination
@@ -228,6 +221,7 @@ async function confirmClear() {
       message="确认清空全部 LLM 调用记录？该操作不可恢复。"
       confirm-text="清空"
       danger
+      :loading="clearing"
       @close="showClear = false"
       @confirm="confirmClear"
     />

@@ -11,6 +11,9 @@ import CustomSelect from '@/components/ui/CustomSelect.vue'
 import DepartmentSelect from '@/components/ui/DepartmentSelect.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
+import { useAsyncAction } from '@/composables/useAsyncAction'
+import { useDebouncedWatch } from '@/composables/useDebouncedWatch'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
 import { errMsg } from '@/utils/errmsg'
 import { getRoles, getUserList, createUser, updateUser, deleteUser } from '@/api/auth'
 import type { Paginated, RoleOut, UserOut, UserCreate, UserUpdate } from '@/types/api'
@@ -82,14 +85,12 @@ const userColumns = [
 ]
 function clearSearch() {
   searchQuery.value = ''
+  cancelSearchDebounce() // 撤销防抖 watcher 的待发请求，避免清空后重复加载
   loadUsers(true)
 }
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-watch(searchQuery, () => {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => loadUsers(true), 250)
-})
+// 输入即搜索（统一 300ms 防抖，见 useDebouncedWatch）
+const { cancel: cancelSearchDebounce } = useDebouncedWatch(searchQuery, () => loadUsers(true))
 watch([roleFilter, pageSize], () => loadUsers(true))
 
 /* ---------- 角色样式 ---------- */
@@ -99,7 +100,7 @@ function roleClass(r: string) {
 
 /* ---------- 新建 / 编辑 ---------- */
 const showModal = ref(false)
-const saving = ref(false)
+const { busy: saving, run: runSave } = useAsyncAction({ errorPrefix: '操作失败' })
 const editingId = ref<string | null>(null)
 const form = ref({ username: '', displayName: '', roleId: '', password: '', isActive: true, email: '', departmentId: '', employeeId: '' })
 
@@ -137,8 +138,7 @@ async function save() {
     toast.warning('请设置初始密码')
     return
   }
-  saving.value = true
-  try {
+  await runSave(async () => {
     if (editingId.value) {
       const payload: UserUpdate = {
         displayName: form.value.displayName || null,
@@ -166,11 +166,7 @@ async function save() {
     }
     showModal.value = false
     await loadUsers()
-  } catch (e: unknown) {
-    toast.error(`操作失败：${errMsg(e)}`)
-  } finally {
-    saving.value = false
-  }
+  })
 }
 
 /* ---------- 删除 ---------- */
@@ -218,10 +214,8 @@ const roleSelectOptions = computed(() =>
             <button v-if="searchQuery" class="search-clear" @click="clearSearch"><Icon name="close" :size="12" /></button>
           </div>
           <CustomSelect v-model="roleFilter" :options="roleFilterOptions" width="140px" @update:model-value="currentPage = 1" />
-          <button class="icon-btn" title="刷新" :disabled="loading" @click="() => loadUsers(false, true)">
-            <Icon name="refresh" :size="15" :class="{ spin: loading }" />
-          </button>
-          <div class="perm-h-row" style="margin-left:auto">
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <RefreshButton :loading="loading" @click="() => loadUsers(false, true)" />
             <button v-if="auth.hasPerm('user_manage')" class="btn btn-primary btn-sm" @click="openCreate">
               <Icon name="plus" :size="13" /> 新建用户
             </button>
@@ -256,7 +250,6 @@ const roleSelectOptions = computed(() =>
               </div>
             </template>
           </template>
-          <template #empty>暂无用户（或当前筛选无匹配）</template>
         </DataTable>
 
         <Pagination

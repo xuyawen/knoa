@@ -9,15 +9,30 @@ import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import Pagination from '@/components/ui/Pagination.vue'
+import DataTable from '@/components/ui/DataTable.vue'
+import type { DataTableColumn } from '@/components/ui/DataTable.vue'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
+import { useAsyncAction } from '@/composables/useAsyncAction'
+import { useDebouncedWatch } from '@/composables/useDebouncedWatch'
 import { getKnowledgeBases, createKnowledgeBase, updateKnowledgeBase, deleteKnowledgeBase, getDepartments } from '@/api'
 import type { KnowledgeBase, DepartmentNode, KBUpdate } from '@/types/api'
 
 const router = useRouter()
 const store = useKnowledgeStore()
+
+// 列表列声明（全局 DataTable 组件）
+const kbColumns: DataTableColumn[] = [
+  { key: 'name', title: '名称' },
+  { key: 'ownerDeptName', title: '归属部门' },
+  { key: 'description', title: '描述' },
+  { key: 'documentCount', title: '文档数', align: 'center', width: '80px' },
+  { key: 'pendingCount', title: '待审核', align: 'center', width: '80px' },
+  { key: 'ops', title: '操作', width: '130px' },
+]
 const auth = useAuthStore()
 const toast = useToastStore()
 
@@ -49,8 +64,16 @@ function doSearch() {
   void load()
 }
 
+// 输入即搜索（300ms 防抖）；回车立即搜索并撤销待发的防抖请求
+const { cancel: cancelSearchDebounce } = useDebouncedWatch(searchText, doSearch)
+function onEnterSearch() {
+  cancelSearchDebounce()
+  doSearch()
+}
+
 function clearSearch() {
   searchText.value = ''
+  cancelSearchDebounce()
   doSearch()
 }
 
@@ -68,7 +91,7 @@ function onPageSizeChange(s: number) {
 // --- 新建 / 编辑弹窗（共用一套表单，editing 为 null 表示新建） ---
 const showForm = ref(false)
 const editing = ref<KnowledgeBase | null>(null)
-const saving = ref(false)
+const { busy: saving, run: runSave } = useAsyncAction()
 const form = ref({ name: '', description: '', ownerDeptId: '' })
 // 部门列表（超管建库/编辑时选择归属部门）
 const deptOptions = ref<{ label: string; value: string }[]>([])
@@ -105,29 +128,27 @@ async function submitForm() {
     toast.warning('请输入知识库名称')
     return
   }
-  saving.value = true
-  try {
-    const payload: KBUpdate & { name: string } = {
-      name,
-      description: form.value.description.trim() || null,
-      // 归属部门：超管（kb_super）可指定/变更；非超管由后端强制本部门
-      ...(auth.hasPerm('kb_super') ? { ownerDeptId: form.value.ownerDeptId || null } : {}),
-    }
-    if (editing.value) {
-      await updateKnowledgeBase(editing.value.id, payload)
-      toast.success('知识库已更新')
-    } else {
-      await createKnowledgeBase(payload)
-      toast.success('知识库已创建')
-    }
-    showForm.value = false
-    await store.reload() // 同步其他页面的 KB 下拉
-    await load()
-  } catch (e: unknown) {
-    toast.error(`${editing.value ? '更新' : '创建'}失败：${errMsg(e)}`)
-  } finally {
-    saving.value = false
-  }
+  await runSave(
+    async () => {
+      const payload: KBUpdate & { name: string } = {
+        name,
+        description: form.value.description.trim() || null,
+        // 归属部门：超管（kb_super）可指定/变更；非超管由后端强制本部门
+        ...(auth.hasPerm('kb_super') ? { ownerDeptId: form.value.ownerDeptId || null } : {}),
+      }
+      if (editing.value) {
+        await updateKnowledgeBase(editing.value.id, payload)
+        toast.success('知识库已更新')
+      } else {
+        await createKnowledgeBase(payload)
+        toast.success('知识库已创建')
+      }
+      showForm.value = false
+      await store.reload() // 同步其他页面的 KB 下拉
+      await load()
+    },
+    { onError: (e) => toast.error(`${editing.value ? '更新' : '创建'}失败：${errMsg(e)}`) },
+  )
 }
 
 // --- 删除（级联清理库内全部文档/图谱，二次确认） ---
@@ -166,17 +187,15 @@ onMounted(load)
           v-model="searchText"
           class="kb-search-input"
           placeholder="按名称或分类搜索"
-          @keydown.enter="doSearch"
+          @keydown.enter="onEnterSearch"
         />
         <button v-if="searchText" class="kb-search-clear" @click="clearSearch">
           <Icon name="close" :size="12" />
         </button>
       </div>
       <div class="kb-actions">
-        <button type="button" class="icon-btn" title="刷新" :disabled="loading" @click="load(true)">
-          <Icon name="refresh" :size="15" :class="{ spin: loading }" />
-        </button>
-        <button class="btn btn-primary" @click="openCreate">
+        <RefreshButton :loading="loading" @click="load(true)" />
+        <button class="btn btn-primary btn-sm" @click="openCreate">
           <Icon name="plus" :size="14" /> 新建知识库
         </button>
       </div>
@@ -186,49 +205,26 @@ onMounted(load)
       <div v-if="loading && !kbs.length" class="kb-loading">
         <Icon name="loader" :size="18" class="spin" /> 加载中…
       </div>
-      <div v-else class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>归属部门</th>
-              <th>描述</th>
-              <th class="col-num">文档数</th>
-              <th class="col-num">待审核</th>
-              <th class="col-ops">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="kb in kbs" :key="kb.id">
-              <td class="td-name">
-                <span class="kb-name">{{ kb.name }}</span>
-              </td>
-              <td>{{ kb.ownerDeptName || '—' }}</td>
-              <td class="td-desc">{{ kb.description || '—' }}</td>
-              <td class="col-num">{{ kb.documentCount }}</td>
-              <td class="col-num">
-                <span :class="kb.pendingCount ? 'pending-hot' : ''">{{ kb.pendingCount }}</span>
-              </td>
-              <td class="col-ops">
-                <button class="action-btn edit" title="编辑" @click="openEdit(kb)">
-                  <Icon name="edit" :size="15" />
-                </button>
-                <button class="action-btn preview" title="成员管理" @click="goMembers(kb)">
-                  <Icon name="users" :size="15" />
-                </button>
-                <button class="action-btn danger" title="删除" @click="deleteTarget = kb">
-                  <Icon name="trash" :size="15" />
-                </button>
-              </td>
-            </tr>
-            <tr v-if="!kbs.length">
-              <td colspan="6" class="empty-cell">
-                {{ submitted ? `未找到与「${submitted}」匹配的知识库` : '暂无知识库，点击右上角「新建知识库」创建' }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <DataTable v-else :columns="kbColumns" :rows="kbs" :loading="loading">
+        <template #cell="{ row, col }">
+          <span v-if="col.key === 'name'" class="kb-name">{{ row.name }}</span>
+          <span v-else-if="col.key === 'ownerDeptName'">{{ row.ownerDeptName || '—' }}</span>
+          <span v-else-if="col.key === 'description'" class="td-desc">{{ row.description || '—' }}</span>
+          <span v-else-if="col.key === 'pendingCount'" :class="row.pendingCount ? 'pending-hot' : ''">{{ row.pendingCount }}</span>
+          <template v-else-if="col.key === 'ops'">
+            <button class="action-btn edit" title="编辑" @click="openEdit(row)">
+              <Icon name="edit" :size="15" />
+            </button>
+            <button class="action-btn preview" title="成员管理" @click="goMembers(row)">
+              <Icon name="users" :size="15" />
+            </button>
+            <button class="action-btn danger" title="删除" @click="deleteTarget = row">
+              <Icon name="trash" :size="15" />
+            </button>
+          </template>
+          <span v-else>{{ row[col.key] }}</span>
+        </template>
+      </DataTable>
       <Pagination
         v-if="total > 0"
         :page="page"
@@ -317,7 +313,7 @@ onMounted(load)
 }
 .kb-search-input {
   width: 100%;
-  height: 34px;
+  height: var(--btn-h-sm);
   padding: 0 30px 0 34px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -353,23 +349,6 @@ onMounted(load)
   color: var(--text-tertiary); font-size: 13px; padding: 32px 20px;
 }
 
-.data-table-wrap { width: 100%; overflow-x: auto; }
-.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.data-table th {
-  text-align: left; padding: 11px 14px; color: var(--text-tertiary);
-  font-weight: 500; font-size: 12px; white-space: nowrap; border-bottom: 1px solid var(--border);
-}
-.data-table td {
-  padding: 12px 14px; border-bottom: 1px solid var(--border);
-  color: var(--text-primary); vertical-align: middle;
-}
-.data-table tbody tr:hover { background: var(--bg-hover); }
-.data-table tbody tr:last-child td { border-bottom: none; }
-.col-num { width: 80px; text-align: center; }
-.col-ops { width: 130px; white-space: nowrap; }
-.empty-cell { text-align: center; color: var(--text-tertiary); padding: 40px 14px; font-size: 13px; opacity: 0.6; }
-
-.td-name { white-space: nowrap; }
 .kb-name { font-weight: 600; color: var(--text-primary); }
 .td-desc {
   color: var(--text-secondary); max-width: 340px;

@@ -2,8 +2,11 @@
 // 知识图谱 — 节点管理视图（实体表格 + 分页 + 多选合并）。
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Pagination from '@/components/ui/Pagination.vue'
+import DataTable from '@/components/ui/DataTable.vue'
+import type { DataTableColumn } from '@/components/ui/DataTable.vue'
 import Icon from '@/components/ui/Icon.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
 import { useGraphData } from '@/composables/useGraphData'
 import { useBackdropClick } from '@/composables/useBackdropClick'
 import { useAuthStore } from '@/stores/auth'
@@ -15,7 +18,7 @@ const {
   graph, pagedNodes, degree, kbName,
   nodePage, nodePageSize, mergeNodes, previewMerge, selectedId,
   nodeFilterKb, nodeFilterTerm, nodeFilterType, nodeTableTypeOpts, hasNodeFilter,
-  nodeTotal, fetchNodeList,
+  nodeTotal, fetchNodeList, nodeListLoading,
   bizCatOpts,
   rebuildProgress,
 } = useGraphData()
@@ -69,18 +72,20 @@ function toggleSelect(id: string) {
   else s.add(id)
   selectedIds.value = s
 }
-const allPageSelected = computed(() =>
-  pagedNodes.value.length > 0 && pagedNodes.value.every(n => selectedIds.value.has(n.id)),
-)
-function toggleSelectAll() {
+/** DataTable 表头全选：checked=true 加入当页全部，false 移除当页全部 */
+function onToggleAllPage(checked: boolean) {
   const s = new Set(selectedIds.value)
-  if (allPageSelected.value) {
-    pagedNodes.value.forEach(n => s.delete(n.id))
-  } else {
-    pagedNodes.value.forEach(n => s.add(n.id))
-  }
+  pagedNodes.value.forEach((n) => (checked ? s.add(n.id) : s.delete(n.id)))
   selectedIds.value = s
 }
+
+// 列表列声明（全局 DataTable 组件）
+const nodeColumns: DataTableColumn[] = [
+  { key: 'label', title: '实体', strong: true },
+  { key: 'type', title: '类型' },
+  { key: 'kb', title: '知识库' },
+  { key: 'degree', title: '度数' },
+]
 /* ---- 合并预览（P1：先预览影响，再确认合并） ---- */
 // 选中实体清单按度数降序——度数最高的实体连接最多、最具代表性，其 label 作为推荐目标名
 const selectedNodes = computed(() =>
@@ -171,27 +176,24 @@ async function confirmMerge() {
         </div>
         <CustomSelect v-model="nodeFilterType" :options="nodeTableTypeOpts" placeholder="全部类型" width="130px" />
         <button v-if="hasNodeFilter" class="btn btn-ghost btn-sm" @click="clearNodeFilters">重置</button>
+        <RefreshButton :loading="nodeListLoading" style="margin-left:auto" @click="() => fetchNodeList()" />
       </div>
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th class="col-check"><input type="checkbox" :checked="allPageSelected" @change="toggleSelectAll" /></th>
-              <th>实体</th><th>类型</th><th>知识库</th><th>度数</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in pagedNodes" :key="row.id" :class="{ 'is-selected': selectedIds.has(row.id) }">
-              <td class="col-check"><input type="checkbox" :checked="selectedIds.has(row.id)" @change="toggleSelect(row.id)" /></td>
-              <td class="td-label">{{ row.label }}</td>
-              <td>{{ row.type || '—' }}</td>
-              <td>{{ kbName(row.kbId) }}</td>
-              <td>{{ degree[row.id] || 0 }}</td>
-            </tr>
-            <tr v-if="!pagedNodes.length"><td colspan="5" class="empty-cell">{{ hasNodeFilter ? '无匹配的实体节点' : '暂无实体节点' }}</td></tr>
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        :columns="nodeColumns"
+        :rows="pagedNodes"
+        row-key="id"
+        selectable
+        :selected-keys="[...selectedIds]"
+        @toggle-row="(k) => toggleSelect(String(k))"
+        @toggle-all="onToggleAllPage"
+      >
+        <template #cell="{ row, col }">
+          <template v-if="col.key === 'type'">{{ row.type || '—' }}</template>
+          <template v-else-if="col.key === 'kb'">{{ kbName(row.kbId) }}</template>
+          <template v-else-if="col.key === 'degree'">{{ degree[row.id] || 0 }}</template>
+          <span v-else>{{ row[col.key] }}</span>
+        </template>
+      </DataTable>
       <Pagination
         v-if="nodeTotal > 0"
         v-model:page="nodePage"
@@ -264,35 +266,9 @@ async function confirmMerge() {
 .node-search { width: 220px; }
 
 /* 复用全局 DataTable 样式，仅保留节点页特有覆盖 */
-.data-table-wrap { width: 100%; overflow-x: auto; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
-.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.data-table th {
-  text-align: left;
-  padding: 11px 14px;
-  color: var(--text-tertiary);
-  font-weight: 600;
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--border);
-}
-.data-table td {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-primary);
-  vertical-align: middle;
-}
-.data-table tbody tr:hover { background: var(--bg-hover); }
-.data-table tbody tr.is-selected { background: var(--brand-soft); }
-.data-table tbody tr:last-child td { border-bottom: none; }
-.col-check { width: 44px; padding-left: 14px; padding-right: 8px; text-align: center; }
-.col-check input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--brand); }
-.td-label { font-weight: 600; color: var(--text-primary); }
-.empty-cell { text-align: center; color: var(--text-tertiary); padding: 32px 14px; font-size: 13px; opacity: 0.5; }
-
 /* 合并弹窗 */
 .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal-box { background: var(--bg-surface); border-radius: 14px; padding: 24px; width: 380px; box-shadow: var(--shadow-pop); }
+.modal-box { background: var(--bg-surface); border-radius: var(--radius-md); padding: 24px; width: 380px; box-shadow: var(--shadow-pop); }
 .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
 .modal-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
 .modal-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; margin-top: 12px; }
@@ -301,8 +277,8 @@ async function confirmMerge() {
 
 /* 合并弹窗——预览面板 */
 .merge-modal { width: 440px; }
-.merge-source-list { max-height: 148px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
-.merge-source-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px; border-radius: 6px; }
+.merge-source-list { max-height: 148px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px; }
+.merge-source-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px; border-radius: var(--radius-sm); }
 .merge-source-item + .merge-source-item { margin-top: 2px; }
 .merge-source-item:hover { background: var(--bg-hover); }
 .merge-source-name { flex: 1; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -310,13 +286,13 @@ async function confirmMerge() {
 .merge-source-degree { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
 .merge-hint { font-size: 12px; color: var(--text-tertiary); margin-top: 4px; }
 .merge-hint a { color: var(--brand); text-decoration: none; font-weight: 600; }
-.merge-preview { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--bg-subtle); }
+.merge-preview { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; background: var(--bg-subtle); }
 .merge-preview.is-loading { font-size: 12px; color: var(--text-tertiary); text-align: center; padding: 16px 12px; }
-.merge-notice { font-size: 12px; line-height: 1.5; border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; }
+.merge-notice { font-size: 12px; line-height: 1.5; border-radius: var(--radius-sm); padding: 6px 10px; margin-bottom: 8px; }
 .merge-notice.is-info { color: var(--info); background: var(--info-soft); }
 .merge-notice.is-warn { color: var(--warning); background: var(--warning-soft); }
 .merge-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.merge-stat { text-align: center; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px; }
+.merge-stat { text-align: center; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 4px; }
 .merge-stat b { display: block; font-size: 16px; color: var(--text-primary); }
 .merge-stat span { font-size: 11px; color: var(--text-tertiary); }
 </style>

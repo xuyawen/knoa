@@ -5,6 +5,7 @@
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import Icon from './Icon.vue'
 import { getUserList } from '@/api/auth'
+import { useDebouncedWatch } from '@/composables/useDebouncedWatch'
 import type { UserOut } from '@/types/api'
 
 const props = withDefaults(defineProps<{
@@ -33,7 +34,6 @@ const results = ref<UserOut[]>([])
 const searching = ref(false)
 const searched = ref(false) // 是否已发起过检索（区分「空结果」与「尚未搜索」）
 
-let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let reqSeq = 0 // 请求序号：丢弃乱序返回的旧结果，避免快键输入时旧响应覆盖新结果
 
 function measure() {
@@ -69,10 +69,8 @@ async function runSearch(kw: string) {
   }
 }
 
-function onInput() {
-  if (debounceTimer) clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(() => void runSearch(query.value.trim()), 300)
-}
+// 输入即搜索（统一 300ms 防抖，见 useDebouncedWatch）
+const { cancel: cancelSearchDebounce } = useDebouncedWatch(query, () => void runSearch(query.value.trim()))
 
 function openPanel() {
   if (open.value) return
@@ -88,6 +86,7 @@ function openPanel() {
 function pick(u: UserOut) {
   emit('select', u)
   query.value = ''
+  cancelSearchDebounce() // 清空输入会触发防抖 watcher，撤销它避免多发一次全量检索
   results.value = []
   searched.value = false
   open.value = false
@@ -106,7 +105,6 @@ onMounted(() => {
   window.addEventListener('scroll', onReposition, true)
 })
 onBeforeUnmount(() => {
-  if (debounceTimer) clearTimeout(debounceTimer)
   document.removeEventListener('click', onClickOutside)
   window.removeEventListener('resize', onReposition)
   window.removeEventListener('scroll', onReposition, true)
@@ -122,7 +120,6 @@ onBeforeUnmount(() => {
         v-model="query"
         class="u-search-input"
         :placeholder="placeholder"
-        @input="onInput"
         @focus="openPanel"
       />
     </div>

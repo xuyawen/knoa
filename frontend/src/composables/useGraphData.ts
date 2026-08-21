@@ -1,10 +1,11 @@
 // 知识图谱共享数据层：四个图谱视图（全局图 / 节点 / 关系 / 统计）共用同一份模块级状态。
 // 四个 tab 来回切换不会重复请求，筛选 / 分页 / 画布状态保留；「搜索」按钮或筛选变化强制刷新。
 // 力导向布局与画布交互仅在「全局图谱」视图内，其余三视图只消费这里的数据。
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
+import { useDebouncedWatch } from '@/composables/useDebouncedWatch'
 import { getGraph, getGraphNodes, getGraphEdges, getGraphHotNodes, getGraphRecent, exportGraph, getGraphNodeSource, deleteGraphNode, updateGraphNode, createGraphNode, createGraphEdge, deleteGraphEdge, mergeGraphNodes, previewMergeGraphNodes, getGraphGaps, clearGraphGaps, rebuildGraph, getRebuildStatus, getIngestProgress } from '@/api'
 import type { GraphData, GraphNode, GraphEdgeListItem, GraphFilter, GraphHotNode, GraphNodeSource, GraphMergePreview, GraphMergeResult, KGGapSignal } from '@/types/api'
 
@@ -245,7 +246,6 @@ export function useGraphData() {
   const nodeTotal = ref(0)
   const nodeListLoading = ref(false)
   let nodeListSeq = 0
-  let nodeSearchTimer: ReturnType<typeof setTimeout> | null = null
 
   // 类型下拉选项：从已加载图谱节点去重派生（仅供下拉展示，过滤本身走服务端）
   const nodeTableTypeOpts = computed<{ label: string; value: string }[]>(() => {
@@ -286,20 +286,15 @@ export function useGraphData() {
     else void fetchNodeList()
   }
   watch([nodeFilterKb, nodeFilterType], resetPageAndFetch)
-  // 名称搜索防抖，避免逐键请求
-  watch(nodeFilterTerm, () => {
-    if (nodeSearchTimer) clearTimeout(nodeSearchTimer)
-    nodeSearchTimer = setTimeout(resetPageAndFetch, 300)
-  })
+  // 名称搜索：输入即搜索（统一 300ms 防抖），避免逐键请求
+  useDebouncedWatch(nodeFilterTerm, resetPageAndFetch)
   watch([nodePage, nodePageSize], () => { void fetchNodeList() })
-  onUnmounted(() => { if (nodeSearchTimer) clearTimeout(nodeSearchTimer) })
 
   /* ---- 关系检索（服务端分页/搜索，解耦画布采样）---- */
   const edgeListItems = ref<GraphEdgeListItem[]>([])
   const edgeTotal = ref(0)
   const edgeListLoading = ref(false)
   let edgeListSeq = 0
-  let relSearchTimer: ReturnType<typeof setTimeout> | null = null
 
   async function fetchEdgeList() {
     const seq = ++edgeListSeq
@@ -325,13 +320,9 @@ export function useGraphData() {
     if (relPage.value !== 1) relPage.value = 1
     else void fetchEdgeList()
   }
-  // 检索词变化 300ms 防抖 + 回第一页（页码变了由 page watcher 触发请求）
-  watch(relTerm, () => {
-    if (relSearchTimer) clearTimeout(relSearchTimer)
-    relSearchTimer = setTimeout(resetRelPageAndFetch, 300)
-  })
+  // 检索词：输入即搜索（统一 300ms 防抖）+ 回第一页（页码变了由 page watcher 触发请求）
+  useDebouncedWatch(relTerm, resetRelPageAndFetch)
   watch([relPage, relPageSize], () => { void fetchEdgeList() })
-  onUnmounted(() => { if (relSearchTimer) clearTimeout(relSearchTimer) })
 
   function resetView() {
     tx.value = 0
