@@ -5,8 +5,11 @@ import { ref, computed, onMounted } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
+import { useAsyncAction } from '@/composables/useAsyncAction'
 import { createRole, deleteRole, getRoles, setRolePermissions, updateRole, getPermissions } from '@/api/auth'
 import type { RoleOut, RoleCreate, PermissionDef } from '@/types/api'
 
@@ -21,6 +24,7 @@ const selectedRole = computed(() => roles.value.find((r) => r.id === selectedId.
 
 // 当前选中角色的权限草稿（开关切换只改这里，保存才写后端）
 const draftPerms = ref<Set<string>>(new Set())
+const { busy: savingPerms, run: runSavePerms } = useAsyncAction({ errorPrefix: '保存失败' })
 
 async function loadRoles(force = false) {
   loading.value = true
@@ -60,20 +64,19 @@ const dirty = computed(() => {
 })
 
 async function savePerms() {
-  if (!selectedRole.value) return
-  try {
-    const updated = await setRolePermissions(selectedRole.value.id, { permissions: [...draftPerms.value] })
+  const role = selectedRole.value
+  if (!role) return
+  await runSavePerms(async () => {
+    const updated = await setRolePermissions(role.id, { permissions: [...draftPerms.value] })
     const idx = roles.value.findIndex((r) => r.id === updated.id)
     if (idx >= 0) roles.value[idx] = updated
     toast.success('权限已保存')
-  } catch (e: unknown) {
-    toast.error(`保存失败：${errMsg(e)}`)
-  }
+  })
 }
 
 /* ---------- 新建角色 ---------- */
 const showCreate = ref(false)
-const creating = ref(false)
+const { busy: creating, run: runCreate } = useAsyncAction({ errorPrefix: '创建失败' })
 const newForm = ref({ name: '', key: '', description: '', perms: new Set<string>() } as {
   name: string
   key: string
@@ -96,8 +99,7 @@ async function confirmCreate() {
     toast.warning('角色名称必填')
     return
   }
-  creating.value = true
-  try {
+  await runCreate(async () => {
     const payload: RoleCreate = {
       name: newForm.value.name.trim(),
       key: newForm.value.key.trim() || undefined,
@@ -110,11 +112,7 @@ async function confirmCreate() {
     selectedId.value = created.id
     syncDraft()
     toast.success('角色已创建')
-  } catch (e: unknown) {
-    toast.error(`创建失败：${errMsg(e)}`)
-  } finally {
-    creating.value = false
-  }
+  })
 }
 
 /* ---------- 删除角色 ---------- */
@@ -143,6 +141,7 @@ async function confirmDelete() {
 
 /* ---------- 编辑名称/描述 ---------- */
 const editingName = ref(false)
+const { busy: savingName, run: runSaveName } = useAsyncAction({ errorPrefix: '更新失败' })
 const nameDraft = ref({ name: '', description: '' })
 function openEditName() {
   if (!selectedRole.value) return
@@ -150,9 +149,10 @@ function openEditName() {
   editingName.value = true
 }
 async function saveName() {
-  if (!selectedRole.value) return
-  try {
-    const updated = await updateRole(selectedRole.value.id, {
+  const role = selectedRole.value
+  if (!role) return
+  await runSaveName(async () => {
+    const updated = await updateRole(role.id, {
       name: nameDraft.value.name.trim(),
       description: nameDraft.value.description.trim() || null,
     })
@@ -160,9 +160,7 @@ async function saveName() {
     if (idx >= 0) roles.value[idx] = updated
     editingName.value = false
     toast.success('角色信息已更新')
-  } catch (e: unknown) {
-    toast.error(`更新失败：${errMsg(e)}`)
-  }
+  })
 }
 
 onMounted(async () => {
@@ -179,7 +177,7 @@ onMounted(async () => {
         <div class="rm-h-row">
           <h3 class="rm-h">角色</h3>
           <div style="display:flex;align-items:center;gap:8px">
-            <button class="icon-btn" title="刷新" :disabled="loading" @click="loadRoles(true)"><Icon name="refresh" :size="15" :class="{ spin: loading }" /></button>
+            <RefreshButton :loading="loading" @click="loadRoles(true)" />
             <button class="btn btn-primary btn-sm" @click="openCreate"><Icon name="plus" :size="13" /> 新建角色</button>
           </div>
         </div>
@@ -238,12 +236,12 @@ onMounted(async () => {
           </div>
 
           <div class="rm-foot">
-            <button class="btn btn-primary btn-sm" :disabled="!dirty" @click="savePerms">
-              {{ dirty ? '保存权限' : '无改动' }}
+            <button class="btn btn-primary btn-sm" :disabled="!dirty || savingPerms" @click="savePerms">
+              {{ savingPerms ? '保存中…' : '保存权限' }}
             </button>
           </div>
         </template>
-        <div v-else class="rm-empty">请选择左侧角色</div>
+        <EmptyState v-else />
       </section>
     </div>
 
@@ -290,7 +288,7 @@ onMounted(async () => {
       </div>
       <template #foot>
         <button class="btn btn-ghost btn-sm" @click="editingName = false">取消</button>
-        <button class="btn btn-primary btn-sm" @click="saveName">保存</button>
+        <button class="btn btn-primary btn-sm" :disabled="savingName" @click="saveName">{{ savingName ? '保存中…' : '保存' }}</button>
       </template>
     </AppModal>
 

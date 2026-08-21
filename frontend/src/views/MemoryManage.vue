@@ -4,8 +4,11 @@
 import { ref, onMounted } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
+import { useAsyncAction } from '@/composables/useAsyncAction'
 import { getMemories, deleteMemory, clearMemories } from '@/api'
 import type { MemoryItem } from '@/types/api'
 
@@ -16,7 +19,8 @@ const loading = ref(false)
 
 const deleteTarget = ref<MemoryItem | null>(null)
 const showClearConfirm = ref(false)
-const clearing = ref(false)
+const { busy: clearing, run: runClear } = useAsyncAction({ errorPrefix: '清空失败' })
+const { busy: deletingMem, run: runDelete } = useAsyncAction({ errorPrefix: '删除失败' })
 
 const TYPE_LABEL: Record<string, string> = {
   user_profile: '用户画像',
@@ -61,30 +65,21 @@ async function loadMemories(force = false) {
 async function confirmDelete() {
   const target = deleteTarget.value
   if (!target) return
-  try {
+  await runDelete(async () => {
     await deleteMemory(target.id)
     memories.value = memories.value.filter((m) => m.id !== target.id)
     toast.success('已删除该条记忆')
-  } catch (e: unknown) {
-    toast.error(`删除失败：${errMsg(e)}`)
-  } finally {
-    deleteTarget.value = null
-  }
+  })
+  deleteTarget.value = null
 }
 
 async function confirmClear() {
-  if (clearing.value) return
-  clearing.value = true
-  try {
+  await runClear(async () => {
     const n = await clearMemories()
     memories.value = []
     toast.success(`已清空 ${n} 条记忆`)
-  } catch (e: unknown) {
-    toast.error(`清空失败：${errMsg(e)}`)
-  } finally {
-    clearing.value = false
-    showClearConfirm.value = false
-  }
+  })
+  showClearConfirm.value = false
 }
 
 onMounted(loadMemories)
@@ -97,9 +92,7 @@ onMounted(loadMemories)
         <p class="mem-sub">系统会在问答过程中自动学习关于你的长期记忆（用户画像、偏好、关键事实等），你可以在此查看或遗忘。</p>
       </div>
       <div class="mem-actions">
-        <button class="icon-btn" title="刷新" :disabled="loading" @click="loadMemories(true)">
-          <Icon name="refresh" :size="15" :class="{ spin: loading }" />
-        </button>
+        <RefreshButton :loading="loading" @click="loadMemories(true)" />
         <button
           class="btn btn-danger btn-sm"
           :disabled="!memories.length || clearing"
@@ -114,10 +107,7 @@ onMounted(loadMemories)
       <div v-if="loading" class="mem-hint">
         <Icon name="loader" :size="16" class="spin" /> 加载中…
       </div>
-      <div v-else-if="!memories.length" class="mem-empty">
-        <Icon name="book-marked" :size="32" />
-        <p>暂无长期记忆。多聊几次，系统会逐渐记住你的偏好。</p>
-      </div>
+      <EmptyState v-else-if="!memories.length" />
       <ul v-else class="mem-list">
         <li v-for="m in memories" :key="m.id" class="mem-item">
           <div class="mem-item-main">
@@ -138,6 +128,7 @@ onMounted(loadMemories)
       :message="deleteTarget ? `确认删除这条记忆？\n「${deleteTarget.content}」` : ''"
       confirm-text="删除"
       danger
+      :loading="deletingMem"
       @close="deleteTarget = null"
       @confirm="confirmDelete"
     />
@@ -147,6 +138,7 @@ onMounted(loadMemories)
       :message="`确认清空全部 ${memories.length} 条长期记忆？此操作不可恢复。`"
       confirm-text="清空"
       danger
+      :loading="clearing"
       @close="showClearConfirm = false"
       @confirm="confirmClear"
     />

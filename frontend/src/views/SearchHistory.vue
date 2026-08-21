@@ -3,6 +3,7 @@
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { useSearchHistory } from '@/composables/useSearchHistory'
 import { useTrending } from '@/composables/useTrending'
 
@@ -74,11 +75,7 @@ function removeItem(text: string, e: Event) {
             </div>
           </div>
         </template>
-        <div v-else class="empty-page">
-          <Icon name="clock" :size="40" />
-          <div>暂无搜索历史</div>
-          <p>去智能搜索试试吧</p>
-        </div>
+        <EmptyState v-else />
       </div>
 
       <!-- 右：热门搜索推荐 -->
@@ -99,7 +96,7 @@ function removeItem(text: string, e: Event) {
             <span class="hot-count">{{ t.count }}次</span>
           </div>
         </template>
-        <div v-else class="empty-hint">暂无热门数据</div>
+        <EmptyState v-else />
       </div>
     </div>
   </div>
@@ -209,7 +206,7 @@ function removeItem(text: string, e: Event) {
   align-items: center;
   justify-content: center;
   width: 28px; height: 28px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-tertiary);
   background: transparent;
   border: none;

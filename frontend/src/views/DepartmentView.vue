@@ -9,6 +9,8 @@ import DepartmentTreeSelect from '@/components/ui/DepartmentTreeSelect.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
+import { useAsyncAction } from '@/composables/useAsyncAction'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
 import {
   getDepartments,
   createDepartment,
@@ -221,7 +223,7 @@ function fmtTime(s?: string) {
 
 /* ---------- 新建 / 编辑 ---------- */
 const showModal = ref(false)
-const saving = ref(false)
+const { busy: saving, run: runSave } = useAsyncAction({ errorPrefix: '操作失败' })
 const editingId = ref<string | null>(null)
 const form = ref({ name: '', parentId: '', description: '' })
 
@@ -245,8 +247,7 @@ async function save() {
     toast.warning('部门名称必填')
     return
   }
-  saving.value = true
-  try {
+  await runSave(async () => {
     const pid = form.value.parentId || null
     if (editingId.value) {
       await updateDepartment(editingId.value, {
@@ -265,11 +266,7 @@ async function save() {
     }
     showModal.value = false
     await loadDepts()
-  } catch (e: unknown) {
-    toast.error(`操作失败：${errMsg(e)}`)
-  } finally {
-    saving.value = false
-  }
+  })
 }
 
 /* ---------- 删除 ---------- */
@@ -297,12 +294,12 @@ async function confirmDelete() {
     <!-- 工具栏 -->
     <div class="toolbar">
       <span class="dept-count">共 {{ totalDepts }} 个部门</span>
-      <button type="button" class="icon-btn" title="刷新" :disabled="loading" @click="loadDepts(true)">
-        <Icon name="refresh" :size="15" :class="{ spin: loading }" />
-      </button>
-      <button v-if="auth.hasPerm('user_manage')" class="btn btn-primary btn-sm" style="margin-left:auto" @click="openCreate">
-        <Icon name="plus" :size="13" /> 新增部门
-      </button>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        <RefreshButton :loading="loading" @click="loadDepts(true)" />
+        <button v-if="auth.hasPerm('user_manage')" class="btn btn-primary btn-sm" @click="openCreate">
+          <Icon name="plus" :size="13" /> 新增部门
+        </button>
+      </div>
     </div>
 
     <!-- 表格 -->
@@ -335,7 +332,6 @@ async function confirmDelete() {
           </div>
         </template>
       </template>
-      <template #empty>暂无部门数据</template>
     </DataTable>
     </div>
     </div>

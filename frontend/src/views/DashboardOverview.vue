@@ -5,6 +5,7 @@ import { useKnowledgeStore } from '@/stores/knowledge'
 import Icon from '@/components/ui/Icon.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import DataTable from '@/components/ui/DataTable.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
@@ -208,7 +209,7 @@ watch(trendRange, (r) => { void loadTrend(r) })
         <div class="panel-head">
           <span class="panel-title">知识库分布</span>
         </div>
-        <div v-if="kbTotal === 0" class="empty-hint">暂无文档</div>
+        <EmptyState v-if="kbTotal === 0" />
         <div v-else class="cat-body">
           <div class="cat-summary">
             <div class="cat-summary-meta">
@@ -228,7 +229,7 @@ watch(trendRange, (r) => { void loadTrend(r) })
               <span class="cat-bar-val">{{ b.value.toLocaleString() }}</span>
               <span class="cat-bar-pct">{{ b.pctTotal }}%</span>
             </div>
-            <div v-if="!barData.length" class="empty-hint">暂无文档</div>
+            <EmptyState v-if="!barData.length" />
           </div>
         </div>
       </div>
@@ -255,7 +256,6 @@ watch(trendRange, (r) => { void loadTrend(r) })
             <span v-else class="na">—</span>
           </template>
         </template>
-        <template #empty>暂无操作记录</template>
       </DataTable>
       <Pagination
         v-if="(opsData?.total ?? 0) > 0"

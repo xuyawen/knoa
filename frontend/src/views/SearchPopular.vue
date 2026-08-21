@@ -2,6 +2,7 @@
 // 热门搜索页：展示热门搜索榜，点击条目跳转搜索。
 import { useRouter } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { useTrending } from '@/composables/useTrending'
 
 const router = useRouter()
@@ -33,10 +34,7 @@ function reSearch(text: string) {
           <span class="trend-count" v-if="t.count">{{ t.count }} 次</span>
         </div>
       </div>
-      <div v-else class="empty-page">
-        <Icon name="fire" :size="40" />
-        <div>暂无热门数据</div>
-      </div>
+      <EmptyState v-else />
     </div>
   </div>
 </template>
@@ -96,7 +94,7 @@ function reSearch(text: string) {
 .trend-rank {
   width: 22px; height: 22px;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 12px; font-weight: 700;
   background: var(--bg-subtle); color: var(--text-secondary);
   flex-shrink: 0;

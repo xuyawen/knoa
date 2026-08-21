@@ -8,6 +8,7 @@ import { useThemeStore } from '@/stores/theme'
 import { getAnnouncements, markAnnouncementRead } from '@/api'
 import type { Announcement } from '@/types/api'
 import Icon from '@/components/ui/Icon.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import UserProfileSettingsModal from '@/components/user/UserProfileSettingsModal.vue'
 import { useBackdropClick } from '@/composables/useBackdropClick'
 import { showBeian } from '@/utils/branding'
@@ -242,7 +243,7 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
               <div v-if="notifyLoading" class="notify-loading">
                 <Icon name="loader" :size="14" class="spin" /> 加载中…
               </div>
-              <div v-else-if="!announcements.length" class="notify-empty">暂无通知</div>
+              <EmptyState v-else-if="!announcements.length" :size="24" />
               <button
                 v-for="a in announcements"
                 :key="a.id"
@@ -393,7 +394,7 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
 .topbar-logo {
   width: 28px;
   height: 28px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
 }
 .topbar-title {
   font-size: 16px;
@@ -450,7 +451,7 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-pill);
   background: var(--danger);
   color: #fff;
   font-size: 10px;

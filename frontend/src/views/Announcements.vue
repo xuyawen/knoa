@@ -4,7 +4,10 @@ import { ref } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useAsyncAction, useKeyedAsyncAction } from '@/composables/useAsyncAction'
 import { getAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement } from '@/api'
 import '@/assets/dashboard.css'
 import type { Announcement, AnnouncementCreate } from '@/types/api'
@@ -16,8 +19,9 @@ async function loadAnnouncements(force = false) { announcements.value = (await g
 
 const showAnnModal = ref(false)
 const editingAnn = ref<Announcement | null>(null)
-const savingAnn = ref(false)
+const { busy: savingAnn, run: runSaveAnn } = useAsyncAction({ errorPrefix: '保存公告失败' })
 const deleteTarget = ref<Announcement | null>(null)
+const { busy: deletingAnn, run: runDeleteAnn } = useAsyncAction({ errorPrefix: '删除公告失败' })
 const annForm = ref({ title: '', content: '', level: 'info' as AnnouncementCreate['level'], pinned: false })
 const LEVEL_OPTIONS: { value: NonNullable<AnnouncementCreate['level']>; label: string }[] = [
   { value: 'info', label: '普通' },
@@ -41,8 +45,7 @@ function openEditAnn(a: Announcement) {
 async function saveAnn() {
   const { title, content, level, pinned } = annForm.value
   if (!title.trim() || !content.trim()) return
-  savingAnn.value = true
-  try {
+  await runSaveAnn(async () => {
     if (editingAnn.value) {
       await updateAnnouncement(editingAnn.value.id, { title, content, level, pinned })
     } else {
@@ -50,19 +53,24 @@ async function saveAnn() {
     }
     showAnnModal.value = false
     await loadAnnouncements()
-  } finally {
-    savingAnn.value = false
-  }
+  })
 }
+// 置顶切换：per-id 在途守卫，防止连点同一条产生重复请求/状态翻转竞态
+const { run: runPin, isBusy: isPinning } = useKeyedAsyncAction({ errorPrefix: '置顶操作失败' })
 async function togglePin(a: Announcement) {
-  await updateAnnouncement(a.id, { pinned: !a.pinned })
-  await loadAnnouncements()
+  await runPin(a.id, async () => {
+    await updateAnnouncement(a.id, { pinned: !a.pinned })
+    await loadAnnouncements()
+  })
 }
 async function confirmDeleteAnn() {
   if (!deleteTarget.value) return
-  await deleteAnnouncement(deleteTarget.value.id)
-  deleteTarget.value = null
-  await loadAnnouncements()
+  const id = deleteTarget.value.id
+  await runDeleteAnn(async () => {
+    await deleteAnnouncement(id)
+    deleteTarget.value = null
+    await loadAnnouncements()
+  })
 }
 
 function fmtTime(iso: string): string {
@@ -79,7 +87,7 @@ loadAnnouncements()
   <div class="dashboard">
     <div class="ann-panel card">
       <div v-if="auth.hasPerm('doc_edit')" class="ann-toolbar">
-        <button class="icon-btn" title="刷新" @click="loadAnnouncements(true)"><Icon name="refresh" :size="14" /></button>
+        <RefreshButton @click="loadAnnouncements(true)" />
         <button class="btn btn-primary btn-sm" @click="openCreateAnn">
           <Icon name="plus" :size="14" /> 新建公告
         </button>
@@ -94,7 +102,7 @@ loadAnnouncements()
           <span class="ann-time">{{ fmtTime(a.createdAt) }}</span>
           <template v-if="auth.hasPerm('doc_edit')">
             <button class="ann-action" title="编辑" @click="openEditAnn(a)"><Icon name="edit" :size="14" /></button>
-            <button class="ann-action" :title="a.pinned ? '取消置顶' : '置顶'" @click="togglePin(a)">
+            <button class="ann-action" :title="a.pinned ? '取消置顶' : '置顶'" :disabled="isPinning(a.id)" @click="togglePin(a)">
               <Icon :name="a.pinned ? 'pin-off' : 'pin'" :size="14" />
             </button>
             <button class="ann-action danger" title="删除" @click="deleteTarget = a"><Icon name="trash-2" :size="14" /></button>
@@ -103,7 +111,7 @@ loadAnnouncements()
         <div class="ann-content">{{ a.content }}</div>
       </div>
     </div>
-    <div v-else class="empty-hint">暂无系统公告</div>
+    <EmptyState v-else />
     </div>
 
     <AppModal :show="showAnnModal" :title="editingAnn ? '编辑公告' : '新建公告'" wide @close="showAnnModal = false">
@@ -153,6 +161,7 @@ loadAnnouncements()
       :message="deleteTarget ? `确认删除公告「${deleteTarget.title}」？该操作不可恢复。` : ''"
       confirm-text="删除"
       danger
+      :loading="deletingAnn"
       @close="deleteTarget = null"
       @confirm="confirmDeleteAnn"
     />

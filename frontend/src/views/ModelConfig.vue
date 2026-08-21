@@ -7,6 +7,7 @@ import CustomSelect from '@/components/ui/CustomSelect.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { useToastStore } from '@/stores/toast'
 import { useAuthStore } from '@/stores/auth'
+import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useModelConfig, DEFAULT_MODEL_PREFS, MODEL_OPTIONS, VOICE_OPTIONS } from '@/composables/useModelConfig'
 import { useTtsPreview } from '@/composables/useTtsPreview'
 import { getSystemStatus } from '@/api'
@@ -105,6 +106,8 @@ function sliderFill(val: number, min = 0, max = 1) {
 
 // 保存成功时间（底部操作栏回显，给用户明确落定感）
 const savedAt = ref('')
+// 保存中守卫：防止连点「保存配置」产生重复请求
+const { busy: savingAll, run: runSaveAll } = useAsyncAction()
 
 // 从服务端加载已保存配置，填充表单（单一真值在服务端）
 onMounted(async () => {
@@ -145,14 +148,16 @@ function saveAll() {
     ttsVoiceType: Number(ttsVoiceType.value) || 1002,
     enterToSend: enterToSend.value,
   }
-  save(modelName.value || null, modelPrefs, ttsEnabled.value)
-    .then(() => {
+  void runSaveAll(
+    async () => {
+      await save(modelName.value || null, modelPrefs, ttsEnabled.value)
       // 同步用户快照，Chat 的朗读按钮随 ttsEnabled 即时生效
       void auth.fetchMe()
       savedAt.value = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
       toast.success('配置已保存')
-    })
-    .catch((e: unknown) => toast.error(e instanceof Error ? e.message : '保存失败，请重试'))
+    },
+    { onError: (e) => toast.error(e instanceof Error ? e.message : '保存失败，请重试') },
+  )
 }
 
 function resetDefaults() {
@@ -426,7 +431,7 @@ function resetDefaults() {
       <div class="cfg-actions-inner">
         <span v-if="savedAt" class="save-note"><Icon name="check" :size="13" /> 已于 {{ savedAt }} 保存</span>
         <button class="btn btn-outline" @click="resetDefaults">恢复默认</button>
-        <button class="btn btn-primary" @click="saveAll">保存配置</button>
+        <button class="btn btn-primary" :disabled="savingAll" @click="saveAll">{{ savingAll ? '保存中…' : '保存配置' }}</button>
       </div>
     </section>
   </div>
@@ -580,7 +585,7 @@ function resetDefaults() {
 .switch {
   position: relative;
   width: 36px; height: 20px;
-  border-radius: 10px;
+  border-radius: var(--radius-pill);
   border: none;
   background: var(--border);
   cursor: pointer;

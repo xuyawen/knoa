@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import Icon from '@/components/ui/Icon.vue'
 import DataTable from '@/components/ui/DataTable.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { getDocStats } from '@/api'
 import '@/assets/dashboard.css'
 import type { DocStats } from '@/types/api'
@@ -113,7 +114,6 @@ onMounted(() => {
             <template v-else-if="col.key === 'count'">{{ row.count }}</template>
             <template v-else-if="col.key === 'ratio'">{{ docStatsTotal ? ((row.count / docStatsTotal) * 100).toFixed(1) + '%' : '—' }}</template>
           </template>
-          <template #empty>暂无数据</template>
         </DataTable>
       </div>
       <div class="chart-panel card">
@@ -127,7 +127,7 @@ onMounted(() => {
             <span class="mini-bar-date">{{ p.date }}</span>
           </div>
         </div>
-        <div v-else class="empty-hint">暂无数据</div>
+        <EmptyState v-else />
       </div>
     </div>
     
@@ -144,7 +144,7 @@ onMounted(() => {
             <span class="cat-bar-val">{{ b.value.toLocaleString() }}</span>
             <span class="cat-bar-pct">{{ b.pct }}%</span>
           </div>
-          <div v-if="!typeBarData.length" class="empty-hint">暂无数据</div>
+          <EmptyState v-if="!typeBarData.length" />
         </div>
       </div>
       <div class="ops-section card">
@@ -156,7 +156,7 @@ onMounted(() => {
             <span class="cat-bar-val">{{ b.value.toLocaleString() }}</span>
             <span class="cat-bar-pct">{{ b.pct }}%</span>
           </div>
-          <div v-if="!docStatsBarData.length" class="empty-hint">暂无数据</div>
+          <EmptyState v-if="!docStatsBarData.length" />
         </div>
       </div>
     </div>
@@ -173,7 +173,6 @@ onMounted(() => {
             <span class="score-pill" :class="row.healthScore >= 0.7 ? 'ok' : 'bad'">{{ Math.round(row.healthScore * 100) }}%</span>
           </template>
         </template>
-        <template #empty>暂无数据</template>
       </DataTable>
     </div>
   </div>

@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { getHotAsk, getKnowledgeGaps } from '@/api'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import '@/assets/dashboard.css'
 import type { HotQueryItem } from '@/types/api'
 
@@ -37,7 +38,7 @@ onMounted(() => {
           <span class="trend-count">{{ t.count }}</span>
         </div>
       </div>
-      <div v-else class="empty-hint">暂无热门搜索数据</div>
+      <EmptyState v-else />
     </div>
 
     <div class="charts-row docs-row">
@@ -50,7 +51,7 @@ onMounted(() => {
             <span class="trend-count">{{ t.count }}</span>
           </div>
         </div>
-        <div v-else class="empty-hint">近 30 天暂无问答记录</div>
+        <EmptyState v-else />
       </div>
 
       <div class="chart-panel card">
@@ -62,7 +63,7 @@ onMounted(() => {
             <span class="trend-count">{{ t.count }}</span>
           </div>
         </div>
-        <div v-else class="empty-hint">近 30 天暂无知识缺口</div>
+        <EmptyState v-else />
       </div>
     </div>
   </div>

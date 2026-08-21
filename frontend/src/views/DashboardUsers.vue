@@ -3,6 +3,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import DataTable from '@/components/ui/DataTable.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { getUserStats, getTrend } from '@/api'
 import { useTrendChart } from '@/composables/useTrendChart'
 import '@/assets/dashboard.css'
@@ -91,7 +92,7 @@ watch(trendRange, (r) => { void loadTrend(r) })
             <span class="cat-bar-val">{{ b.value.toLocaleString() }}</span>
             <span class="cat-bar-pct">{{ b.pct }}%</span>
           </div>
-          <div v-if="!roleBarData.length" class="empty-hint">{{ totalUsers === null ? '无权限查看' : '暂无数据' }}</div>
+          <EmptyState v-if="!roleBarData.length" />
         </div>
       </div>
       <div class="ops-section card">
@@ -104,7 +105,6 @@ watch(trendRange, (r) => { void loadTrend(r) })
             <template v-else-if="col.key === 'count'">{{ row.count }}</template>
             <template v-else-if="col.key === 'ratio'">{{ userStatusTotal ? ((row.count / userStatusTotal) * 100).toFixed(1) + '%' : '—' }}</template>
           </template>
-          <template #empty>{{ totalUsers === null ? '无权限查看' : '暂无数据' }}</template>
         </DataTable>
       </div>
     </div>
@@ -144,7 +144,7 @@ watch(trendRange, (r) => { void loadTrend(r) })
             <span class="mini-bar-date">{{ p.date }}</span>
           </div>
         </div>
-        <div v-else class="empty-hint">{{ totalUsers === null ? '无权限查看' : '暂无数据' }}</div>
+        <EmptyState v-else />
       </div>
     </div>
 

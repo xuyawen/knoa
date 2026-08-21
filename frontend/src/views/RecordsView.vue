@@ -5,6 +5,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import RefreshButton from '@/components/ui/RefreshButton.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import { useToastStore } from '@/stores/toast'
@@ -101,9 +103,7 @@ onMounted(loadRecords)
         <div class="records-title-row">
           <h2 class="records-title">检索记录</h2>
           <span class="records-count">{{ total }} 条提问</span>
-          <button type="button" class="icon-btn" title="刷新" :disabled="recordsLoading" @click="loadRecords(true)">
-            <Icon name="refresh" :size="15" :class="{ spin: recordsLoading }" />
-          </button>
+          <RefreshButton :loading="recordsLoading" @click="loadRecords(true)" />
         </div>
         <div class="records-filters">
           <button
@@ -120,11 +120,7 @@ onMounted(loadRecords)
         <span class="dot" /><span class="dot" /><span class="dot" />
       </div>
 
-      <div v-else-if="!records.length" class="records-empty">
-        <Icon name="search" :size="32" />
-        <p>暂无检索记录</p>
-        <p class="records-empty-hint">去「对话」里问几个问题，这里就会展示每次检索的详情</p>
-      </div>
+      <EmptyState v-else-if="!records.length" />
 
       <template v-else>
         <div class="records-list">
@@ -244,25 +240,12 @@ onMounted(loadRecords)
 .records-title-row { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
 .records-title { font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0; }
 .records-count { font-size: 13px; color: var(--text-tertiary); }
-.records-title-row .icon-btn { margin-left: auto; align-self: center; }
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: background var(--dur-fast), color var(--dur-fast);
-}
-.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-.icon-btn:disabled { opacity: 0.5; cursor: default; }
+.records-title-row .refresh-btn { margin-left: auto; align-self: center; }
 .records-filters { display: flex; gap: 6px; }
 .records-filters .seg-btn {
   padding: 5px 14px;
   font-size: 12.5px;
-  border-radius: 20px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-secondary);
@@ -311,7 +294,7 @@ onMounted(loadRecords)
 .record-card-meta { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .record-sources-badges { display: flex; gap: 4px; }
 .src-badge {
-  padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; line-height: 1.6;
+  padding: 2px 8px; border-radius: var(--radius-md); font-size: 11px; font-weight: 600; line-height: 1.6;
 }
 .src-badge.kb { background: #eef7ff; color: #0958d9; }
 .src-badge.web { background: #f0fdf4; color: #15803d; }
