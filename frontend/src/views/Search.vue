@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // 智能搜索主页：搜索框 + 筛选条 + 文档结果列表（带关键词高亮）。
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import Icon from '@/components/ui/Icon.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import { useToastStore } from '@/stores/toast'
@@ -10,6 +11,7 @@ import { errMsg } from '@/utils/errmsg'
 import { searchDocs, getDocumentById } from '@/api'
 import type { SearchDocItem, Paginated, DocumentDetail } from '@/types/api'
 import { useSearchHistory } from '@/composables/useSearchHistory'
+import { useDebouncedWatch } from '@/composables/useDebouncedWatch'
 
 const route = useRoute()
 const toast = useToastStore()
@@ -57,8 +59,42 @@ onMounted(() => {
   const q = (route.query.q as string) || ''
   if (q) {
     query.value = q
+    cancelSearchDebounce() // 赋值会触发防抖 watcher，撤销它避免 300ms 后重复检索
     void runSearch()
   }
+})
+
+// 输入即搜索：停顿 400ms 才发起（混合检索较重，比标准防抖略长）。
+// 停顿瞬间恰有检索在途时记下意图，待其结束自动补搜，避免结果落后于输入。
+let searchAgain = false
+const { cancel: cancelSearchDebounce } = useDebouncedWatch(
+  query,
+  () => {
+    if (loading.value) {
+      searchAgain = true
+      return
+    }
+    void runSearch()
+  },
+  400,
+)
+watch(loading, (v) => {
+  if (!v && searchAgain) {
+    searchAgain = false
+    void runSearch()
+  }
+})
+
+// 回车：立即检索，并撤销待发的防抖搜索
+function submitSearch() {
+  cancelSearchDebounce()
+  searchAgain = false
+  void runSearch()
+}
+
+// 筛选条件变化：对已提交关键词立即重搜（与「输入即搜索」交互一致）
+watch([filterType, filterScope, filterStatus, filterTime], () => {
+  if (submitted.value) void runSearch()
 })
 
 // ── 执行搜索 ──
@@ -164,7 +200,7 @@ function closePreview() {
 
 <template>
   <div class="search-page">
-    <!-- 搜索栏（搜索框+按钮一行，筛选条件下一行） -->
+    <!-- 搜索栏（搜索框一行，筛选条件下一行；输入即搜索，回车立即检索） -->
     <div class="search-bar card">
       <div class="search-input-row">
         <div class="search-input-wrap">
@@ -174,26 +210,19 @@ function closePreview() {
             type="text"
             placeholder="企业数据安全管理规范"
             class="sb-input"
-            @keydown.enter="runSearch()"
+            @keydown.enter="submitSearch"
           />
           <button v-if="query" class="sb-clear" @click="clearSearch">
             <Icon name="close" :size="13" />
           </button>
         </div>
-        <button
-          class="btn btn-primary btn-sm"
-          :disabled="loading"
-          @click="runSearch()"
-        >
-          {{ loading ? '检索中…' : '搜索' }}
-        </button>
       </div>
       <div class="filter-row">
         <CustomSelect v-model="filterType" :options="typeOpts" placeholder="文件类型" width="110px" />
         <CustomSelect v-model="filterScope" :options="scopeOpts" placeholder="权限范围" width="120px" />
         <CustomSelect v-model="filterStatus" :options="statusOpts" placeholder="文档状态" width="110px" />
         <CustomSelect v-model="filterTime" :options="timeOpts" placeholder="更新时间" width="110px" />
-        <button class="btn btn-ghost btn-sm" @click="resetFilters">清空</button>
+        <button class="btn btn-ghost btn-sm" @click="resetFilters">重置</button>
       </div>
     </div>
 
@@ -241,7 +270,7 @@ function closePreview() {
         </div>
       </div>
 
-      <div v-else-if="results" class="empty-hint">未找到与「{{ submitted }}」相关的文档</div>
+      <EmptyState v-else-if="results" />
     </div>
 
     <!-- 未搜索时的欢迎态 -->
@@ -381,7 +410,7 @@ function closePreview() {
 .doc-card:last-child { border-bottom: none; padding-bottom: 0; }
 .doc-icon {
   width: 44px; height: 44px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
   background: var(--bg-subtle);
@@ -462,7 +491,9 @@ function closePreview() {
   gap: 10px;
   min-height: 300px;
 }
-.welcome-icon { color: var(--brand-soft); }
+/* 亮色用品牌蓝加深；暗色下品牌蓝叠透明度会发暗，改用固定浅蓝保证可见性 */
+.welcome-icon { color: var(--brand); opacity: 0.45; }
+[data-theme='dark'] .welcome-icon { color: #60A5FA; opacity: 0.8; }
 .welcome-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .welcome-desc { font-size: 13px; color: var(--text-secondary); }
 </style>
