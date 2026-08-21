@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 
@@ -21,7 +22,8 @@ from app.core.security import (
 from app.core.rbac import Perm
 from app.core.ratelimit import rate_limit
 from app.core.store.redis_store import RedisStore
-from app.config import settings
+from app.core.rag.parsers import UnsupportedFormatError, parse_document
+from app.config import model_supports_vision, settings
 from app.db import User
 from app.database import AsyncSessionLocal
 from app.deps import get_embedder, get_llm, get_redis, get_es
@@ -50,12 +52,33 @@ async def ask(
         req.knowledge_base, req.question[:80], len(req.files),
         extra={"request_id": rid},
     )
-    # 多模态能力：当前模型仅确认支持 image。不支持的模态（audio/video）不拦截——
-    # 仍作为附件入库/回显（用户记录留痕），但 agent 构造 LLM 消息时只会把 image
-    # 拼成 image_url block，audio/video 不被喂给模型（避免无谓报错）。
-    unsupported = [f.kind for f in req.files if not settings.MODEL_CAPABILITIES.get(f.kind, False)]
-    if unsupported:
-        logger.info("chat attachments with unsupported modality (stored, not sent to model): %s", unsupported)
+    # 附件按模型能力分流（前端已做同款 gating，此处为兜底，保证任何模型都不报错）：
+    # - image：仅视觉模型保留（拼 image_url）；文本模型（如 DeepSeek）静默丢弃；
+    # - document：解析提取文本注入上下文，全模型可用；解析失败静默跳过；
+    # - audio/video：无模型/管道支持，前端已移除，后端静默忽略。
+    vision = model_supports_vision(req.model or user.preferred_model)
+    processed_files: list[dict] = []
+    for f in req.files:
+        if f.kind == "image":
+            if vision:
+                processed_files.append(f.model_dump(by_alias=False))
+        elif f.kind == "document" and f.data_b64:
+            try:
+                raw = base64.b64decode(f.data_b64)
+                parsed = parse_document(f.name or "document", raw)
+                processed_files.append({
+                    "kind": "document",
+                    "name": f.name,
+                    "text": parsed.text[: settings.CHAT_DOC_MAX_CHARS],
+                })
+            except (UnsupportedFormatError, ValueError) as e:
+                logger.info("chat document parse skipped: %s", e)
+    if len(processed_files) != len(req.files):
+        logger.info(
+            "ask attachments filtered vision=%s kept=%d/%d",
+            vision, len(processed_files), len(req.files),
+            extra={"request_id": rid},
+        )
 
     # 库级权限：问答目标 KB 必须对该用户可见。
     # 用一次性 DB 会话完成（流式开始前），不占用流式生成器的会话生命周期 ——
@@ -140,7 +163,7 @@ async def ask(
                 question=req.question,
                 kb_id=req.knowledge_base,
                 session_id=req.session_id,
-                files=[f.model_dump(by_alias=False) for f in req.files] or None,
+                files=processed_files or None,
                 model=req.model or user.preferred_model,
                 temperature=req.temperature,
                 top_p=req.top_p,

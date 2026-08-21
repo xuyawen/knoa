@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import model_supports_vision, settings
 from app.core.security import get_current_user
 from app.db import User
 from app.deps import get_db
@@ -37,6 +37,8 @@ class SettingsOut(BaseModel):
     preferredModel: str | None = None
     ttsEnabled: bool = False
     modelPrefs: dict = {}
+    # 有效模型（preferredModel 或系统默认）是否支持读图；前端据此 gating 图片上传
+    chatVision: bool = False
 
 
 class SettingsUpdate(BaseModel):
@@ -70,6 +72,7 @@ async def get_settings(user: User = Depends(get_current_user)):
         preferredModel=user.preferred_model,
         ttsEnabled=bool(user.tts_enabled),
         modelPrefs=merged,
+        chatVision=model_supports_vision(user.preferred_model),
     )
 
 
@@ -123,4 +126,5 @@ async def update_settings(
         preferredModel=user.preferred_model,
         ttsEnabled=bool(user.tts_enabled),
         modelPrefs=merged,
+        chatVision=model_supports_vision(user.preferred_model),
     )

@@ -11,14 +11,20 @@ MAX_FILES_PER_ASK = 5
 
 
 class ChatFile(CamelModel):
-    """多模态输入文件（一期仅 image；audio/video 由 MODEL_CAPABILITIES 开关控制）。
+    """对话附件。
+
+    kind 语义：
+      - image：需模型视觉能力（MODEL_VISION），由 ask 路由按有效模型 gating；
+      - document：md/txt/docx/pdf，后端提取文本注入上下文，全模型可用（不依赖视觉）；
+      - audio/video：当前无模型/管道支持，前端已移除，后端静默忽略。
 
     两种传图方式（互斥，优先 url）：
       - url：前端已直传 OSS，传可访问地址；后端直接拼 image_url 给大模型（不发大 base64）
-      - data_b64：纯 base64（不含 `data:<mime>;base64,` 前缀），后端拼回 data URI
+      - data_b64：纯 base64（不含 `data:<mime>;base64,` 前缀），后端拼回 data URI；
+        document 类型固定走 data_b64（后端解析提取文本）。
     """
 
-    kind: Literal["image", "audio", "video"]
+    kind: Literal["image", "audio", "video", "document"]
     mime_type: str
     url: str | None = None                 # OSS 直传后的可访问地址
     data_b64: str | None = Field(default=None, max_length=MAX_FILE_B64_LEN)

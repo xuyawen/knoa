@@ -18,10 +18,17 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "deepseek-chat"
     LLM_TEMPERATURE: float = 0.3
     LLM_MAX_TOKENS: int = 2000
-    # 模型多模态能力开关（一期只开 image；audio/video 预留，
-    # 切换不支持的模型时在 ask 路由层给清晰中文报错）。
-    # Agnes agnes-2.0-flash 当前仅支持图片输入（image_url + base64 data URI）。
-    MODEL_CAPABILITIES: dict = {"image": True, "audio": False, "video": False}
+    # 各模型视觉(读图)能力表：键为模型名，值=是否支持 image_url 输入。
+    # 未列出的模型默认不读图（fail-close），避免把图喂给文本模型（如 DeepSeek）导致 400。
+    # 文档类附件不依赖此表（提取文本注入上下文，全模型可用）。
+    MODEL_VISION: dict = {
+        "agnes-2.0-flash": True,
+        "agnes-2.0-pro": True,
+        "gpt-4o": True,
+        "deepseek-chat": False,
+    }
+    # 对话内单个文档附件注入上下文的字符上限（防超长 prompt）
+    CHAT_DOC_MAX_CHARS: int = 6000
     # 联网搜索（web_search 工具）：优先 BoCha（中文检索更准），其次 Tavily，
     # 二者均留空则走无 key 的 DuckDuckGo HTML 兜底
     BOCHA_API_KEY: str = ""
@@ -210,3 +217,12 @@ def validate_production_settings() -> None:
 
 
 settings = Settings()
+
+
+def model_supports_vision(model: str | None) -> bool:
+    """解析有效模型（空/None=系统默认 LLM_MODEL）并查视觉能力表。
+
+    未列出的模型默认不读图（fail-close），与 MODEL_VISION 注释一致。
+    """
+    name = (model or settings.LLM_MODEL).strip()
+    return bool(settings.MODEL_VISION.get(name, False))

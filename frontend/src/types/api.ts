@@ -200,7 +200,7 @@ export interface ThinkingStep {
 }
 
 export interface ChatAttachment {
-  kind: 'image' | 'audio' | 'video'
+  kind: 'image' | 'audio' | 'video' | 'document'
   mimeType: string
   dataB64?: string              // 纯 base64（无 `data:` 前缀）；旧流程发送与历史回显用
   url?: string                  // OSS 直传后的可访问地址；优先于 dataB64 发送给大模型
@@ -209,7 +209,7 @@ export interface ChatAttachment {
 
 /** 兼容历史数据：早期后端曾在 DB 存 snake_case(mime_type/data_b64)。 */
 export interface RawAttachment {
-  kind?: 'image' | 'audio' | 'video'
+  kind?: 'image' | 'audio' | 'video' | 'document'
   mimeType?: string
   mime_type?: string
   dataB64?: string
@@ -603,6 +603,7 @@ export interface Settings {
   preferredModel: string | null        // 偏好问答模型；null=使用系统默认
   ttsEnabled: boolean                   // 是否启用语音播报
   modelPrefs: Record<string, unknown>  // 模型配置偏好（温度/TopP/最大长度/TopK/联网/来源数/provider/人设/思考/简洁）
+  chatVision?: boolean                  // 有效模型是否支持读图；前端据此 gating 图片上传
 }
 
 export interface SettingsUpdate {

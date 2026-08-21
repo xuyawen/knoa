@@ -243,13 +243,22 @@ function attachSrc(a: { mimeType?: string; dataB64?: string }): string {
   return `data:${a.mimeType};base64,${a.dataB64}`
 }
 
-/** 由 MIME 推断附件种类，决定缩略图/播放器渲染。 */
-function kindOf(file: File): 'image' | 'audio' | 'video' | null {
+/** 对话附件支持的文档扩展名（提取文本注入上下文，全模型可用）。 */
+const DOC_EXTS = ['md', 'txt', 'docx', 'pdf']
+
+/** 由 MIME/扩展名推断附件种类：图片（需视觉模型）或文档（全模型）。音视频已移除。 */
+function kindOf(file: File): 'image' | 'document' | null {
   if (file.type.startsWith('image/')) return 'image'
-  if (file.type.startsWith('audio/')) return 'audio'
-  if (file.type.startsWith('video/')) return 'video'
+  const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : ''
+  if (DOC_EXTS.includes(ext)) return 'document'
   return null
 }
+
+// 有效模型是否读图：决定 accept 是否包含 image/*（文本模型仅允许文档）
+const chatVision = computed(() => state.chatVision)
+const acceptAttr = computed(() =>
+  chatVision.value ? 'image/*,.md,.txt,.docx,.pdf' : '.md,.txt,.docx,.pdf',
+)
 
 /** 复制 AI 回答到剪贴板。 */
 async function copyAnswer(m: ChatMessage) {
@@ -589,24 +598,37 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-/* ---------- 附件（多模态：图片 / 音频 / 视频） ---------- */
+/* ---------- 附件（图片需视觉模型 / 文档全模型；音视频已移除） ---------- */
+const MAX_ATTACH_BYTES = 20 * 1024 * 1024
 async function onAttach(e: Event) {
   const input = e.target as HTMLInputElement
   const files = Array.from(input.files || [])
   for (const f of files) {
     const kind = kindOf(f)
-    if (!kind) continue
+    if (!kind) { toast.error(`不支持的文件类型：${f.name}`); continue }
+    if (f.size > MAX_ATTACH_BYTES) { toast.error(`文件过大（≤20MB）：${f.name}`); continue }
+    // 图片仅在视觉模型下允许（文本模型如 DeepSeek 不读图，前端直接拦截）
+    if (kind === 'image' && !chatVision.value) {
+      toast.info('当前模型不支持图片问答，已忽略；可切换 agnes / GPT-4o')
+      continue
+    }
     try {
-      // 优先 OSS 直传拿可访问地址；未启用则回退本地 base64
-      try {
-        const { url } = await uploadToOss(f, 'uploads/chat')
-        attached.value.push({ kind, mimeType: f.type, url, name: f.name })
-      } catch (ossErr: unknown) {
-        if (errMsg(ossErr, '').includes('OSS 未启用')) {
-          const b64 = await readFileB64(f)
-          attached.value.push({ kind, mimeType: f.type, dataB64: b64, name: f.name })
-        } else {
-          throw ossErr
+      if (kind === 'document') {
+        // 文档走 base64 交后端解析提取文本（不依赖视觉能力）
+        const b64 = await readFileB64(f)
+        attached.value.push({ kind, mimeType: f.type || 'application/octet-stream', dataB64: b64, name: f.name })
+      } else {
+        // 图片：优先 OSS 直传拿可访问地址；未启用则回退本地 base64
+        try {
+          const { url } = await uploadToOss(f, 'uploads/chat')
+          attached.value.push({ kind, mimeType: f.type, url, name: f.name })
+        } catch (ossErr: unknown) {
+          if (errMsg(ossErr, '').includes('OSS 未启用')) {
+            const b64 = await readFileB64(f)
+            attached.value.push({ kind, mimeType: f.type, dataB64: b64, name: f.name })
+          } else {
+            throw ossErr
+          }
         }
       }
     } catch {
@@ -849,6 +871,7 @@ watch(messages, () => scrollToBottom(), { deep: false })
                 <img v-if="a.kind === 'image'" :src="attachSrc(a)" class="attach-thumb" />
                 <audio v-else-if="a.kind === 'audio'" :src="attachSrc(a)" controls class="attach-media" />
                 <video v-else-if="a.kind === 'video'" :src="attachSrc(a)" controls class="attach-media" />
+                <span v-else-if="a.kind === 'document'" class="attach-badge attach-doc"><Icon name="doc" :size="12" />{{ a.name || '文档' }}</span>
                 <span v-else class="attach-badge">{{ a.kind }}</span>
               </template>
             </div>
@@ -948,6 +971,7 @@ watch(messages, () => scrollToBottom(), { deep: false })
             <img v-if="a.kind === 'image'" :src="attachSrc(a)" class="attach-thumb" />
             <audio v-else-if="a.kind === 'audio'" :src="attachSrc(a)" controls class="attach-media" />
             <video v-else-if="a.kind === 'video'" :src="attachSrc(a)" controls class="attach-media" />
+            <span v-else-if="a.kind === 'document'" class="attach-badge attach-doc"><Icon name="doc" :size="12" />{{ a.name || '文档' }}</span>
             <span v-else class="attach-badge">{{ a.kind }}</span>
             <button class="attach-x" @click="removeAttach(i)"><Icon name="close" :size="11" /></button>
           </div>
@@ -973,9 +997,9 @@ watch(messages, () => scrollToBottom(), { deep: false })
 
         <div class="composer-bar">
           <div class="composer-left">
-            <label class="composer-attach" title="附图片 / 音频 / 视频">
+            <label class="composer-attach" :title="chatVision ? '附图片 / 文档' : '附文档（当前模型不支持图片）'">
               <Icon name="attach" :size="17" />
-              <input type="file" accept="image/*,audio/*,video/*" multiple class="file-hidden" @change="onAttach" />
+              <input type="file" :accept="acceptAttr" multiple class="file-hidden" @change="onAttach" />
             </label>
             <span class="composer-count">{{ inputText.length }} / 2000</span>
           </div>
@@ -1024,7 +1048,7 @@ watch(messages, () => scrollToBottom(), { deep: false })
 <style scoped>
 .chat-page {
   display: flex;
-  height: calc(100vh - var(--topbar-h) - 48px);
+  height: calc(100vh - var(--topbar-h) - 40px);
   min-height: 520px;
   background: var(--bg-page);
 }
@@ -1542,6 +1566,8 @@ watch(messages, () => scrollToBottom(), { deep: false })
 .attach-thumb { width: 50px; height: 50px; border-radius: 9px; object-fit: cover; border: 1px solid var(--border); }
 .attach-media { width: 200px; max-width: 60vw; border-radius: 9px; border: 1px solid var(--border); }
 .attach-badge { display: inline-flex; padding: 4px 10px; border-radius: 9px; background: var(--bg-subtle); color: var(--text-secondary); font-size: 12px; }
+.attach-doc { gap: 5px; align-items: center; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-doc .icon { flex: none; }
 .attach-x {
   position: absolute;
   top: -6px; right: -6px;

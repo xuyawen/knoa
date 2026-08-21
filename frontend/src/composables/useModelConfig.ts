@@ -43,6 +43,7 @@ export const VOICE_OPTIONS = [
 const state = reactive({
   preferredModel: '' as string,
   ttsEnabled: false,
+  chatVision: false, // 有效模型是否支持读图；Chat 页据此 gating 图片上传
   prefs: { ...DEFAULT_MODEL_PREFS } as Record<string, any>,
   loaded: false,
 })
@@ -53,6 +54,7 @@ async function load(): Promise<void> {
     const s: Settings = await getSettings()
     state.preferredModel = s.preferredModel ?? ''
     state.ttsEnabled = s.ttsEnabled
+    state.chatVision = Boolean(s.chatVision)
     if (s.modelPrefs) Object.assign(state.prefs, s.modelPrefs)
     state.loaded = true
   } catch {
@@ -72,6 +74,7 @@ async function save(
   })
   state.preferredModel = saved.preferredModel ?? ''
   state.ttsEnabled = saved.ttsEnabled
+  state.chatVision = Boolean(saved.chatVision)
   if (saved.modelPrefs) Object.assign(state.prefs, saved.modelPrefs)
 }
 

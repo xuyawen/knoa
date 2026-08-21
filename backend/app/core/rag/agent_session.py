@@ -188,11 +188,13 @@ class SessionMemoryMixin:
 
     @staticmethod
     def _build_user_content(question: str, files: "list[dict] | None") -> "str | list[dict]":
-        """把文本 + 多模态文件拼成 OpenAI 多模态 content。
+        """把文本 + 附件拼成 OpenAI 多模态 content。
 
-        纯文本问题 → 返回 str;带图 → 返回 content blocks list
-        （text + image_url/data URI）。当前模型仅支持 image，故 audio/video
-        不拼进 LLM 消息（仅作为附件入库/回显），这里只处理 image。
+        纯文本问题 → 返回 str;带附件 → 返回 content blocks list。
+        - image：拼 image_url（OSS url 优先，否则 data URI）；
+        - document：ask 路由已提取文本，这里拼成 text block 注入上下文，
+          任何文本模型都能消费（不依赖视觉能力）。
+        能力 gating 在 ask 路由完成，此处只做渲染。
         """
         if not files:
             return question
@@ -213,6 +215,11 @@ class SessionMemoryMixin:
                         "type": "image_url",
                         "image_url": {"url": f"data:{f['mime_type']};base64,{f['data_b64']}"},
                     })
+            elif f.get("kind") == "document" and f.get("text"):
+                blocks.append({
+                    "type": "text",
+                    "text": f"【附件 {f.get('name') or '文档'} 的正文内容】\n{f['text']}",
+                })
         return blocks if blocks else question
 
     async def _get_or_create_session(self, session_id: str | None, question: str) -> ChatSession:
