@@ -603,7 +603,7 @@ export interface Settings {
   preferredModel: string | null        // 偏好问答模型；null=使用系统默认
   ttsEnabled: boolean                   // 是否启用语音播报
   modelPrefs: Record<string, unknown>  // 模型配置偏好（温度/TopP/最大长度/TopK/联网/来源数/provider/人设/思考/简洁）
-  chatVision?: boolean                  // 有效模型是否支持读图；前端据此 gating 图片上传
+  chatVision?: boolean                  // 视觉问答是否可用（后端百炼端点已配置）；带图提问自动路由视觉模型
 }
 
 export interface SettingsUpdate {

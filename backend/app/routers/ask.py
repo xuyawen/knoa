@@ -50,12 +50,13 @@ async def ask(
         req.knowledge_base, req.question[:80], len(req.files),
         extra={"request_id": rid},
     )
-    # 附件按模型能力分流（前端已做同款 gating，此处为兜底，保证任何模型都不报错）：
-    # - image：仅视觉模型且百炼端点可用时保留（拼 image_url）；否则静默丢弃；
+    # 附件分流（前端已做同款 gating，此处为兜底，保证任何模型都不报错）：
+    # - image：视觉端点可用即保留（所选模型不读图时自动路由视觉模型）；否则静默丢弃；
     # - document：解析提取文本注入上下文，全模型可用；解析失败静默跳过；
     # - audio/video：无模型/管道支持，前端已移除，后端静默忽略。
     requested_model = req.model or user.preferred_model
-    vision = model_supports_vision(requested_model) and vision_llm_available()
+    has_image = any(f.kind == "image" for f in req.files)
+    vision = vision_llm_available() and (model_supports_vision(requested_model) or has_image)
     processed_files: list[dict] = []
     for f in req.files:
         if f.kind == "image":
@@ -151,8 +152,10 @@ async def ask(
                     scope_ctx=scope_ctx,
                 )
             # 按目标模型路由 provider：视觉模型走百炼端点，其余走主 LLM；
-            # 视觉端点未配置时自动降级系统默认模型（resolve_llm 内部处理）
-            llm_provider, effective_model = resolve_llm(requested_model)
+            # 带图片附件时自动路由视觉模型；视觉端点未配置时自动降级系统默认模型
+            llm_provider, effective_model = resolve_llm(
+                requested_model, force_vision=has_image and vision,
+            )
             pipeline = RAGPipeline(
                 retriever, llm_provider, redis, gen_db,
                 user_id=str(user.id),

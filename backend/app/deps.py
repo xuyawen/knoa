@@ -71,17 +71,18 @@ def get_vision_llm() -> "OpenAICompatProvider | None":
 _MAIN_LLM_MODELS = {"deepseek-chat"}
 
 
-def resolve_llm(model: "str | None") -> tuple[OpenAICompatProvider, "str | None"]:
+def resolve_llm(model: "str | None", force_vision: bool = False) -> tuple[OpenAICompatProvider, "str | None"]:
     """按目标模型选 provider：视觉模型走百炼端点，其余走主 LLM（DeepSeek）。
 
-    返回 (provider, effective_model)。视觉模型但百炼未配置、或模型名
+    返回 (provider, effective_model)。force_vision=True（带图片附件）时
+    强制路由视觉模型，与所选文本模型解耦。视觉模型但百炼未配置、或模型名
     已下线/未知时，降级为系统默认模型，避免把调不通的模型名打到
     错误端点报 404。
     """
-    if model_supports_vision(model):
+    if model_supports_vision(model) or force_vision:
         vision = get_vision_llm()
         if vision is not None:
-            return vision, model
+            return vision, (model if model_supports_vision(model) else None)
         return get_llm(), None
     name = (model or "").strip()
     if name and name != settings.LLM_MODEL and name not in _MAIN_LLM_MODELS:

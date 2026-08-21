@@ -42,13 +42,15 @@ export const VOICE_OPTIONS = [
 const state = reactive({
   preferredModel: '' as string,
   ttsEnabled: false,
-  chatVision: false, // 有效模型是否支持读图；Chat 页据此 gating 图片上传
+  chatVision: false, // 视觉问答是否可用（后端端点已配置）；Chat 页据此 gating 图片上传
   prefs: { ...DEFAULT_MODEL_PREFS } as Record<string, any>,
   loaded: false,
 })
 
 async function load(): Promise<void> {
-  if (state.loaded) return
+  // 不做 loaded 短路：页面每次挂载都重新对齐服务端真值，
+  // 避免后端配置变更/单次请求失败后单例缓存旧值（如 chatVision 停留在 false）；
+  // 重复调用开销由 getSettings 的 60s TTL + in-flight 去重兜底
   try {
     const s: Settings = await getSettings()
     // 归一化历史遗留偏好：已下线的模型（agnes/gpt-4o）回落系统默认，

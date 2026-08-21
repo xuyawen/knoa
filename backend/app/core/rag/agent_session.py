@@ -201,6 +201,16 @@ class SessionMemoryMixin:
         blocks: list[dict] = []
         if question.strip():
             blocks.append({"type": "text", "text": question})
+        # 附件相关性引导：附件之间、附件与问题之间可能互不相关，
+        # 要求模型自行筛选，避免小模型被无关附件带偏、强行关联
+        blocks.append({
+            "type": "text",
+            "text": (
+                "【附件使用约定】以下附件仅供参考，可能包含与问题无关的内容。"
+                "先判断每个附件与问题的相关性：只使用相关附件作答；"
+                "无关附件直接忽略，不要强行关联、不要编造两者之间的关系。"
+            ),
+        })
         for f in files:
             if f.get("kind") == "image":
                 # OSS 直传优先用 url（大模型直接拉取，省去大 base64 往返）；

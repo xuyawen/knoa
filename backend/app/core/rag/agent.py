@@ -109,6 +109,7 @@ class _AgentState:
         # snippet，为的是 SSE/入库瘦身），生成回答时需用全文，另存这里。
         self.source_content: dict[int, str] = {}
         self.retrieval_attempted: bool = False  # 是否已执行过 KB 检索（无论有无结果）
+        self.has_image: bool = False            # 是否带图片附件（route 拦截器的纯图豁免依据）
         self.step = 0                         # 已执行的 route 步数（上限 MAX_STEPS）
         self.action = ""                      # 最近一次 route 决策的动作名
         self.route_result: ToolCallResult | None = None
@@ -540,6 +541,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
             # (纯文本 → str;带图 → list)。agent 决策(tool_call)也能看到图。
             user_content = self._build_user_content(question, files)
             st = _AgentState(question, kb_id)
+            st.has_image = any(f.get("kind") == "image" for f in (files or []))
             st.thinking_steps = pre_loop_thinking  # 合并循环前的 thinking 事件
             st.all_sources = all_sources
             st.source_content = source_content
@@ -744,6 +746,8 @@ class AgenticRAGAgent(SessionMemoryMixin):
             # ── 简化确定性规则（无嵌套、无歧义）──
             #
             # 规则1: 纯闲聊/数学/时间 且 从未检索过 → 允许直接答，结束
+            #   （带图提问同豁免：route 已亲眼看图并主动选 direct_answer，
+            #   拦截器不再强制改检索；混合意图时 route 会自行选 retrieve）
             # 规则2: 已检索过（有结果或无结果）→ 强制 _generate，绝不回路由（防死循环）
             # 规则3: 其他情况 → 强制 _retrieve，查完再说
             #
@@ -754,7 +758,7 @@ class AgenticRAGAgent(SessionMemoryMixin):
                 or bool(re.match(r'^[你好嗨嘿哈哟哇噢唉哼啊嗯哦\s\,\.\!\?\~\@\#\$\%\^\&\*\(\)]+$', st.question.strip()))
             )
 
-            if is_greeting_or_math and not st.retrieval_attempted:
+            if (is_greeting_or_math or st.has_image) and not st.retrieval_attempted:
                 # 规则1: 纯 trivial 且从未检索 → 放行，走 _n_finish 结束
                 st.candidate = result.arguments.get("content", "").strip()
                 st.next = "_n_finish"
