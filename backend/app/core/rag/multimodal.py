@@ -3,9 +3,9 @@
 把音频 / 视频 / 图片等非文本文件转成「可检索文本」，统一进 DocChunk
 （与 md/txt/docx/pdf 的纯文本走同一条摄入链路）。
 
-沙箱约束（venv 装不了第三方包、且 Agnes 仅确认支持 image）：
-- 图片：直接调多模态 LLM（Agnes image 能力）做视觉描述 + OCR，最稳、零额外依赖。
-- 音频：优先走 OpenAI 兼容的 audio.transcriptions（需 STT 服务 + key），
+沙箱约束（venv 装不了第三方包）：
+- 图片：直接调多模态 LLM（阿里云百炼 qwen3-vl）做视觉描述 + OCR，最稳、零额外依赖。
+- 音频：优先走百炼 OpenAI 兼容的 audio.transcriptions（paraformer，复用视觉端点 key），
   无服务/失败时软降级为占位说明（不阻塞主流程）。
 - 视频：需要 ffmpeg 抽帧 + ASR 转录，沙箱缺失时软降级为占位说明。
 所有降级都返回真实 ParseResult（占位文本也可被检索命中），保证上传链路不崩。
@@ -75,16 +75,17 @@ async def parse_image(filename: str, data: bytes, llm) -> ParseResult:
 
 
 async def _transcribe(filename: str, data: bytes) -> str | None:
-    """OpenAI 兼容音频转录；无 SDK / 无服务 / 失败均返回 None（交由上层降级）。"""
+    """阿里云百炼 OpenAI 兼容音频转录（paraformer）；无 key / 失败均返回 None（交由上层降级）。"""
     try:
         from openai import AsyncOpenAI
     except ImportError:
         return None
-    base_url = settings.LLM_BASE_URL
-    api_key = settings.LLM_API_KEY
+    # 复用视觉模型端点（百炼 DashScope）：主 LLM（DeepSeek）不提供转录服务
+    base_url = settings.VISION_LLM_BASE_URL
+    api_key = settings.VISION_LLM_API_KEY or settings.EMBEDDING_API_KEY
     if not (base_url and api_key):
         return None
-    model = getattr(settings, "STT_MODEL", None) or "whisper-1"
+    model = getattr(settings, "STT_MODEL", None) or "paraformer-v2"
     try:
         client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         res = await client.audio.transcriptions.create(

@@ -21,18 +21,24 @@ class Settings(BaseSettings):
     # 各模型视觉(读图)能力表：键为模型名，值=是否支持 image_url 输入。
     # 未列出的模型默认不读图（fail-close），避免把图喂给文本模型（如 DeepSeek）导致 400。
     # 文档类附件不依赖此表（提取文本注入上下文，全模型可用）。
+    # 仅保留国产模型：视觉模型走 VISION_LLM_* 端点（阿里云百炼），文本模型走 LLM_* 端点。
     MODEL_VISION: dict = {
-        "agnes-2.0-flash": True,
-        "agnes-2.0-pro": True,
-        "gpt-4o": True,
+        "qwen3-vl-flash": True,
+        "qwen3-vl-plus": True,
         "deepseek-chat": False,
     }
+    # 视觉模型专用端点（阿里云百炼 DashScope，OpenAI 兼容）。
+    # 主 LLM（DeepSeek）不支持读图，视觉模型须路由到百炼；API key 留空时
+    # 自动复用 EMBEDDING_API_KEY（同属百炼同一把 key，无需额外申请）。
+    VISION_LLM_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    VISION_LLM_API_KEY: str = ""
+    # 文档摄入图片解析（OCR+视觉描述）默认用的视觉模型
+    VISION_LLM_MODEL: str = "qwen3-vl-flash"
     # 对话内单个文档附件注入上下文的字符上限（防超长 prompt）
     CHAT_DOC_MAX_CHARS: int = 6000
-    # 联网搜索（web_search 工具）：优先 BoCha（中文检索更准），其次 Tavily，
-    # 二者均留空则走无 key 的 DuckDuckGo HTML 兜底
+    # 联网搜索（web_search 工具）：国内服务 BoCha 博查（api.bocha.cn）；
+    # 未配置 key 则联网搜索返回空结果（不降级境外服务，生产网络不可达）
     BOCHA_API_KEY: str = ""
-    TAVILY_API_KEY: str = ""
     # LangSmith (M4 启用)
     LANGSMITH_TRACING: bool = False
     LANGSMITH_API_KEY: str = ""
@@ -226,3 +232,8 @@ def model_supports_vision(model: str | None) -> bool:
     """
     name = (model or settings.LLM_MODEL).strip()
     return bool(settings.MODEL_VISION.get(name, False))
+
+
+def vision_llm_available() -> bool:
+    """视觉模型端点是否可用（百炼 key 已配置，含复用 EMBEDDING_API_KEY）。"""
+    return bool(settings.VISION_LLM_API_KEY or settings.EMBEDDING_API_KEY)

@@ -47,7 +47,7 @@ class AskRequest(CamelModel):
     top_k: int | None = None              # 知识库检索召回数量
     source_count: int | None = None       # 最终引用来源数上限
     web_search: bool | None = None        # 是否允许联网搜索
-    web_provider: str | None = None       # 联网搜索 provider：auto/bocha/tavily/ddg
+    web_provider: str | None = None       # 联网搜索 provider：auto/bocha（境外服务已下线）
     system_prompt: str | None = None      # 追加到系统 Prompt 的自定义人设指令
     concise_mode: bool | None = None      # 简洁模式：回答更精炼
 

@@ -53,23 +53,21 @@ const sourceCount = ref(Number(DEFAULT_MODEL_PREFS.sourceCount))
 const topKOptions = [3, 5, 8, 10].map(v => ({ value: v, label: `${v} 条` }))
 const sourceOptions = [3, 5, 8, 10].map(v => ({ value: v, label: `${v} 条` }))
 
-// 联网搜索 provider：auto 走后端 env 优先级降级，其余显式指定单一服务
+// 联网搜索 provider：仅国内 BoCha（境外 Tavily/DDG 已移除，生产网络不可达）
 const webProvider = ref(DEFAULT_MODEL_PREFS.webProvider as string)
 const webProviderOptions = [
-  { value: 'auto', label: '自动（按可用密钥优先级）' },
+  { value: 'auto', label: '自动（按可用密钥）' },
   { value: 'bocha', label: 'BoCha 博查（中文检索质量最佳）' },
-  { value: 'tavily', label: 'Tavily（LLM 检索专用）' },
-  { value: 'ddg', label: 'DuckDuckGo（无需密钥兜底）' },
 ]
 // 依据后端真实配置动态标注未配置密钥的服务，避免用户选了永不生效的选项
 const webProviderOpts = computed(() =>
   webProviderOptions.map((o) => {
-    if (o.value === 'auto' || o.value === 'ddg') return o
+    if (o.value === 'auto') return o
     const ok = sysStatus.value?.webProviders.includes(o.value) ?? true
     return ok ? o : { ...o, label: `${o.label}（未配置密钥）` }
   })
 )
-const PROVIDER_NAMES: Record<string, string> = { bocha: 'BoCha', tavily: 'Tavily', ddg: 'DuckDuckGo' }
+const PROVIDER_NAMES: Record<string, string> = { bocha: 'BoCha' }
 const webProviderText = computed(() =>
   (sysStatus.value?.webProviders || []).map((p) => PROVIDER_NAMES[p] || p).join(' · ')
 )

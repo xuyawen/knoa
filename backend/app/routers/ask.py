@@ -5,7 +5,6 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
-from app.core.llm.openai_compat import OpenAICompatProvider
 from app.core.rag.embeddings import EmbeddingModel
 from app.core.rag.pipeline import RAGPipeline
 from app.core.rag.es_retriever import ESRetriever
@@ -23,10 +22,10 @@ from app.core.rbac import Perm
 from app.core.ratelimit import rate_limit
 from app.core.store.redis_store import RedisStore
 from app.core.rag.parsers import UnsupportedFormatError, parse_document
-from app.config import model_supports_vision, settings
+from app.config import model_supports_vision, settings, vision_llm_available
 from app.db import User
 from app.database import AsyncSessionLocal
-from app.deps import get_embedder, get_llm, get_redis, get_es
+from app.deps import get_embedder, get_redis, get_es, resolve_llm
 from app.models.chat import AskRequest
 from app.models.operation_log import record_operation
 
@@ -39,7 +38,6 @@ async def ask(
     req: AskRequest,
     request: Request,
     embedder: EmbeddingModel = Depends(get_embedder),
-    llm: OpenAICompatProvider = Depends(get_llm),
     redis: RedisStore = Depends(get_redis),
     user: User = Depends(get_current_user),
     _: User = Depends(require_permission(Perm.AI_QA)),
@@ -53,10 +51,11 @@ async def ask(
         extra={"request_id": rid},
     )
     # 附件按模型能力分流（前端已做同款 gating，此处为兜底，保证任何模型都不报错）：
-    # - image：仅视觉模型保留（拼 image_url）；文本模型（如 DeepSeek）静默丢弃；
+    # - image：仅视觉模型且百炼端点可用时保留（拼 image_url）；否则静默丢弃；
     # - document：解析提取文本注入上下文，全模型可用；解析失败静默跳过；
     # - audio/video：无模型/管道支持，前端已移除，后端静默忽略。
-    vision = model_supports_vision(req.model or user.preferred_model)
+    requested_model = req.model or user.preferred_model
+    vision = model_supports_vision(requested_model) and vision_llm_available()
     processed_files: list[dict] = []
     for f in req.files:
         if f.kind == "image":
@@ -151,8 +150,11 @@ async def ask(
                     embedder, gen_db, settings.RRF_K, kb_ids=accessible_kb_ids,
                     scope_ctx=scope_ctx,
                 )
+            # 按目标模型路由 provider：视觉模型走百炼端点，其余走主 LLM；
+            # 视觉端点未配置时自动降级系统默认模型（resolve_llm 内部处理）
+            llm_provider, effective_model = resolve_llm(requested_model)
             pipeline = RAGPipeline(
-                retriever, llm, redis, gen_db,
+                retriever, llm_provider, redis, gen_db,
                 user_id=str(user.id),
                 embedder=embedder,
                 dept_id=str(user.department_id) if user.department_id else None,
@@ -164,7 +166,7 @@ async def ask(
                 kb_id=req.knowledge_base,
                 session_id=req.session_id,
                 files=processed_files or None,
-                model=req.model or user.preferred_model,
+                model=effective_model,
                 temperature=req.temperature,
                 top_p=req.top_p,
                 top_k=req.top_k,

@@ -624,7 +624,7 @@ export interface SystemStatus {
   esEnabled: boolean          // ES 混合检索；false = pgvector 回退
   convSummaryEnabled: boolean
   ttsAvailable: boolean       // 腾讯 TTS 密钥是否已配置
-  webProviders: string[]      // 可用联网搜索服务（含 ddg 免密钥兜底）
+  webProviders: string[]      // 可用联网搜索服务（仅国内 BoCha，未配置 key 则为空）
 }
 
 /** 语音合成结果：base64 音频 + MIME 类型，前端拼 data URI 播放。P8 新增。 */

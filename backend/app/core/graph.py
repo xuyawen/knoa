@@ -58,7 +58,7 @@ def _cosine(a: list[float], b: list[float]) -> float:
 def _extract_json(text: str):
     """从 LLM 的自由文本里抠出 JSON 对象/数组（容错）。
 
-    推理模型（如 Agnes）常把结构化输出塞进 reasoning_content，且中间可能夹带
+    推理型模型常把结构化输出塞进 reasoning_content，且中间可能夹带
     草稿 JSON，真正完整的 JSON 在末尾。故优先整体解析，失败则尝试从「最后一个」
     配平 JSON 块提取（推理模型的终版 JSON 通常在最后），再回退到首个块。
     """
@@ -239,7 +239,7 @@ class GraphStore:
         token = caller_var.set("graph_extract")
         try:
             try:
-                # 推理模型（Agnes）非流式 chat 的 content 常为空，且 reasoning 会吃掉
+                # 推理型模型非流式 chat 的 content 常为空，且 reasoning 会吃掉
                 # max_tokens 预算导致 JSON 被截断；故用流式 + 提高 token 上限，
                 # 让完整 JSON 落在 content 流里（与非流式问答同一套流式通道）。
                 raw = "".join(

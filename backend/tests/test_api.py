@@ -94,7 +94,9 @@ async def test_settings_system_status(client):
     assert data["embeddingDim"] == settings.EMBEDDING_DIM
     assert data["defaultModel"] == settings.LLM_MODEL
     assert data["graphEnabled"] == settings.GRAPH_ENABLED
-    assert isinstance(data["webProviders"], list) and "ddg" in data["webProviders"]
+    # 联网搜索仅国内 BoCha：未配置 key 则列表为空（境外服务已移除，绝不含 ddg/tavily）
+    assert isinstance(data["webProviders"], list)
+    assert set(data["webProviders"]) <= {"bocha"}
     # 信任边界：只报配置值/开关，绝不暴露密钥本身
     assert not any("KEY" in k.upper() or "SECRET" in k.upper() for k in data)
     # 未鉴权不得访问：登录会下发 HttpOnly Cookie 且 httpx 自动携带，

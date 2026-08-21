@@ -61,7 +61,7 @@ class SystemStatusOut(BaseModel):
     esEnabled: bool                 # ES 混合检索；False = pgvector 回退
     convSummaryEnabled: bool
     ttsAvailable: bool              # 腾讯 TTS 密钥是否已配置
-    webProviders: list[str]         # 可用联网搜索服务（含 ddg 免密钥兜底）
+    webProviders: list[str]         # 可用联网搜索服务（仅国内 BoCha，未配置 key 则为空）
 
 
 @router.get("/settings", response_model=SettingsOut)
@@ -80,15 +80,12 @@ async def get_settings(user: User = Depends(get_current_user)):
 async def get_system_status(_: User = Depends(get_current_user)):
     """后端运行配置概览：前端状态面板据此渲染，避免写死值与后端实际配置脱节。
 
-    联网搜索服务只报「是否配置了密钥」（auto 降级顺序与 ask 路由一致）；
-    DuckDuckGo 免密钥始终可用作兜底。
+    联网搜索服务只报「是否配置了密钥」；境外服务（Tavily/DDG）已移除，
+    未配置 BoCha key 时 webProviders 为空，前端据此提示联网搜索不可用。
     """
     providers: list[str] = []
     if settings.BOCHA_API_KEY:
         providers.append("bocha")
-    if settings.TAVILY_API_KEY:
-        providers.append("tavily")
-    providers.append("ddg")
     return SystemStatusOut(
         defaultModel=settings.LLM_MODEL,
         embeddingModel=settings.EMBEDDING_MODEL,

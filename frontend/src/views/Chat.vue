@@ -609,7 +609,7 @@ async function onAttach(e: Event) {
     if (f.size > MAX_ATTACH_BYTES) { toast.error(`文件过大（≤20MB）：${f.name}`); continue }
     // 图片仅在视觉模型下允许（文本模型如 DeepSeek 不读图，前端直接拦截）
     if (kind === 'image' && !chatVision.value) {
-      toast.info('当前模型不支持图片问答，已忽略；可切换 agnes / GPT-4o')
+      toast.info('当前模型不支持图片问答，已忽略；可切换到支持读图的模型（如 Qwen3-VL Flash）')
       continue
     }
     try {

@@ -22,13 +22,12 @@ export const DEFAULT_MODEL_PREFS: Record<string, unknown> = {
   enterToSend: true, // 对话页 Enter 发送（关闭后 Ctrl+Enter 发送）
 }
 
-// 问答模型选项（模型配置页与个人设置弹框共用）
+// 问答模型选项（模型配置页与个人设置弹框共用）——仅国产模型；
+// 视觉模型（qwen3-vl）走阿里云百炼端点，文本模型走 DeepSeek
 export const MODEL_OPTIONS = [
   { value: '', label: '系统默认' },
-  { value: 'agnes-2.0-flash', label: 'agnes-2.0-flash（快）' },
-  { value: 'agnes-2.0-pro', label: 'agnes-2.0-pro（强）' },
-  { value: 'gpt-4o', label: 'GPT-4o（OpenAI）' },
-  { value: 'deepseek-chat', label: 'DeepSeek Chat' },
+  { value: 'deepseek-chat', label: 'DeepSeek Chat（文本）' },
+  { value: 'qwen3-vl-flash', label: 'Qwen3-VL Flash（可读图）' },
 ]
 
 // 腾讯 TTS 音色选项（与后端 config 注释一致）
@@ -52,10 +51,18 @@ async function load(): Promise<void> {
   if (state.loaded) return
   try {
     const s: Settings = await getSettings()
-    state.preferredModel = s.preferredModel ?? ''
+    // 归一化历史遗留偏好：已下线的模型（agnes/gpt-4o）回落系统默认，
+    // 已下线的搜索 provider（tavily/ddg）回落 auto，避免选中永不生效的选项
+    const validModels = MODEL_OPTIONS.map(o => o.value)
+    state.preferredModel = validModels.includes(s.preferredModel ?? '') ? (s.preferredModel ?? '') : ''
     state.ttsEnabled = s.ttsEnabled
     state.chatVision = Boolean(s.chatVision)
-    if (s.modelPrefs) Object.assign(state.prefs, s.modelPrefs)
+    if (s.modelPrefs) {
+      Object.assign(state.prefs, s.modelPrefs)
+      if (!['auto', 'bocha'].includes(String(state.prefs.webProvider))) {
+        state.prefs.webProvider = 'auto'
+      }
+    }
     state.loaded = true
   } catch {
     // 加载失败不阻塞 UI，回落默认值（不打印，避免生产环境控制台噪音）

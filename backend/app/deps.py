@@ -4,7 +4,7 @@ from functools import lru_cache
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import model_supports_vision, settings, vision_llm_available
 from app.core.llm.base import LLMConfig
 from app.core.llm.openai_compat import OpenAICompatProvider
 from app.core.rag.embeddings import EmbeddingModel
@@ -47,6 +47,46 @@ def get_llm() -> OpenAICompatProvider:
         temperature=settings.LLM_TEMPERATURE,
         max_tokens=settings.LLM_MAX_TOKENS,
     ))
+
+
+@lru_cache
+def get_vision_llm() -> "OpenAICompatProvider | None":
+    """视觉模型 provider（阿里云百炼）；未配置 key 返回 None，由调用方降级。
+
+    key 留空时复用 EMBEDDING_API_KEY（同为百炼 DashScope key）。
+    """
+    if not vision_llm_available():
+        return None
+    return OpenAICompatProvider(LLMConfig(
+        base_url=settings.VISION_LLM_BASE_URL,
+        api_key=settings.VISION_LLM_API_KEY or settings.EMBEDDING_API_KEY,
+        model=settings.VISION_LLM_MODEL,
+        temperature=settings.LLM_TEMPERATURE,
+        max_tokens=settings.LLM_MAX_TOKENS,
+    ))
+
+
+# 主 LLM（DeepSeek）端点上额外可用的模型名（除 settings.LLM_MODEL 外）；
+# 不在白名单里的模型名（如已下线的 agnes/gpt-4o）一律回落系统默认，避免 404
+_MAIN_LLM_MODELS = {"deepseek-chat"}
+
+
+def resolve_llm(model: "str | None") -> tuple[OpenAICompatProvider, "str | None"]:
+    """按目标模型选 provider：视觉模型走百炼端点，其余走主 LLM（DeepSeek）。
+
+    返回 (provider, effective_model)。视觉模型但百炼未配置、或模型名
+    已下线/未知时，降级为系统默认模型，避免把调不通的模型名打到
+    错误端点报 404。
+    """
+    if model_supports_vision(model):
+        vision = get_vision_llm()
+        if vision is not None:
+            return vision, model
+        return get_llm(), None
+    name = (model or "").strip()
+    if name and name != settings.LLM_MODEL and name not in _MAIN_LLM_MODELS:
+        return get_llm(), None
+    return get_llm(), model
 
 
 @lru_cache

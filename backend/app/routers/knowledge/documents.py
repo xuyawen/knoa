@@ -35,7 +35,7 @@ from app.core.security import (
 )
 from app.core.storage import get_object_store
 from app.db import DocChunk, Document, DocumentTask, KnowledgeBase, User
-from app.deps import get_db, get_es, get_llm, get_redis
+from app.deps import get_db, get_es, get_llm, get_redis, get_vision_llm
 from app.models.common import PaginatedOut
 from app.models.knowledge import (
     DocumentDetailOut,
@@ -307,7 +307,8 @@ async def upload_document(
             raise HTTPException(status_code=415, detail=str(e)) from e
     elif ext in IMAGE_EXTS | AUDIO_EXTS | VIDEO_EXTS:
         try:
-            parsed = await parse_multimodal(filename, raw, get_llm())
+            # 图片解析优先走视觉模型（百炼）；未配置时回落主 LLM（内部软降级占位文本）
+            parsed = await parse_multimodal(filename, raw, get_vision_llm() or get_llm())
             logger.info("[upload] multimodal parse ok | ext=%s", ext)
         except UnsupportedFormatError as e:
             logger.error("[upload] multimodal parse FAILED | ext=%s | err=%s", ext, e)
