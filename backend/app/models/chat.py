@@ -32,7 +32,7 @@ class ChatFile(CamelModel):
 
 
 class AskRequest(CamelModel):
-    question: str = Field(default="", max_length=2000)
+    question: str = Field(default="", max_length=8000)
     knowledge_base: str | None = None
     session_id: str | None = None
     files: list[ChatFile] = Field(default_factory=list)

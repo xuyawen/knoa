@@ -11,6 +11,7 @@ import ChatSessionList from '@/components/chat/ChatSessionList.vue'
 import DocDetailModal from '@/components/chat/DocDetailModal.vue'
 import { useToastStore } from '@/stores/toast'
 import { errMsg } from '@/utils/errmsg'
+import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useAuthStore } from '@/stores/auth'
 import {
   getSessions,
@@ -19,6 +20,7 @@ import {
   deleteSession,
   clearSessionMessages,
   renameSession,
+  pinSession,
   deleteMessage,
   streamAsk,
   submitFeedback,
@@ -91,13 +93,24 @@ const sessionTotal = ref(0)
 
 const activeId = ref<string | null>(null)
 const deleteTargetId = ref<string | null>(null)
+const { busy: deletingSession, run: runDeleteSession } = useAsyncAction({ errorPrefix: '删除失败' })
+const { run: runPinSession } = useAsyncAction({ errorPrefix: '置顶操作失败' })
 const showClearConfirm = ref(false)
 const messages = ref<ChatMessage[]>([])
 const streaming = ref(false)
 const inputText = ref('')
 const inputRef = ref<HTMLTextAreaElement>()
-// 输入框高度自适应：初始单行，随内容增高（上限 180px 后滚动），
-// 输入框固定高度，不随内容撑高
+// 提问字数上限（与后端 AskRequest.max_length 同步）：超出计数变红、禁用发送
+const QUESTION_MAX_LEN = 8000
+/** 输入框随内容增高至最多 4 行，超出出现内部滚动条，高度不再变大 */
+const INPUT_MAX_PX = 112 // 4 行 × 22.4px + 上下 padding 22px
+function autoGrow() {
+  const el = inputRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, INPUT_MAX_PX)}px`
+}
+watch(inputText, () => nextTick(autoGrow))
 const errorMsg = ref('')
 // V4：问答失败后保留上一问题（含附件），供内联「重试」按钮复发
 const retryPayload = ref<{ text: string; attachments: ChatAttachment[] | null } | null>(null)
@@ -116,6 +129,8 @@ function toggleThinking(id: string) {
 // 组件卸载时中断进行中的问答流（TTS 清理在 useTts 内）
 onBeforeUnmount(() => {
   askAbort.value?.abort()
+  document.removeEventListener('mousedown', onHeadOutside)
+  window.removeEventListener('keydown', onHeadEsc)
 })
 
 // 文档详情弹框（展示逻辑在 DocDetailModal）
@@ -238,9 +253,9 @@ function readFileB64(file: File): Promise<string> {
   })
 }
 
-/** 多模态附件 → data URI（图片/音频/视频统一用 base64 内联播放或预览）。 */
-function attachSrc(a: { mimeType?: string; dataB64?: string }): string {
-  return `data:${a.mimeType};base64,${a.dataB64}`
+/** 多模态附件 → 展示地址：OSS 直传 url 优先；无 url 时回退 base64 内联（旧流程/历史回显）。 */
+function attachSrc(a: { url?: string; mimeType?: string; dataB64?: string }): string {
+  return a.url || `data:${a.mimeType};base64,${a.dataB64}`
 }
 
 /** 对话附件支持的文档扩展名（提取文本注入上下文，全模型可用）。 */
@@ -254,11 +269,11 @@ function kindOf(file: File): 'image' | 'document' | null {
   return null
 }
 
-// 有效模型是否读图：决定 accept 是否包含 image/*（文本模型仅允许文档）
+// accept 恒含 image/*：文件选择框在打开瞬间读取 accept，若此时 /api/settings
+// 尚未返回（chatVision 还是默认 false），图片会被系统对话框直接过滤掉；
+// 是否允许图片改由 onAttach 按 chatVision 真值判断（未配置时 toast 拦截）
 const chatVision = computed(() => state.chatVision)
-const acceptAttr = computed(() =>
-  chatVision.value ? 'image/*,.md,.txt,.docx,.pdf' : '.md,.txt,.docx,.pdf',
-)
+const acceptAttr = 'image/*,.md,.txt,.docx,.pdf'
 
 /** 复制 AI 回答到剪贴板。 */
 async function copyAnswer(m: ChatMessage) {
@@ -304,7 +319,7 @@ function toChatMessage(m: SessionMessage): ChatMessage {
     id: genId(),
     role: m.role === 'assistant' ? 'assistant' : 'user',
     content: m.content,
-    citations: m.citations || undefined,
+    citations: m.citations ?? undefined,
     sources: m.sources || undefined,
     attachments: m.attachments || null,
     thinkingSteps: m.thinkingSteps || undefined,
@@ -343,6 +358,8 @@ async function selectSession(id: string) {
   askAbort.value?.abort()
   streaming.value = false
   activeId.value = id
+  // 附件属于原会话的草稿，切换时清空，避免误发到别的会话
+  attached.value = []
   errorMsg.value = ''
   followUps.value = []
   try {
@@ -367,25 +384,77 @@ async function newChat() {
   followUps.value = []
 }
 
+// ---------- 侧边栏收起（localStorage 持久化） ----------
+const sidebarCollapsed = ref(localStorage.getItem('knoa.chatSidebar') === 'collapsed')
+function setSidebarCollapsed(v: boolean) {
+  sidebarCollapsed.value = v
+  localStorage.setItem('knoa.chatSidebar', v ? 'collapsed' : 'open')
+}
+
+/** 置顶切换：调 API 后重拉列表，保证置顶组排最前的排序生效 */
+async function onPinSession(id: string) {
+  await runPinSession(async () => {
+    await pinSession(id)
+    await loadSessions()
+  })
+}
+
+// ---------- 头部 ⋯ 菜单（低频操作：导出 / 清空对话） ----------
+const headMenuOpen = ref(false)
+const headMenuPos = ref({ top: 0, left: 0 })
+
+function openHeadMenu(e: MouseEvent) {
+  if (headMenuOpen.value) {
+    headMenuOpen.value = false
+    return
+  }
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  headMenuPos.value = { top: r.bottom + 6, left: Math.max(8, r.right - 160) }
+  headMenuOpen.value = true
+}
+function headExport() {
+  headMenuOpen.value = false
+  exportSession()
+}
+function headClear() {
+  headMenuOpen.value = false
+  showClearConfirm.value = true
+}
+function onHeadOutside(e: MouseEvent) {
+  if (!headMenuOpen.value) return
+  const t = e.target as HTMLElement
+  if (t.closest('.head-menu') || t.closest('.head-more')) return
+  headMenuOpen.value = false
+}
+function onHeadEsc(e: KeyboardEvent) {
+  if (e.key === 'Escape') headMenuOpen.value = false
+}
+
+/** 新会话插入非置顶组最前（置顶会话恒排列表最前） */
+function insertSession(s: ChatSession) {
+  const idx = sessions.value.findIndex((x) => !x.pinned)
+  if (idx === -1) sessions.value.push(s)
+  else sessions.value.splice(idx, 0, s)
+}
+
 function onDeleteSession(id: string) {
   deleteTargetId.value = id
 }
 
 async function confirmDeleteSession() {
-  if (!deleteTargetId.value) return
-  try {
-    await deleteSession(deleteTargetId.value)
-    if (activeId.value === deleteTargetId.value) {
+  const id = deleteTargetId.value
+  if (!id) return
+  await runDeleteSession(async () => {
+    await deleteSession(id)
+    if (activeId.value === id) {
       activeId.value = null
       messages.value = []
+      attached.value = []
     }
     await loadSessions()
     toast.success('会话已删除')
-  } catch (e: unknown) {
-    toast.error(`删除失败：${errMsg(e)}`)
-  } finally {
-    deleteTargetId.value = null
-  }
+  })
+  deleteTargetId.value = null
 }
 
 /* ---------- 清空对话 ---------- */
@@ -416,6 +485,10 @@ async function confirmClear() {
 async function send() {
   const text = inputText.value.trim()
   if (!text || streaming.value) return
+  if (inputText.value.length > QUESTION_MAX_LEN) {
+    toast.warning(`问题不能超过 ${QUESTION_MAX_LEN} 字`)
+    return
+  }
 
   let sid = activeId.value
   if (!sid) {
@@ -426,7 +499,7 @@ async function send() {
       sessionsData.value = cur
         ? { ...cur, items: [s, ...cur.items], total: cur.total + 1 }
         : { items: [s], total: 1, page: 1, pageSize: 20, pages: 1 }
-      sessions.value.unshift(s)
+      insertSession(s)
       activeId.value = sid
     } catch (e: unknown) {
       toast.error(`创建会话失败：${errMsg(e)}`)
@@ -519,8 +592,10 @@ async function runStream(
         typeBuf += (ev.data as { content: string }).content
         startTypewriter()
       } else if (ev.event === 'done') {
-        const d = ev.data as { messageId: string; sessionId: string }
+        const d = ev.data as { messageId: string; sessionId: string; citations?: number[] }
         aiMsg.messageId = d.messageId
+        // 模型实际引用的 [n] 编号：done 后用于收窄引用来源展示（流式期间先展示全量召回）
+        aiMsg.citations = d.citations ?? []
         if (d.sessionId) activeId.value = d.sessionId
       } else if (ev.event === 'follow_ups') {
         const d = ev.data as { questions?: string[]; sessionTitle?: string | null }
@@ -559,7 +634,7 @@ async function runStream(
       cur.msgCount = (cur.msgCount ?? 0) + 1
     } else if (sessionsData.value) {
       const fresh = sessionsData.value.items.find((x) => x.id === sid)
-      if (fresh) sessions.value.unshift(fresh)
+      if (fresh) insertSession(fresh)
     }
   }
 }
@@ -600,16 +675,22 @@ function onKeydown(e: KeyboardEvent) {
 
 /* ---------- 附件（图片需视觉模型 / 文档全模型；音视频已移除） ---------- */
 const MAX_ATTACH_BYTES = 20 * 1024 * 1024
+// 单次附件数量上限（与后端 MAX_FILES_PER_ASK 同步）：超出前端直接拦截
+const MAX_ATTACH_COUNT = 5
 async function onAttach(e: Event) {
   const input = e.target as HTMLInputElement
   const files = Array.from(input.files || [])
   for (const f of files) {
+    if (attached.value.length >= MAX_ATTACH_COUNT) {
+      toast.warning(`单次最多上传 ${MAX_ATTACH_COUNT} 个附件`)
+      break
+    }
     const kind = kindOf(f)
     if (!kind) { toast.error(`不支持的文件类型：${f.name}`); continue }
     if (f.size > MAX_ATTACH_BYTES) { toast.error(`文件过大（≤20MB）：${f.name}`); continue }
-    // 图片仅在视觉模型下允许（文本模型如 DeepSeek 不读图，前端直接拦截）
+    // 视觉端点未配置时才拦截图片（带图提问会自动路由视觉模型，与所选文本模型无关）
     if (kind === 'image' && !chatVision.value) {
-      toast.info('当前模型不支持图片问答，已忽略；可切换到支持读图的模型（如 Qwen3-VL Flash）')
+      toast.warning('视觉问答服务未配置，图片已忽略')
       continue
     }
     try {
@@ -713,10 +794,11 @@ function exportSession() {
   for (const m of messages.value) {
     if (!m.content) continue
     lines.push(m.role === 'user' ? '## 提问' : '## 回答', '', m.content, '')
-    if (m.sources?.length) {
+    const refs = citedSources(m)
+    if (refs.length) {
       lines.push(
         '**引用来源：**',
-        ...m.sources.map((s) => `- [${s.id}] ${s.title}（${s.kb || s.sourceType || 'kb'}）`),
+        ...refs.map((s) => `- [${s.id}] ${s.title}（${s.kb || s.sourceType || 'kb'}）`),
         '',
       )
     }
@@ -752,7 +834,18 @@ function prevUserOf(m: ChatMessage): ChatMessage | null {
 function showNoSourceHint(m: ChatMessage): boolean {
   if (streaming.value || m.id !== lastAiId.value || m.sources?.length || !m.messageId) return false
   const prev = prevUserOf(m)
-  return !!prev && prev.content.length >= 8
+  if (!prev || prev.content.length < 8) return false
+  // 带图提问的回答不依赖知识库来源，不提示「未找到来源」
+  return !prev.attachments?.some(a => a.kind === 'image')
+}
+
+/** 引用来源只展示模型实际引用（[n] 标记）的召回，弱相关未被引用的不陈列。
+ *  流式期间 citations 未定（undefined）先展示全量，done/历史回显后按交集收窄。 */
+function citedSources(m: ChatMessage): SourceItem[] {
+  if (!m.sources?.length) return []
+  if (m.citations === undefined) return m.sources
+  const cited = new Set(m.citations)
+  return m.sources.filter(s => cited.has(s.id))
 }
 
 /** 无来源：把上一问填回输入框供用户换种问法。 */
@@ -769,6 +862,8 @@ async function retryAllKb(m: ChatMessage) {
 
 const route = useRoute()
 onMounted(async () => {
+  document.addEventListener('mousedown', onHeadOutside)
+  window.addEventListener('keydown', onHeadEsc)
   await loadSessions()
   void loadKbOptions()
   void loadSuggested()
@@ -786,46 +881,66 @@ watch(messages, () => scrollToBottom(), { deep: false })
 
 <template>
   <div class="chat-page">
-    <!-- ====== 左栏：会话列表（拆分组件） ====== -->
-    <ChatSessionList
-      :sessions="sessions"
-      :total="sessionTotal"
-      :active-id="activeId"
-      :loading-more="sessionLoadingMore"
-      :all-loaded="allSessionsLoaded"
-      @select="selectSession"
-      @remove="onDeleteSession"
-      @rename="onRenameSession"
-      @load-more="loadSessions(true)"
-    />
-
-    <!-- ====== 中栏：对话区 ====== -->
+    <!-- ====== 对话区（会话列表移入消息区父容器，见 chat-body） ====== -->
     <main class="chat-main">
       <div class="card chat-panel">
-      <!-- 头部 -->
+      <!-- 头部：会话条（左=侧栏切换+小标题，右=⋯菜单+新建对话） -->
       <header class="chat-header">
         <div class="chat-head-left">
-          <div class="chat-eyebrow">智能问答</div>
-          <h1 class="chat-question">{{ firstQuestion || '有什么可以帮你？' }}</h1>
+          <button
+            class="head-icon-btn"
+            :title="sidebarCollapsed ? '展开对话列表' : '收起对话列表'"
+            @click="setSidebarCollapsed(!sidebarCollapsed)"
+          >
+            <Icon :name="sidebarCollapsed ? 'panel-left-open' : 'collapse'" :size="16" />
+          </button>
+          <span class="chat-session-title" :title="activeSession?.title || ''">
+            <Icon v-if="activeSession?.pinned" name="pin" :size="11" class="title-pin" />
+            <span class="title-text">{{ activeSession?.title || '新对话' }}</span>
+          </span>
         </div>
         <div class="chat-head-actions">
+          <button class="head-icon-btn head-more" title="更多操作" @click="openHeadMenu">
+            <Icon name="more" :size="16" />
+          </button>
           <button class="btn btn-primary btn-sm" @click="newChat">
             <Icon name="plus" :size="14" />
             <span>新建对话</span>
           </button>
-          <button class="btn btn-ghost btn-sm" title="导出当前对话为 Markdown" @click="exportSession">
+        </div>
+      </header>
+
+      <!-- 头部 ⋯ 浮动菜单：低频操作收敛于此 -->
+      <Teleport to="body">
+        <div v-if="headMenuOpen" class="head-menu" :style="{ top: headMenuPos.top + 'px', left: headMenuPos.left + 'px' }">
+          <button class="head-menu-item" @click="headExport">
             <Icon name="export" :size="14" />
-            <span>导出</span>
+            <span>导出 Markdown</span>
           </button>
-          <button class="btn btn-ghost btn-sm chat-clear" @click="showClearConfirm = true">
+          <button class="head-menu-item danger" @click="headClear">
             <Icon name="trash" :size="14" />
             <span>清空对话</span>
           </button>
         </div>
-      </header>
+      </Teleport>
 
-      <!-- 消息区 + 输入区（共用灰色背景） -->
+      <!-- 消息区 + 输入区（共用灰色背景）；会话列表为左列，对话内容为右列 -->
       <div class="chat-body">
+      <ChatSessionList
+        v-if="!sidebarCollapsed"
+        :sessions="sessions"
+        :total="sessionTotal"
+        :active-id="activeId"
+        :loading-more="sessionLoadingMore"
+        :all-loaded="allSessionsLoaded"
+        @select="selectSession"
+        @remove="onDeleteSession"
+        @rename="onRenameSession"
+        @pin="onPinSession"
+        @load-more="loadSessions(true)"
+      />
+
+      <div class="chat-convo">
       <!-- 消息区 -->
       <div class="messages-area" ref="scrollRef" @scroll="onMsgScroll">
         <!-- 空状态（hero） -->
@@ -900,14 +1015,14 @@ watch(messages, () => scrollToBottom(), { deep: false })
               <span v-if="deepThinking" class="busy-hint">深度思考中…</span>
             </div>
 
-            <!-- 引用文档 -->
-            <div v-if="m.role !== 'user' && m.sources?.length" class="refs">
+            <!-- 引用文档（仅模型实际引用的来源） -->
+            <div v-if="m.role !== 'user' && citedSources(m).length" class="refs">
               <div class="refs-label">
                 <Icon name="quote" :size="14" />
-                <span>引用来源（{{ m.sources.length }}）</span>
+                <span>引用来源（{{ citedSources(m).length }}）</span>
               </div>
               <div class="refs-grid">
-                <div v-for="(s, i) in m.sources" :key="s.id ?? i" class="ref-card" :data-ref-id="s.id" :class="{ 'ref-clickable': s.kbId && s.docId }" @click="openDocDetail(s)" :title="s.kbId && s.docId ? '点击查看文档详情' : undefined">
+                <div v-for="(s, i) in citedSources(m)" :key="s.id ?? i" class="ref-card" :data-ref-id="s.id" :class="{ 'ref-clickable': s.kbId && s.docId }" @click="openDocDetail(s)" :title="s.kbId && s.docId ? '点击查看文档详情' : undefined">
                   <span class="ref-icon" :class="`src-${s.sourceType || 'kb'}`">
                     <Icon :name="s.sourceType === 'web' ? 'globe' : s.sourceType === 'graph' ? 'graph' : 'doc'" :size="16" />
                   </span>
@@ -966,24 +1081,16 @@ watch(messages, () => scrollToBottom(), { deep: false })
 
       <!-- 输入区（仅对话视图显示） -->
       <div class="composer">
-        <div v-if="attached.length" class="attach-preview">
-          <div v-for="(a, i) in attached" :key="i" class="attach-chip">
-            <img v-if="a.kind === 'image'" :src="attachSrc(a)" class="attach-thumb" />
-            <audio v-else-if="a.kind === 'audio'" :src="attachSrc(a)" controls class="attach-media" />
-            <video v-else-if="a.kind === 'video'" :src="attachSrc(a)" controls class="attach-media" />
-            <span v-else-if="a.kind === 'document'" class="attach-badge attach-doc"><Icon name="doc" :size="12" />{{ a.name || '文档' }}</span>
-            <span v-else class="attach-badge">{{ a.kind }}</span>
-            <button class="attach-x" @click="removeAttach(i)"><Icon name="close" :size="11" /></button>
+        <!-- 附件紧凑条：仅有附件时才占一行，无附件时把高度让给对话区 -->
+        <div v-if="attached.length" class="attach-strip">
+          <div v-for="(a, i) in attached" :key="i" class="attach-chip" :class="'kind-' + a.kind">
+            <img v-if="a.kind === 'image'" :src="attachSrc(a)" class="attach-thumb" :title="a.name || '附件'" />
+            <template v-else>
+              <span class="attach-doc-icon"><Icon name="doc" :size="11" /></span>
+              <span class="attach-name" :title="a.name || '文档'">{{ a.name || '文档' }}</span>
+            </template>
+            <button class="attach-x" title="移除附件" @click="removeAttach(i)"><Icon name="close" :size="12" /></button>
           </div>
-        </div>
-
-        <!-- 知识库范围：独立置于输入框上方，避免与底部发送按钮挤在一排 -->
-        <div class="composer-scope">
-          <span class="scope-label" title="限定检索的知识库范围">
-            <Icon name="folder" :size="13" />
-            知识库范围
-          </span>
-          <CustomSelect v-model="selectedKb" :options="kbSelectOptions" width="170px" />
         </div>
 
         <textarea
@@ -997,23 +1104,29 @@ watch(messages, () => scrollToBottom(), { deep: false })
 
         <div class="composer-bar">
           <div class="composer-left">
-            <label class="composer-attach" :title="chatVision ? '附图片 / 文档' : '附文档（当前模型不支持图片）'">
+            <CustomSelect v-model="selectedKb" :options="kbSelectOptions" width="170px">
+              <template #prefix>
+                <Icon name="folder" :size="13" class="scope-prefix" />
+              </template>
+            </CustomSelect>
+            <!-- 字数计数置于下拉框右侧同行，不撑高底部栏 -->
+            <span class="composer-count" :class="{ over: inputText.length > QUESTION_MAX_LEN }">{{ inputText.length }} / {{ QUESTION_MAX_LEN }}</span>
+          </div>
+          <div class="composer-right">
+            <label class="composer-attach" title="附加附件">
               <Icon name="attach" :size="17" />
               <input type="file" :accept="acceptAttr" multiple class="file-hidden" @change="onAttach" />
             </label>
-            <span class="composer-count">{{ inputText.length }} / 2000</span>
-          </div>
-          <div class="composer-right">
             <button v-if="streaming" class="btn btn-ghost" @click="stop">
               <Icon name="square" :size="13" />
               <span>停止</span>
             </button>
-            <button v-else class="btn btn-primary" :disabled="!inputText.trim()" @click="send">
-              <span>发送</span>
-              <Icon name="arrow-up" :size="15" />
+            <button v-else class="btn btn-primary composer-send" :disabled="!inputText.trim() || inputText.length > QUESTION_MAX_LEN" title="发送" @click="send">
+              <Icon name="arrow-up" :size="16" />
             </button>
           </div>
         </div>
+      </div>
       </div>
       </div>
     </div>
@@ -1027,6 +1140,7 @@ watch(messages, () => scrollToBottom(), { deep: false })
     message="确认删除该会话？删除后无法恢复。"
     confirm-text="删除"
     danger
+    :loading="deletingSession"
     @close="deleteTargetId = null"
     @confirm="confirmDeleteSession"
   />
@@ -1063,7 +1177,6 @@ watch(messages, () => scrollToBottom(), { deep: false })
 
 /* ============ 对话主区 ============ */
 .chat-main {
-  margin-left: 10px;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1078,9 +1191,18 @@ watch(messages, () => scrollToBottom(), { deep: false })
 }
 .chat-body {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  gap: 10px;
   flex: 1;
   min-height: 0;
+}
+/* 对话内容右列（消息区 + 追问 + 输入区）：与会话列表并列的兄弟卡片 */
+.chat-convo {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-subtle);
   border-radius: var(--radius-lg);
   overflow: hidden;
@@ -1091,33 +1213,66 @@ watch(messages, () => scrollToBottom(), { deep: false })
   justify-content: space-between;
   padding-bottom: 10px;
 }
+.chat-head-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* 头部图标按钮（侧栏切换 / ⋯ 菜单）：固定位置，收起展开同一处 */
+.head-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.head-icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+/* 小号会话标题：不抢戏，长对话/侧栏收起时提供上下文锚点 */
+.chat-session-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.title-pin { flex: none; color: var(--brand); }
+.title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 头部 ⋯ 浮动菜单（与侧栏三点菜单同款样式） */
+.head-menu {
+  position: fixed;
+  z-index: 300;
+  width: 160px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-float);
+}
+.head-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.head-menu-item:hover { background: var(--bg-hover); }
+.head-menu-item.danger { color: var(--danger); }
+.head-menu-item.danger:hover { background: var(--danger-soft); }
 .chat-head-actions {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
 }
-.chat-eyebrow {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--brand);
-  margin-bottom: 4px;
-}
-.chat-question {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0;
-  letter-spacing: -0.02em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 60vw;
-}
-/* 工具栏按钮跟随全局 .btn 系统；composer 区域按钮稍高以对齐输入框 */
-.composer-right .btn { height: 38px; }
+/* 工具栏按钮跟随全局 .btn 系统（36px），圆形发送按钮需宽高一致 */
 
 /* ============ 消息区 ============ */
 .messages-area {
@@ -1142,7 +1297,7 @@ watch(messages, () => scrollToBottom(), { deep: false })
 .empty-orb {
   width: 68px;
   height: 68px;
-  border-radius: 24px;
+  border-radius: var(--radius-xl);
   background: linear-gradient(135deg, var(--brand) 0%, var(--brand-hover) 100%);
   color: #fff;
   display: flex;
@@ -1201,7 +1356,7 @@ watch(messages, () => scrollToBottom(), { deep: false })
 .msg-avatar {
   width: 34px;
   height: 34px;
-  border-radius: 11px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1223,14 +1378,14 @@ watch(messages, () => scrollToBottom(), { deep: false })
 .msg-row.ai-msg .msg-bubble {
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 6px var(--radius-lg) var(--radius-lg) var(--radius-lg);
+  border-radius: var(--radius-sm) var(--radius-lg) var(--radius-lg) var(--radius-lg);
   box-shadow: var(--shadow-card);
   flex: 1;
 }
 .msg-row.user-msg .msg-bubble {
   background: var(--brand);
   color: var(--text-on-brand);
-  border-radius: var(--radius-lg) 6px var(--radius-lg) var(--radius-lg);
+  border-radius: var(--radius-lg) var(--radius-sm) var(--radius-lg) var(--radius-lg);
 }
 .msg-row.ai-msg .msg-bubble.has-tts {
   position: relative;
@@ -1356,7 +1511,7 @@ watch(messages, () => scrollToBottom(), { deep: false })
 .answer-body.md :deep(pre) {
   background: #1f2330;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 14px 16px;
   margin: 0 0 14px;
   overflow-x: auto;
@@ -1472,7 +1627,7 @@ watch(messages, () => scrollToBottom(), { deep: false })
 }
 .ref-icon {
   width: 34px; height: 34px;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
@@ -1561,24 +1716,50 @@ watch(messages, () => scrollToBottom(), { deep: false })
   border-color: var(--brand);
   box-shadow: 0 0 0 4px var(--brand-ring);
 }
-.attach-preview { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-.attach-chip { position: relative; }
-.attach-thumb { width: 50px; height: 50px; border-radius: 9px; object-fit: cover; border: 1px solid var(--border); }
-.attach-media { width: 200px; max-width: 60vw; border-radius: 9px; border: 1px solid var(--border); }
-.attach-badge { display: inline-flex; padding: 4px 10px; border-radius: 9px; background: var(--bg-subtle); color: var(--text-secondary); font-size: 12px; }
+/* 附件紧凑条：并入底部操作栏（回形针后）横排展示，溢出横向滚动，
+   不占独立行，把高度让给对话区 */
+.attach-strip {
+  display: flex; align-items: center; gap: 6px;
+  flex: 1; min-width: 0;
+  overflow-x: auto; padding: 2px;
+  scrollbar-width: thin;
+}
+.attach-chip {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  max-width: 170px;
+  padding: 3px 5px 3px 6px;
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+}
+.attach-doc-icon {
+  flex: none; width: 16px; height: 16px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  color: var(--brand);
+}
+.attach-name {
+  font-size: 11px; line-height: 1; color: var(--text-secondary);
+  max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.attach-chip .attach-thumb { width: 20px; height: 20px; border-radius: 5px; }
+.attach-chip .attach-x {
+  flex: none; width: 20px; height: 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary);
+  transition: color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast);
+}
+.attach-chip .attach-x:hover {
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 18%, transparent);
+  transform: scale(1.08);
+}
+/* 消息气泡内附件缩略图 / 音视频（独立尺寸，不受紧凑条影响） */
+.attach-thumb { width: 50px; height: 50px; border-radius: var(--radius-md); object-fit: cover; border: 1px solid var(--border); }
+.attach-media { width: 200px; max-width: 60vw; border-radius: var(--radius-md); border: 1px solid var(--border); }
+.attach-badge { display: inline-flex; padding: 4px 10px; border-radius: var(--radius-md); background: var(--bg-subtle); color: var(--text-secondary); font-size: 12px; }
 .attach-doc { gap: 5px; align-items: center; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attach-doc .icon { flex: none; }
-.attach-x {
-  position: absolute;
-  top: -6px; right: -6px;
-  width: 19px; height: 19px;
-  border-radius: 50%;
-  background: var(--danger);
-  color: #fff;
-  display: flex; align-items: center; justify-content: center;
-  transition: background var(--dur-fast);
-}
-.attach-x:hover { background: var(--danger-hover); }
 
 .composer-input {
   width: 100%;
@@ -1589,8 +1770,8 @@ watch(messages, () => scrollToBottom(), { deep: false })
   font-size: 14px;
   line-height: 1.6;
   color: var(--text-primary);
-  height: 45px;
-  max-height: 45px;
+  min-height: 45px;
+  max-height: 112px;
   overflow-y: auto;
   font-family: inherit;
   padding: 11px 2px;
@@ -1599,28 +1780,18 @@ watch(messages, () => scrollToBottom(), { deep: false })
 
 .composer-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   margin-top: 10px;
 }
+.attach-thumb { width: 50px; height: 50px; border-radius: var(--radius-md); object-fit: cover; border: 1px solid var(--border); }
+.attach-media { width: 200px; max-width: 60vw; border-radius: var(--radius-md); border: 1px solid var(--border); }
 .composer-left { display: flex; align-items: center; gap: 12px; }
-/* 知识库范围行：独立置于输入框上方，与输入区、底部操作栏形成清晰分层；
-   trigger 压缩到 28px（覆盖公共组件默认 34px），整行更紧凑，把高度让给对话区 */
-.composer-scope {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.composer-scope :deep(.c-select-trigger) { height: 28px; font-size: 12.5px; }
-.scope-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12.5px;
-  color: var(--text-tertiary);
-  white-space: nowrap;
-}
+/* 附件条置顶时与输入框的间距；知识库下拉移入底部栏后压缩 trigger 高度 */
+.composer > .attach-strip { margin-bottom: 8px; }
+.composer-left :deep(.c-select-trigger) { height: 28px; font-size: 12.5px; }
+/* 知识库下拉框内前置文件夹图标 */
+.scope-prefix { flex: none; color: var(--text-tertiary); }
 .composer-attach {
   position: relative;
   display: flex;
@@ -1633,8 +1804,11 @@ watch(messages, () => scrollToBottom(), { deep: false })
   transition: all var(--dur-fast) var(--ease-out);
 }
 .composer-attach:hover { background: var(--bg-hover); color: var(--brand); }
-.composer-count { font-size: 12px; color: var(--text-tertiary); }
-.composer-right { display: flex; align-items: center; gap: 8px; }
+.composer-count { font-size: 12px; color: var(--text-tertiary); line-height: 1; }
+.composer-count.over { color: var(--danger); }
+.composer-right { display: flex; align-items: center; gap: 20px; }
+/* 发送按钮：圆形纯图标（上箭头），与回形针同高，不额外撑高底部栏 */
+.composer-send { width: var(--btn-h-md); padding: 0; border-radius: 50%; }
 
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(10px); }
@@ -1646,7 +1820,6 @@ watch(messages, () => scrollToBottom(), { deep: false })
 
 @media (max-width: 720px) {
   .empty-suggest { grid-template-columns: 1fr; }
-  .chat-question { max-width: 50vw; }
 }
 
 /* 引用卡片可点击态（详情弹框本体在 DocDetailModal） */
