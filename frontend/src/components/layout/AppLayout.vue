@@ -127,12 +127,12 @@ const subMenus: Record<string, SubItem[]> = {
     { label: '搜索历史', icon: 'clock', to: '/search/history', activeNames: ['search-history'] },
   ],
   chat: [
-    { label: '对话', icon: 'plus', to: '/chat/new', activeNames: ['chat', 'chat-new'] },
+    { label: '对话', icon: 'plus', to: '/chat', activeNames: ['chat'] },
     { label: '检索记录', icon: 'list', to: '/chat/records', activeNames: ['chat-records'] },
     { label: '模型配置', icon: 'settings', to: '/chat/model', activeNames: ['chat-model'] },
   ],
   graph: [
-    { label: '全局图谱', icon: 'graph', to: '/graph/global', activeNames: ['graph', 'graph-global'] },
+    { label: '全局图谱', icon: 'graph', to: '/graph', activeNames: ['graph'] },
     { label: '节点管理', icon: 'node', to: '/graph/nodes', activeNames: ['graph-nodes'] },
     { label: '关系检索', icon: 'link', to: '/graph/relations', activeNames: ['graph-relations'] },
     { label: '图谱统计', icon: 'chart', to: '/graph/stats', activeNames: ['graph-stats'] },
@@ -347,7 +347,12 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
 
       <!-- 主内容区 -->
       <main class="main-content">
-        <router-view />
+        <!-- 仅缓存对话页：切页保留会话/草稿/滚动；其余页面每次进入重新拉数据 -->
+        <router-view v-slot="{ Component }">
+          <KeepAlive include="Chat">
+            <component :is="Component" />
+          </KeepAlive>
+        </router-view>
         <!-- 备案号公示：仅域名访问展示（IP 直连隐藏） -->
         <footer v-if="beianVisible" class="site-footer">
           <span class="beian-name">惠聚创智能知识库</span>

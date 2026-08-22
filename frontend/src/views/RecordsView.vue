@@ -19,7 +19,7 @@ const router = useRouter()
 
 /** 跳回该记录所属的对话继续追问。 */
 function openSession(id: string) {
-  router.push({ path: '/chat/new', query: { session: id } })
+  router.push({ path: '/chat', query: { session: id } })
 }
 
 // ── 分页状态 ──

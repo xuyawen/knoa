@@ -71,13 +71,11 @@ const routes: RouteRecordRaw[] = [
 
       // ===== 智能问答（一个页面一个文件）=====
       { path: 'chat', name: 'chat', component: Chat, meta: { title: '智能问答', icon: 'chat' } },
-      { path: 'chat/new', name: 'chat-new', component: Chat, meta: { title: '智能问答', icon: 'plus' } },
       { path: 'chat/records', name: 'chat-records', component: RecordsView, meta: { title: '检索记录', icon: 'list' } },
       { path: 'chat/model', name: 'chat-model', component: ModelConfig, meta: { title: '智能问答', icon: 'settings' } },
 
-      // ===== 知识图谱（每个页面一个文件）=====
+      // ===== 知识图谱（一个页面一个文件）=====
       { path: 'graph', name: 'graph', component: GraphGlobal, meta: { title: '知识图谱', icon: 'graph' } },
-      { path: 'graph/global', name: 'graph-global', component: GraphGlobal, meta: { title: '知识图谱', icon: 'graph' } },
       { path: 'graph/nodes', name: 'graph-nodes', component: GraphNodes, meta: { title: '知识图谱', icon: 'node' } },
       { path: 'graph/relations', name: 'graph-relations', component: GraphRelations, meta: { title: '知识图谱', icon: 'link' } },
       { path: 'graph/stats', name: 'graph-stats', component: GraphStats, meta: { title: '知识图谱', icon: 'chart' } },

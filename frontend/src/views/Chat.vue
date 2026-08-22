@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 智能问答 — 对话主界面，接真实 SSE 流式问答。
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onMounted, onActivated, onDeactivated, onBeforeUnmount, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import Icon from '@/components/ui/Icon.vue'
@@ -43,6 +43,9 @@ import type {
 import { uploadToOss } from '@/utils/oss'
 import { useModelConfig } from '@/composables/useModelConfig'
 import { useTts } from '@/composables/useTts'
+
+// 显式组件名：与 AppLayout 中 KeepAlive include="Chat" 匹配，缓存对话页状态
+defineOptions({ name: 'Chat' })
 
 /** 生成唯一 ID（兼容非安全上下文 HTTP 下 crypto.randomUUID 不可用） */
 function genId(): string {
@@ -129,6 +132,11 @@ function toggleThinking(id: string) {
 // 组件卸载时中断进行中的问答流（TTS 清理在 useTts 内）
 onBeforeUnmount(() => {
   askAbort.value?.abort()
+  document.removeEventListener('mousedown', onHeadOutside)
+  window.removeEventListener('keydown', onHeadEsc)
+})
+// keep-alive 隐藏页面时摘除全局监听，避免后台页面仍响应点击/Esc
+onDeactivated(() => {
   document.removeEventListener('mousedown', onHeadOutside)
   window.removeEventListener('keydown', onHeadEsc)
 })
@@ -861,20 +869,36 @@ async function retryAllKb(m: ChatMessage) {
 }
 
 const route = useRoute()
+const router = useRouter()
+
+// 跳转参数消费：?session= 打开对应对话；?q= + ?kb= 预填问题并预选库
+// （来自检索记录页「继续追问」与图谱「提问」按钮）。
+// keep-alive 下页面不再随导航重建，参数须在每次激活时消费；
+// 消费后把 URL 归一成干净的 /chat，避免旧参数在下次激活时重放。
+let queryConsumed = false
+async function consumeRouteQuery() {
+  const sid = typeof route.query.session === 'string' ? route.query.session : ''
+  const qParam = typeof route.query.q === 'string' ? route.query.q : ''
+  const kbParam = typeof route.query.kb === 'string' ? route.query.kb : ''
+  if (!sid && !qParam && !kbParam) return
+  if (sid) await selectSession(sid)
+  if (qParam) inputText.value = qParam
+  if (kbParam) selectedKb.value = kbParam
+  router.replace({ path: '/chat' })
+}
+
 onMounted(async () => {
-  document.addEventListener('mousedown', onHeadOutside)
-  window.addEventListener('keydown', onHeadEsc)
   await loadSessions()
   void loadKbOptions()
   void loadSuggested()
-  // 支持从检索记录页等带 ?session=xxx 跳转进来打开对应对话
-  const sid = route.query.session
-  if (typeof sid === 'string' && sid) await selectSession(sid)
-  // 支持从图谱「提问」按钮带 ?q=xxx&kb=yyy 跳转：自动选库 + 预填问题
-  const qParam = route.query.q
-  if (typeof qParam === 'string' && qParam) inputText.value = qParam
-  const kbParam = route.query.kb
-  if (typeof kbParam === 'string' && kbParam) selectedKb.value = kbParam
+  await consumeRouteQuery()
+  queryConsumed = true
+})
+// keep-alive 重新激活：重挂全局监听；首挂载由 onMounted 消费参数，此处只处理后续激活
+onActivated(() => {
+  document.addEventListener('mousedown', onHeadOutside)
+  window.addEventListener('keydown', onHeadEsc)
+  if (queryConsumed) void consumeRouteQuery()
 })
 watch(messages, () => scrollToBottom(), { deep: false })
 </script>
