@@ -902,6 +902,7 @@ watch(() => route.fullPath, () => {
     top: var(--topbar-h);
     bottom: 0;
     left: 0;
+    height: auto; /* 覆盖桌面 height:100%：fixed+top 同时存在时 height 优先，会把底部收起按钮顶出屏幕 */
     z-index: 500;
     box-shadow: var(--shadow-float);
   }
