@@ -12,6 +12,7 @@ export interface DataTableColumn {
   strong?: boolean // 粗体（原 .col-name）
   mono?: boolean // 等宽灰字（原 .col-time）
   muted?: boolean // 次级灰字（原 .col-content）
+  nowrap?: boolean // 单行不换行（名称类列，窄屏靠表内横滚兜底）
 }
 
 const props = withDefaults(
@@ -108,7 +109,7 @@ const cellColspan = () => props.columns.length + (props.selectable ? 1 : 0)
           <td
             v-for="col in columns"
             :key="col.key"
-            :class="[alignClass(col.align), { 'is-strong': col.strong, 'is-mono': col.mono, 'is-muted': col.muted }]"
+            :class="[alignClass(col.align), { 'is-strong': col.strong, 'is-mono': col.mono, 'is-muted': col.muted, 'is-nowrap': col.nowrap }]"
           >
             <slot name="cell" :row="row" :col="col" :index="i">
               {{ row[col.key] }}
@@ -162,6 +163,7 @@ const cellColspan = () => props.columns.length + (props.selectable ? 1 : 0)
   white-space: nowrap;
 }
 .data-table td.is-muted { color: var(--text-secondary); }
+.data-table td.is-nowrap { white-space: nowrap; }
 
 .data-table th.col-check,
 .data-table td.col-check {

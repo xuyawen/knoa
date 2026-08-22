@@ -26,7 +26,7 @@ const store = useKnowledgeStore()
 
 // 列表列声明（全局 DataTable 组件）
 const kbColumns: DataTableColumn[] = [
-  { key: 'name', title: '名称' },
+  { key: 'name', title: '名称', nowrap: true },
   { key: 'ownerDeptName', title: '归属部门' },
   { key: 'description', title: '描述' },
   { key: 'documentCount', title: '文档数', align: 'center', width: '80px' },

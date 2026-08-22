@@ -161,14 +161,12 @@ function setSize(v: string | number) {
 }
 
 @media (max-width: 640px) {
+  /* 窄屏保持单行居中；页码过多放不下时横向滚动（safe 防溢出裁剪，下拉弹层 Teleport body 不受影响） */
   .pagination-bar {
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
+    justify-content: safe center;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
-  .total-text {
-    width: 100%;
-    text-align: center;
-  }
+  .pagination-bar::-webkit-scrollbar { display: none; }
 }
 </style>
