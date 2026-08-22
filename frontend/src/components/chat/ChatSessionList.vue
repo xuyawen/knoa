@@ -356,6 +356,15 @@ function actRemove() {
 @keyframes blink { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
 
 @media (max-width: 720px) {
-  .chat-sidebar { width: 210px; }
+  /* 窄屏：会话列表改覆盖式抽屉，不挤压对话区（定位上下文在 .chat-body） */
+  .chat-sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(280px, 82%);
+    z-index: 6;
+    box-shadow: var(--shadow-float);
+  }
 }
 </style>

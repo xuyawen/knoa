@@ -393,10 +393,14 @@ async function newChat() {
 }
 
 // ---------- 侧边栏收起（localStorage 持久化） ----------
-const sidebarCollapsed = ref(localStorage.getItem('knoa.chatSidebar') === 'collapsed')
+// 窄屏下会话列表是覆盖抽屉，默认收起保证对话区全宽可用
+const sidebarCollapsed = ref(
+  window.innerWidth <= 720 ? true : localStorage.getItem('knoa.chatSidebar') === 'collapsed'
+)
 function setSidebarCollapsed(v: boolean) {
   sidebarCollapsed.value = v
-  localStorage.setItem('knoa.chatSidebar', v ? 'collapsed' : 'open')
+  // 窄屏的临时开合不写持久化，避免污染桌面端偏好
+  if (window.innerWidth > 720) localStorage.setItem('knoa.chatSidebar', v ? 'collapsed' : 'open')
 }
 
 /** 置顶切换：调 API 后重拉列表，保证置顶组排最前的排序生效 */
@@ -1844,6 +1848,13 @@ watch(messages, () => scrollToBottom(), { deep: false })
 
 @media (max-width: 720px) {
   .empty-suggest { grid-template-columns: 1fr; }
+  /* 会话列表抽屉的定位上下文；收窄外边距给对话区让位 */
+  .chat-body { position: relative; }
+  .chat-main { padding: 10px; }
+  /* 输入区底栏：收窄库选择器、计数不换行，极端窄时允许换行兜底 */
+  .composer-bar { flex-wrap: wrap; row-gap: 8px; }
+  .composer-left .c-select { width: 138px !important; }
+  .composer-count { white-space: nowrap; }
 }
 
 /* 引用卡片可点击态（详情弹框本体在 DocDetailModal） */

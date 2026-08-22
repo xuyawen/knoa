@@ -127,7 +127,8 @@ const cellColspan = () => props.columns.length + (props.selectable ? 1 : 0)
 
 <style scoped>
 .data-table-wrap { width: 100%; overflow-x: auto; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
-.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+/* min-width 保底：窄屏容器放不下列时走 wrap 表内横滚，而不是把列压成竖排 */
+.data-table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 13px; }
 
 .data-table th {
   text-align: left;

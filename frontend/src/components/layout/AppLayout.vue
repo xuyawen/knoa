@@ -191,6 +191,10 @@ const userBadge = computed(() => {
 /* ---------- 子侧栏折叠（localStorage 持久化） ---------- */
 const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === '1')
 watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1' : '0'))
+// 窄屏下子菜单是覆盖式抽屉：导航完成后自动收起，避免抽屉挡住内容
+watch(() => route.fullPath, () => {
+  if (window.innerWidth <= 900) sidebarCollapsed.value = true
+})
 </script>
 
 <template>
@@ -881,5 +885,28 @@ watch(sidebarCollapsed, (v) => localStorage.setItem('sidebar-collapsed', v ? '1'
 .side-handle:hover {
   background: var(--brand-soft);
   color: var(--brand);
+}
+
+/* ==================== 窄屏兜底（≤900px：布局不崩、可用） ==================== */
+@media (max-width: 900px) {
+  /* 顶栏：收起长文案，导航横向滚动，杜绝整页横向溢出 */
+  .topbar-title,
+  .user-name,
+  .user-chev { display: none; }
+  .topbar-nav { overflow-x: auto; scrollbar-width: none; }
+  .topbar-nav::-webkit-scrollbar { display: none; }
+  .topbar-link { padding: 7px 10px; }
+  /* 子菜单改覆盖式抽屉：不挤压内容区，展开时浮在内容之上 */
+  .sub-sidebar {
+    position: fixed;
+    top: var(--topbar-h);
+    bottom: 0;
+    left: 0;
+    z-index: 500;
+    box-shadow: var(--shadow-float);
+  }
+  .main-content { padding: 12px; }
+  /* 弹层宽度受视口约束 */
+  .notify-dropdown { width: min(340px, calc(100vw - 24px)); }
 }
 </style>

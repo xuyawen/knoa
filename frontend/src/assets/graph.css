@@ -291,6 +291,10 @@
 @media (max-width: 900px) {
   .stat-grid.wide { grid-template-columns: 1fr 1fr; }
   .grid-2 { grid-template-columns: 1fr; }
+  /* 窄屏兜底：工具栏换行不裁按钮；画布与数据面板上下堆叠，画布保底高度 */
+  .graph-toolbar { flex-wrap: wrap; }
+  .graph-body { grid-template-columns: 1fr; min-height: 0; }
+  .canvas-area { min-height: 340px; }
 }
 
 /* ---- 导出下拉菜单（Teleport 到 body + fixed 定位，避开画布卡片 overflow:hidden 裁剪） ---- */
