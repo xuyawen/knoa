@@ -275,14 +275,16 @@ function computeLayout(nodes: GraphNode[], edges: GraphEdge[]): LNode[] {
   }
   // 归一化后重叠分离：位置被等比压缩但节点半径不缩放，
   // 模拟时留的间隙可能被压到小于半径和 → 节点重叠、无法点选。
-  // 在最终尺度上补几轮碰撞分离，保证每个节点独立可选
+  // 在最终尺度上补几轮碰撞分离，保证每个节点独立可选。
+  // 窄屏画布小、节点密度高，分离垫量收紧（4px），减少包围盒外扩
+  const sepPad = W < 480 ? 4 : 12
   for (let pass = 0; pass < 40; pass++) {
     let moved = false
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         const dx = arr[j].x - arr[i].x
         const dy = arr[j].y - arr[i].y
-        const minDist = arr[i].r + arr[j].r + 12
+        const minDist = arr[i].r + arr[j].r + sepPad
         const d2 = dx * dx + dy * dy
         if (d2 > minDist * minDist) continue // 远距离对不可能重叠，跳过 sqrt（图谱尺度下 95%+ 的节点对）
         const d = Math.sqrt(d2) + 0.01
@@ -295,6 +297,22 @@ function computeLayout(nodes: GraphNode[], edges: GraphEdge[]): LNode[] {
       }
     }
     if (!moved) break
+  }
+  // 窄屏兜底：分离可能把包围盒重新撑出画布 → fitView 整图缩小、四周大片空边。
+  // 撑出时按比例收回画布可用区（宁可轻微重叠，不整图缩小；桌面尺寸不会触发）
+  let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity
+  for (const nd of arr) {
+    bx0 = Math.min(bx0, nd.x); bx1 = Math.max(bx1, nd.x)
+    by0 = Math.min(by0, nd.y); by1 = Math.max(by1, nd.y)
+  }
+  const shrink = Math.min(1, (W - 20) / (bx1 - bx0 || 1), (H - 20) / (by1 - by0 || 1))
+  if (shrink < 1) {
+    const mx = (bx0 + bx1) / 2
+    const my = (by0 + by1) / 2
+    for (const nd of arr) {
+      nd.x = mx + (nd.x - mx) * shrink
+      nd.y = my + (nd.y - my) * shrink
+    }
   }
   return arr
 }
